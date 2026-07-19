@@ -1,4 +1,6 @@
 """Геокодування: розвʼязання омонімів. Потребує газетира (132 МБ)."""
+import collections
+import json
 import unittest
 
 from tests.helpers import GAZ, needs_gazetteer
@@ -116,6 +118,226 @@ class TestHomonyms(unittest.TestCase):
         """Сибірський тезка за 4000 км — це помилка, не ціль."""
         hit = self.gaz.lookup("Ангарск", near=self.cfg.geo["Крим"], max_km=400)
         self.assertIsNone(hit)
+
+
+@needs_gazetteer
+class TestConsensus(unittest.TestCase):
+    """Пост без назви області: топоніми перевіряють одне одного.
+
+    Раніше тут лишався фолбек «найбільший однойменний за населенням», і він
+    кидав точки за сотні кілометрів. Гірше — якірний прохід дозволяв
+    неоднозначному топоніму стати якорем САМОМУ СОБІ, і та сама помилка
+    виходила вже з conf="region", ніби її підтвердив контекст: 713 розвʼязань
+    у корпусі мали таку позначку з єдиного топоніма в пості.
+
+    Всі пости тут — справжні, з data/*.jsonl.
+    """
+
+    #: (текст поста, запит, очікувані координати, допуск км)
+    GOLD = [
+        # Красногвардійський район КРИМУ, а не однойменний район Пітера за
+        # 1639 км. Точний збіг назви веде лише в Пітер — кримський варіант
+        # лежить під ключем «красногвардейское» і видимий тільки широкому
+        # набору кандидатів.
+        ("Красногвардейский район в направлении Белогорск фиксации БПЛА "
+         "Пойдут на трассу Таврида или Таврическую ТЭС",
+         "Красногвардейский", (45.50, 34.30), 45),
+        ("Красногвардейский район в направлении Белогорск фиксации БПЛА "
+         "Пойдут на трассу Таврида или Таврическую ТЭС",
+         "Белогорск", (45.06, 34.60), 20),
+        # Мирне Каланчацької громади (pop 1880) проти Мирного під
+        # Сімферополем (pop 9284) за 147 км: населення програє сусідству.
+        ("Каланчак, Мирное тревога по БПЛА носителю ФПВ",
+         "Мирное", (46.25, 33.47), 30),
+        # Три кримські назви поспіль; жодного спільного скупчення деінде.
+        ("Желябовка, Советский, Кировское и близлежащие, тревога по БпЛА",
+         "Советский", (45.34, 34.92), 25),
+        ("Желябовка, Советский, Кировское и близлежащие, тревога по БпЛА",
+         "Кировское", (45.23, 35.20), 30),
+        # Міллеровський район Ростовської, а не однойменний у Саратовській.
+        ("От Новоайдар в сторону Миллеровский район и Чертковский район "
+         "фиксации БПЛА", "Миллеровский", (48.93, 40.40), 40),
+        # Красноярузький р-н Бєлгородщини, а не Красноярський у Самарській.
+        ("Ракитянский район, Борисовский район, Краснояружский район "
+         "и близлежащие Тревога по УАБ", "Краснояружский", (50.82, 35.54), 25),
+    ]
+
+    @classmethod
+    def setUpClass(cls):
+        cls.cfg = E.Config.load(CFG)
+        cls.gaz = GC.Gazetteer.load(GAZ / "RU.txt", GAZ / "UA.txt")
+        cls.a1 = cls.gaz.region_codes(cls.cfg.entities["регіон"], cls.cfg.geo)
+
+    def _resolve(self, text, query):
+        posts = E.enrich([{"channel": "t", "id": 1, "text": text,
+                           "date": "2026-07-01T10:00:00+00:00"}], self.cfg)
+        GC.geocode_posts(posts, self.gaz, self.cfg.geo,
+                         aliases=self.cfg.geo_aliases, region_a1=self.a1)
+        for e in posts[0].get("entities", []):
+            if e["type"] == "нп" and (e.get("match") or e.get("value")) == query:
+                return e
+        return None
+
+    def test_gold_set(self):
+        for text, query, gold, tol in self.GOLD:
+            with self.subTest(query=query):
+                e = self._resolve(text, query)
+                self.assertIsNotNone(e, "сутність не витягнулась")
+                self.assertIsNotNone(e.get("lat"), "не розвʼязано взагалі")
+                d = GC.haversine(gold, (e["lat"], e["lon"]))
+                self.assertLessEqual(
+                    d, tol, f"{e.get('geo_name')} за {d:.0f} км від очікуваного")
+
+    def test_wide_set_sees_morphological_variant_despite_exact_homonym(self):
+        """Точний збіг більше не замикає пошук накоротко.
+
+        Це корінь помилки з Пітером: by_name["красногвардейский"] непорожній
+        (район Пітера), тому стем-гілка не виконувалась, і кримський Курман
+        у список кандидатів не потрапляв ЖОДНОГО разу — його неможливо було
+        обрати за жодного відбору.
+        """
+        narrow = self.gaz.candidates("Красногвардейский")
+        wide = self.gaz.candidates("Красногвардейский", wide=True)
+        crimean = lambda cs: [c for c in cs if (c["cc"], c["a1"]) == ("UA", "11")]
+        self.assertEqual(crimean(narrow), [], "вузький набір раптом бачить Крим")
+        self.assertTrue(crimean(wide), "широкий набір не бачить кримського тезки")
+
+    def test_only_exact_name_match_may_anchor(self):
+        """Якір із морфологічного здогаду тягне за собою весь пост.
+
+        «Островское Первомайский» точного збігу не має, зате через основу
+        дотягується до Островського району Псковщини — і, ставши якорем, тягне
+        сусіднє «Гвардейское» під Виборг за 1775 км від кримського.
+
+        Слід малий: після узгодження вимога міняє всього 3 рядки корпусу (воно
+        перехоплює більшість таких постів раніше), і виграш чистий лише в
+        цьому. Лишена тому, що якір із морфологічного здогаду — це не якір, а
+        та сама вгадайка, тільки з позначкою «підтверджено».
+        """
+        e = self._resolve("Островское Первомайский район и далее в направлении "
+                          "Гвардейское тревога по БПЛА", "Гвардейское")
+        self.assertIsNotNone(e.get("lat"))
+        d = GC.haversine((45.12, 34.02), (e["lat"], e["lon"]))
+        self.assertLessEqual(d, 30, f"{e.get('geo_name')} за {d:.0f} км від Криму")
+
+    def test_support_comes_from_the_weightiest_twin_not_the_nearest(self):
+        """Підтверджує пару найвагоміший тезка в колі, а не найближчий.
+
+        «Сары Баш, Войково и далее на Гвардейское»: за найближчим кримська
+        пара трималась на хуторі Гвардійське (pop 772) за 15 км і програвала
+        дніпровській; за найвагомішим — селищі Гвардійське (pop 12 589) за
+        45 км — виграє з запасом.
+        """
+        e = self._resolve("Сары Баш, Войково и далее на Гвардейское, "
+                          "в том числе трасса тревога по БПЛА", "Гвардейское")
+        self.assertIsNotNone(e.get("lat"))
+        d = GC.haversine((45.12, 34.02), (e["lat"], e["lon"]))
+        self.assertLessEqual(d, 30, f"{e.get('geo_name')} за {d:.0f} км від Криму")
+
+    def test_single_toponym_post_keeps_the_old_fallback(self):
+        """Стеля методу, виміряна до написання коду.
+
+        Постів без регіону з ≥2 резолвними топонімами — 778 із 3379 (23%).
+        Решта перевіряти нема чим, і там свідомо лишається «найбільший за
+        населенням». Тест фіксує саме це, щоб межу не переплутали з вадою.
+        """
+        e = self._resolve("Гуляйполе уаб", "Гуляйполе")
+        self.assertEqual(e["geo_conf"], "global")
+
+
+@needs_gazetteer
+class TestHomonymFixture(unittest.TestCase):
+    """Повний розмічений набір: tests/data/homonyms.jsonl, 113 випадків.
+
+    Навіщо окремим файлом, а не сімкою прикладів у коді. Вибір розвʼязувача
+    двічі робився за набором на 7 випадків, і обидва рази ламав те, чого в
+    наборі не було. Сім прикладів не набір, а ілюстрація: вони підтверджують
+    задум і мовчать про побічну шкоду.
+
+    Вибірка не з голови: 40 випадкових УНІКАЛЬНИХ постів без регіону з ≥2
+    резолвними топонімами (seed=7) плюс топ-60 найчастіших неоднозначних
+    запитів корпусу. Тексти постів вкладено дослівно з data/ разом із
+    переносами рядків — вони впливають на розбір, і плаский переказ дає інші
+    сутності (на цьому я вже спіймався).
+
+    Мітки:
+      guard   — було правильно; зміна тут це регресія
+      fixed   — було неправильно, полагоджено узгодженням топонімів
+      ceiling — відомо, що не працює й чому; тест вимагає, щоб воно НЕ
+                проходило, інакше про покращення ніхто не дізнається
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.cfg = E.Config.load(CFG)
+        cls.gaz = GC.Gazetteer.load(GAZ / "RU.txt", GAZ / "UA.txt")
+        a1 = cls.gaz.region_codes(cls.cfg.entities["регіон"], cls.cfg.geo)
+        cls.rows = [json.loads(l) for l in
+                    (ROOT / "tests/data/homonyms.jsonl").read_text(
+                        encoding="utf-8").splitlines() if l.strip()]
+        texts = sorted({r["text"] for r in cls.rows})
+        posts = E.enrich([{"channel": "fixture", "id": i, "text": t,
+                           "date": "2026-07-01T10:00:00+00:00"}
+                          for i, t in enumerate(texts)], cls.cfg)
+        GC.geocode_posts(posts, cls.gaz, cls.cfg.geo,
+                         aliases=cls.cfg.geo_aliases, region_a1=a1)
+        cls.by_text = {p["text"]: p for p in posts}
+
+    def _hit(self, row):
+        """(відстань у км до еталона, підпис) або (None, причина)."""
+        for e in self.by_text[row["text"]].get("entities", []):
+            if e["type"] != "нп":
+                continue
+            if (e.get("match") or e.get("value")) != row["query"]:
+                continue
+            if e.get("lat") is None:
+                return None, "не розвʼязано"
+            d = GC.haversine((row["lat"], row["lon"]), (e["lat"], e["lon"]))
+            return d, f'{e.get("geo_name")} conf={e.get("geo_conf")}'
+        return None, "сутність не витягнулась"
+
+    def test_guard_and_fixed_cases(self):
+        for row in self.rows:
+            if row["status"] == "ceiling":
+                continue
+            with self.subTest(status=row["status"], query=row["query"]):
+                d, what = self._hit(row)
+                self.assertIsNotNone(d, what)
+                self.assertLessEqual(
+                    d, row["tol_km"], f'{what} за {d:.0f} км від еталона')
+
+    def test_known_ceiling_cases_still_fail(self):
+        """Ратчет у зворотний бік: полагодив — перенеси рядок у fixed.
+
+        Стеля тут не абстрактна, кожен випадок має свою причину:
+
+        «Берестовое» — другий топонім поста («Мальцевка») сам неоднозначний і
+        весь із записів pop=0, зійтись нема на чому.
+
+        «Первомайское» — сусід із друкарською помилкою каналу
+        («Красногвадейское»), точного збігу нема, тож і голосувати нема кому.
+
+        «Октябрьское» — чесна межа МЕТОДУ, а не недогляд: у пості «Красный
+        Партизан, Красногвардейский район … Октябрьское» всі три назви мають
+        пітерське прочитання, і воно взаємно узгоджене незгірш за кримське.
+        Узгодженість тут просто не розрізняє; потрібен зовнішній сигнал
+        (сусідні пости каналу за той самий наліт), а його ще не міряли.
+        """
+        for row in self.rows:
+            if row["status"] != "ceiling":
+                continue
+            with self.subTest(query=row["query"]):
+                d, what = self._hit(row)
+                if d is not None and d <= row["tol_km"]:
+                    self.fail(f'«{row["query"]}» тепер розвʼязується правильно '
+                              f'({what}) — переведи рядок у status="fixed" '
+                              f'у tests/data/homonyms.jsonl')
+
+    def test_fixture_covers_both_directions(self):
+        """Набір без guard-випадків міряв би лише те, що я хотів побачити."""
+        n = collections.Counter(r["status"] for r in self.rows)
+        self.assertGreaterEqual(n["guard"], 50, "замало охоронних випадків")
+        self.assertGreaterEqual(n["fixed"], 10, "замало цільових випадків")
 
 
 class TestNormalisation(unittest.TestCase):

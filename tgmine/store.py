@@ -35,7 +35,7 @@ MSK = timezone(timedelta(hours=3))
 # Версія конвеєра. Якщо змінились правила розбору — підняти, і `sync` сам
 # перебудує похідний шар, а не змішає старі й нові події в одному файлі.
 # 9: near отримав tid — прив'язка до цілі за ідентифікатором, не за назвою.
-PIPELINE_VERSION = 9
+PIPELINE_VERSION = 10   # v10: подія несе geo_conf
 
 COUNT_N = re.compile(r"от\s+(\d+)\s*(?:БПЛА|бпла)", re.I)
 GROUP_RE = re.compile(r"групп\w*", re.I)
@@ -318,7 +318,10 @@ class Store:
         rc = cfg.geo.get(region) if region else None
         if lat and rc and GC.haversine((lat, lon), rc) > 400:
             lat, lon = rc
-            best = {"value": region, "geo_name": region}
+            # Окрема позначка, а не мовчазна підміна: точка тут не розвʼязана,
+            # а відкочена до центру області. Раніше вона виглядала в сховищі
+            # так само, як чесно знайдений НП.
+            best = {"value": region, "geo_name": region, "geo_conf": "region-snap"}
         return {
             "id": f"{p['channel']}/{p['id']}",
             "t": dt.isoformat(),
@@ -329,6 +332,15 @@ class Store:
             "scope": "точка" if k in POINT_KINDS else "область",
             "place": (best or {}).get("geo_name") or (best or {}).get("value"),
             "lat": lat, "lon": lon,
+            # Як саме знайдено координату. Рахувалось у geocode й викидалось:
+            # у сховищі точка, підтверджена областю з того ж поста, виглядала
+            # так само, як вгадана за населенням. Значення: region (є область),
+            # consensus (топоніми поста зійшлись), global (фолбек «найбільший
+            # однойменний» — найслабше), alias (ручне), city-marker/centroid
+            # (подія по області), region-snap (відкат за санітарною межею).
+            # Поле присутнє ЗАВЖДИ, зокрема None: test_schema_is_uniform
+            # вимагає однаковий набір ключів у всіх рядках.
+            "geo_conf": (best or {}).get("geo_conf"),
             "depth": round(depth_km((lat, lon))) if lat else None,
             "region": region,
             "drones": int(m.group(1)) if m else None,

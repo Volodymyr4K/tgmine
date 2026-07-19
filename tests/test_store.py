@@ -178,6 +178,40 @@ class TestStoreInvariants(unittest.TestCase):
         keys = {frozenset(e) for _, e in self.events}
         self.assertEqual(len(keys), 1, "рядки з різним набором полів")
 
+    def test_event_carries_how_the_coordinate_was_found(self):
+        """`geo_conf` рахувався в geocode й викидався перед записом.
+
+        Через це в сховищі точка, підтверджена областю з того ж поста,
+        виглядала точнісінько як вгадана за населенням, і жоден вид не міг їх
+        розрізнити. Поле має бути в КОЖНОМУ рядку (навіть None — інакше
+        падає test_schema_is_uniform) і мати осмислені значення.
+        """
+        KNOWN = {"region", "consensus", "global", "alias",
+                 "city-marker", "centroid", "region-snap", None}
+        seen = {e.get("geo_conf") for _, e in self.events}
+        self.assertTrue(all("geo_conf" in e for _, e in self.events),
+                        "подія без geo_conf")
+        self.assertEqual(seen - KNOWN, set(), "невідома позначка впевненості")
+        # Контроль, що поле не заповнене однією заглушкою: у сховищі мають
+        # бути і слабкі розвʼязання, і підтверджені узгодженням.
+        for want in ("region", "global", "consensus"):
+            self.assertIn(want, seen, f"жодної події з geo_conf={want}")
+
+    def test_coordinate_bearing_events_are_not_mostly_guesswork(self):
+        """Точкове спостереження з координатою має спиратись на щось.
+
+        Сторожа проти тихої деградації: якщо частка найслабшої гілки
+        («найбільший однойменний за населенням») поповзе вгору, карта почне
+        брехати рівно так, як брехала до узгодження. На момент введення
+        порогу частка була 3.7% (315 з 8485).
+        """
+        pts = [e for _, e in self.events
+               if e.get("scope") == "точка" and e.get("lat") is not None]
+        self.assertGreater(len(pts), 100, "замало точкових подій для оцінки")
+        guessed = sum(1 for e in pts if e.get("geo_conf") == "global")
+        self.assertLess(guessed / len(pts), 0.10,
+                        f"{guessed} з {len(pts)} точок вгадано за населенням")
+
 
 if __name__ == "__main__":
     unittest.main()

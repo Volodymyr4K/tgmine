@@ -114,12 +114,18 @@ jobs:
         id: cachekey
         run: echo "day=$(date -u +%F)" >> "$GITHUB_OUTPUT"
 
+      # ВЕРСІЯ В КЛЮЧІ (raids-vN) — не прикраса. Карти беруться з кешу й НЕ
+      # перебудовуються, тож зміна вигляду чи розмітки в makeraid.py/raid.py
+      # доходить лише до свіжих двох діб, а решта архіву назавжди лишається
+      # старою. Помітити це на око майже неможливо: сторінки різні, дати різні.
+      # Правило: змінив makeraid.py або raid.py — підніми vN тут же, у тому
+      # самому коміті. Один холодний прогін ~5.5 хв, далі знову 13 с.
       - name: Кеш карт нальотів
         uses: actions/cache@v4
         with:
           path: site/raids
-          key: raids-${{ steps.cachekey.outputs.day }}
-          restore-keys: raids-
+          key: raids-v2-${{ steps.cachekey.outputs.day }}
+          restore-keys: raids-v2-
 
       # Без --days: денні сторінки за всі 93 доби коштують 6 секунд, тобто
       # обрізання архіву економило час не там, де він витрачався. --raid-days 2

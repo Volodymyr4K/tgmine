@@ -52,7 +52,13 @@ TPL = r"""<!doctype html>
   /* На карті лишається мінімум: годинник і що відбувається. Решта цифр
      переїхала в панель — на мапі вони лежали просто поверх території
      і заважали читати саму подію. */
-  #banner{position:absolute;top:36px;left:12px;z-index:500;padding:9px 13px;
+  /* Кнопки масштабу Leaflet за замовчуванням сідають у ЛІВИЙ ВЕРХНІЙ кут —
+     рівно туди, де банер із годинником і кнопка «Зведення» з шапки. Три шари
+     налазили один на одного, і години читались як «:2:10». Опускаємо кнопки
+     над смугу часу; смуга 66px, тому 74px лишає зазор. */
+  .leaflet-top.leaflet-left{top:auto;bottom:74px}
+  /* 44px, а не 36: шапка з падінгом і кнопками займає ~40px, банер лізав під неї. */
+  #banner{position:absolute;top:44px;left:12px;z-index:500;padding:9px 13px;
           pointer-events:none;border-radius:8px;background:rgba(6,9,16,.72);
           border:1px solid rgba(40,58,76,.6);backdrop-filter:blur(6px)}
   #clock{font-size:26px;color:var(--cyan);letter-spacing:.03em;font-variant-numeric:tabular-nums}

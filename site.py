@@ -474,6 +474,14 @@ def main():
     ap = argparse.ArgumentParser("site")
     ap.add_argument("--days", type=int, default=0, help="скільки останніх днів (0 = всі)")
     ap.add_argument("--raids", action="store_true", help="перегенерувати сторінки нальотів")
+    # Карти нальотів — 99% часу збірки: 93 доби без них будуються 6 секунд, з
+    # ними 5.5 хвилини. При цьому карта минулої доби більше не змінюється.
+    # Тому свіжі перебудовуються щоразу (дані ще доходять), а старі — лише якщо
+    # їх нема на диску. Разом із кешем site/raids у CI це тримає щогодинний
+    # прогін у бюджеті безкоштовних хвилин, не ріжучи архів.
+    ap.add_argument("--raid-days", type=int, default=0, metavar="N",
+                    help="перебудовувати карти лише за N останніх діб "
+                         "(0 = усі; відсутні добудовуються завжди)")
     a = ap.parse_args()
 
     st = ST.Store()
@@ -509,10 +517,16 @@ def main():
 
     # ---- сторінки нальотів ------------------------------------------------
     if a.raids:
+        # Свіжі доби перебудовуються завжди: дані по них ще доходять, і карта
+        # вчорашньої ночі о 03:00 неповна. Старі — тільки якщо файлу нема.
+        rebuild = {r["date"] for r in rows[-a.raid_days:]} if a.raid_days else None
+        built = {p.stem for p in (OUT / "raids").glob("*.html")}
         for r in rows:
             if r["points"] < 40:          # тихі ночі не варті окремої сторінки
                 continue
             d = r["date"]
+            if rebuild is not None and d not in rebuild and d in built:
+                continue
             try:
                 subprocess.run([sys.executable, "raid.py", d], check=True,
                                capture_output=True, timeout=900)

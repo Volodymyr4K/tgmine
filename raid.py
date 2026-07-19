@@ -18,6 +18,7 @@ from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, ".")
 from tgmine import extract as E, geocode as GC, store as ST, tracker as TR, vectors as V
+from tgmine.labels import region_label
 
 MSK = timezone(timedelta(hours=3))
 # Кордон України — точка відліку: все, що ближче за 60 км, вважаємо заходом.
@@ -163,9 +164,18 @@ def main(date="2026-07-17", h_from="12", h_to="12", src=None):
               f"{t['kmh']:3} км/год  курс {t['course']:3}°  "
               f"{(t['from'] or '')[:16]:17} -> {(t['to'] or '')[:16]}")
 
+    # Назви для читача підставляються тут, а не в JS карти: обидві сторони
+    # (подія і region_geo) мають лишитись узгодженими, бо карта зшиває їх за
+    # цим рядком. Перейменувати ключі у сховищі не можна — вони в кожній події.
+    for e in events:
+        if e.get("region"):
+            e["region"] = region_label(e["region"])
+        # place теж несе ключ, коли подія стосується цілої області
+        if e.get("place"):
+            e["place"] = region_label(e["place"])
     out = {"date": date, "events": events, "vectors": vecs, "tracks": tracks,
            "null": null,
-           "region_geo": {k: list(v) for k, v in cfg.geo.items()}}
+           "region_geo": {region_label(k): list(v) for k, v in cfg.geo.items()}}
     fn = f"raid_{date}.json"
     json.dump(out, open(fn, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
     print(f"\n-> {fn}")

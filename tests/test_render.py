@@ -174,3 +174,41 @@ class TestGeneratedPages(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestRegionLabels(unittest.TestCase):
+    """Назви регіонів на сайті й контури карти мають зшиватись.
+
+    Карта бере контур області за назвою події (`POLY[e.region]`). Коли назви
+    для читача підставили в подіях, але лишили внутрішні ключі в regions.json,
+    для пʼяти областей POLY[reg] повертав undefined — заливка тривоги тихо
+    зникала, і жодної помилки в консолі при цьому не було. Тест саме про це.
+    """
+
+    def test_map_regions_all_have_a_contour(self):
+        site = ROOT / "site"
+        regions = site / "regions.json"
+        if not regions.exists():
+            self.skipTest("сайт не зібрано")
+        with regions.open(encoding="utf-8") as fh:
+            poly = set(json.load(fh))
+        orphan = set()
+        for f in sorted((site / "raids").glob("*.html"))[:20]:
+            m = re.search(r'"events":\s*(\[.*?\]),\s*"vectors"',
+                          f.read_text(encoding="utf-8"), re.S)
+            if not m:
+                continue
+            for e in json.loads(m.group(1)):
+                if e.get("region") and e["region"] not in poly:
+                    orphan.add(e["region"])
+        self.assertEqual(sorted(orphan), [],
+                         "регіон події без контуру — заливка тривоги зникне мовчки")
+
+    def test_internal_keys_do_not_reach_the_reader(self):
+        site = ROOT / "site"
+        if not (site / "index.html").exists():
+            self.skipTest("сайт не зібрано")
+        leaked = [p.name for p in list(site.glob("*.html")) + list((site / "day").glob("*.html"))
+                  if "ТОТ_" in p.read_text(encoding="utf-8")
+                  or "Ивановська" in p.read_text(encoding="utf-8")]
+        self.assertEqual(leaked[:5], [], "внутрішній ключ регіону потрапив у HTML")

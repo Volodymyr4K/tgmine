@@ -21,6 +21,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from tgmine import store as ST
+from tgmine.labels import region_label
 
 MSK = timezone(timedelta(hours=3))
 OUT = Path("site")
@@ -100,23 +101,6 @@ def esc(x):
     return html.escape(str(x or ""))
 
 
-# Ключі регіонів — внутрішні: вони лежать у полі `region` кожної події, у
-# regions.json і в geo конфіга. Перейменувати їх означає розсинхронізувати
-# сховище, тому назва для читача виправляється тут, на рівні подання.
-#
-# «ТОТ_Херсон» з підкресленням і «Ивановська» російською просочувались просто в
-# інтерфейс — обидва помічені при обході сайту.
-REGION_LABEL = {
-    "ТОТ_Донецьк":   "Донеччина (ТОТ)",
-    "ТОТ_Луганськ":  "Луганщина (ТОТ)",
-    "ТОТ_Запоріжжя": "Запоріжжя (ТОТ)",
-    "ТОТ_Херсон":    "Херсонщина (ТОТ)",
-    "Ивановська":    "Іванівська",
-}
-
-
-def region_label(name):
-    return REGION_LABEL.get(name, name)
 
 
 _TGT_BY_TID = None
@@ -291,28 +275,30 @@ def day_page(date, ev, s, prev_stats, have_raid, prev_date=None, next_date=None)
 
     places = collections.Counter(e["place"] for e in pts if e.get("place"))
     top_pl = "\n".join(
-        f'<tr><td>{esc(k)}</td><td class=n>{v}</td></tr>' for k, v in places.most_common(12))
+        f'<tr><td>{esc(region_label(k))}</td><td class=n>{v}</td></tr>'
+        for k, v in places.most_common(12))
     # 90-й перцентиль, а не максимум: одна помилка геокодування (тезка за
     # тисячу кілометрів) інакше стає «рекордом глибини» для цілого регіону
     def p90(reg):
         d = sorted(e["depth"] for e in pts if e.get("region") == reg and e.get("depth"))
         return d[int(len(d) * .9)] if d else 0
     regs = "\n".join(
-        f'<tr><td>{esc(k)}</td><td class=n>{v}</td><td class=n>{p90(k)}</td></tr>'
+        f'<tr><td>{esc(region_label(k))}</td><td class=n>{v}</td>'
+        f'<td class=n>{p90(k)}</td></tr>'
         for k, v in s["regions"].most_common(14))
 
     big = sorted([e for e in pts if e.get("drones")],
                  key=lambda e: -e["drones"])[:8]
     bigrows = "\n".join(
         f'<tr><td>{datetime.fromisoformat(e["t"]).strftime("%H:%M")}</td>'
-        f'<td class=n>{e["drones"]}</td><td>{esc(e["place"])}</td>'
+        f'<td class=n>{e["drones"]}</td><td>{esc(region_label(e["place"]))}</td>'
         f'<td class=big>{esc(e["text"][:90])}</td>'
         f'<td><a href="{esc(e["url"])}" target=_blank>↗</a></td></tr>' for e in big)
 
     notable = [e for e in pts if e["kind"] in ("збиття", "вибух")][:10]
     notrows = "\n".join(
         f'<tr><td>{datetime.fromisoformat(e["t"]).strftime("%H:%M")}</td>'
-        f'<td><span class=tag>{esc(e["kind"])}</span></td><td>{esc(e["place"])}</td>'
+        f'<td><span class=tag>{esc(e["kind"])}</span></td><td>{esc(region_label(e["place"]))}</td>'
         f'<td class=big>{esc(e["text"][:90])}</td>'
         f'<td><a href="{esc(e["url"])}" target=_blank>↗</a></td></tr>' for e in notable)
 
@@ -519,10 +505,20 @@ def main():
     # перебудовує лише останні дні. Один файл — одна версія для всього архіву.
     for name, why in (("targets.json", "карти будуть без шару цілей"),
                       ("regions.json", "карти будуть без меж областей")):
-        if Path(name).exists():
-            shutil.copyfile(name, OUT / name)
-        else:
+        if not Path(name).exists():
             print(f"! {name} нема — {why}")
+            continue
+        if name == "regions.json":
+            # Карта зшиває контур області з подією ЗА НАЗВОЮ (`POLY[e.region]`),
+            # а події публікуються вже з назвою для читача. Якби тут лишились
+            # внутрішні ключі, для пʼяти перейменованих областей POLY[reg]
+            # повертав би undefined і заливка тривоги тихо зникала б — карта
+            # малювалась би далі, без жодної помилки в консолі.
+            poly = json.load(open(name, encoding="utf-8"))
+            json.dump({region_label(k): v for k, v in poly.items()},
+                      open(OUT / name, "w", encoding="utf-8"), ensure_ascii=False)
+        else:
+            shutil.copyfile(name, OUT / name)
 
     rows = []
     for d in dates:
@@ -587,7 +583,7 @@ def main():
         "alerts": sorted(region_label(k) for k, v in last_state.items()
                          if v not in ("відбій",)),
         "recent": [{"hhmm": datetime.fromisoformat(e["t"]).strftime("%H:%M"),
-                    "kind": e["kind"], "place": e.get("place"),
+                    "kind": e["kind"], "place": region_label(e.get("place")),
                     "text": e["text"], "url": e["url"]}
                    for e in reversed(recent[-40:])],
     }

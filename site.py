@@ -435,7 +435,10 @@ async function tick(){
     const r = await fetch('live.json?_='+Date.now());
     const d = await r.json();
     const age = (Date.now()-new Date(d.generated).getTime())/60000;
-    const stale = age>45;
+    // Поріг привʼязаний до крону (година) з подвійним запасом: GitHub регулярно
+    // запізнюється на десятки хвилин, і при 45 хв позначка стояла б майже
+    // завжди — тобто не значила б нічого.
+    const stale = age>120;
     document.body.classList.toggle('stale',stale);
     document.getElementById('status').innerHTML =
       `<span class=pulse></span>дані станом на ${new Date(d.generated)

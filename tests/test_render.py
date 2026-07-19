@@ -212,3 +212,38 @@ class TestRegionLabels(unittest.TestCase):
                   if "ТОТ_" in p.read_text(encoding="utf-8")
                   or "Ивановська" in p.read_text(encoding="utf-8")]
         self.assertEqual(leaked[:5], [], "внутрішній ключ регіону потрапив у HTML")
+
+
+class TestMapsAreByteStable(unittest.TestCase):
+    """Карта завершеної доби не має мінятись від самої перезбірки.
+
+    Тут стояв `datetime.now()` як «збірка HH:MM». Один цей рядок робив кожну
+    перезбірку іншим файлом, тож хостинг перезаливав карти щогодини — 800 КБ
+    на дві карти за прогін, при незмінному вмісті. За добу це десятки мегабайт
+    трафіку ні за що, і саме воно зʼїдало кредити хостингу.
+
+    Тепер підпис — час останньої події доби. Для минулої ночі він сталий, для
+    сьогоднішньої змінюється, бо дані справді доходять.
+    """
+
+    def test_no_wall_clock_in_the_map_generator(self):
+        # Перевіряємо КОД, не текст: у файлі є коментар, що пояснює, чому
+        # datetime.now() звідси прибрано, і пошук по сирому рядку ловив би
+        # саме його.
+        tree = ast.parse((ROOT / "makeraid.py").read_text(encoding="utf-8"))
+        calls = [n for n in ast.walk(tree)
+                 if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                 and n.func.attr == "now"]
+        self.assertEqual(calls, [],
+                         "вихід карти знову залежить від часу збірки, "
+                         "а не лише від даних")
+
+    def test_rebuilding_the_same_day_gives_the_same_bytes(self):
+        raid = ROOT / "site" / "raids"
+        if not raid.is_dir() or not any(raid.glob("*.html")):
+            self.skipTest("карти не зібрано")
+        # Непрямо, але без запуску конвеєра: сторінка не повинна містити
+        # мітки, яка залежить від часу збірки.
+        page = sorted(raid.glob("*.html"))[0].read_text(encoding="utf-8")
+        self.assertIn("дані до", page)
+        self.assertNotIn("збірка", page)

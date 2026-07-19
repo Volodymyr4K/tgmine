@@ -154,7 +154,7 @@ TPL = r"""<!doctype html>
     <a href="../day/__DATE__.html">Звіт за ніч</a>
     <a href="../nights.html">Усі ночі</a>
     <a href="../live.html">Що зараз</a>
-    <span class=t>__DATE__ · збірка __BUILD__</span>
+    <span class=t>__DATE__ · дані до __BUILD__</span>
   </div>
   <div id="banner">
     <div id="clock">--:--</div><div id="phase"></div>
@@ -853,11 +853,24 @@ def render(tpl: str, subs: dict) -> str:
 
 
 def main(src="raid_2026-07-17.json"):
-    from datetime import datetime as _dt, timezone as _tz
-    build = _dt.now(_tz.utc).strftime("%d.%m %H:%M")
     raid = json.load(open(src, encoding="utf-8"))
     ev = [e for e in raid["events"] if e.get("lat")]
     trk = raid.get("tracks", [])
+    # Час ОСТАННЬОЇ ПОДІЇ доби, а не час збірки. Різниця не косметична:
+    # раніше тут стояв datetime.now(), тож кожна перезбірка давала інший байт,
+    # і карта завершеної ночі перезаливалась на хостинг щогодини — 800 КБ на
+    # дві карти за прогін, при тому що вміст не мінявся. Тепер карта минулої
+    # доби байт-у-байт стала, а сьогоднішня оновлюється, бо в ній справді
+    # зʼявляються події.
+    #
+    # Для читача так теж чесніше: «збірка 19.07 19:41» на карті вчорашньої ночі
+    # не означала нічого, а час останньої події означає, доки дані доходили.
+    stamps = [e["t"] for e in raid["events"] if e.get("t")]
+    if stamps:
+        from datetime import datetime as _dt
+        build = _dt.fromisoformat(max(stamps)).strftime("%d.%m %H:%M")
+    else:
+        build = raid["date"]
     regs = len({e["region"] for e in ev if e["region"]})
     places = len({e["place"] for e in ev})
     sub = (f"{ev[0]['hhmm']}–{ev[-1]['hhmm']} МСК · {len(ev)} повідомлень · "

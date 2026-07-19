@@ -130,7 +130,11 @@ jobs:
       # тому він спершу кладеться в env кроку — цей контекст в `if` видно.
       - name: Публікація на Netlify
         if: env.NETLIFY_AUTH_TOKEN != '' && env.NETLIFY_SITE_ID != ''
-        run: npx --yes netlify-cli@17 deploy --prod --dir=site --no-build
+        # Без --build: у netlify-cli 17 deploy сам нічого не збирає, збірка
+        # запускається лише явним прапорцем. Тека вже готова — її зібрав крок
+        # вище, тут потрібна тільки заливка. (Прапорця --no-build не існує,
+        # команда з ним падає з «unknown option».)
+        run: npx --yes netlify-cli@17 deploy --prod --dir=site
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID:    ${{ secrets.NETLIFY_SITE_ID }}

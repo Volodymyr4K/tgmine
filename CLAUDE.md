@@ -258,5 +258,5 @@ industrial (regex) окремо. Без `User-Agent` — 406.
 Газетир (`gazetteer/`, 132 МБ) у `.gitignore`, CI тягне сам.
 
 Розгортання — `DEPLOY.md`: Actions cron збирає й будує, Netlify роздає готову
-теку (`--no-build`). Netlify **не** звʼязаний з Git: `site/` у `.gitignore`, тож
+теку (`deploy` без `--build`). Netlify **не** звʼязаний з Git: `site/` у `.gitignore`, тож
 Git-інтеграція публікує корінь репо й засвічує `data/` назовні.

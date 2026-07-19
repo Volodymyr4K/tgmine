@@ -201,7 +201,12 @@ def _absorb(res, seen, log):
 
 def _save(seen, log):
     import os, collections
-    objects = list(seen.values())
+    from tgmine.territory import filter_objects
+    # Плитки Overpass прямокутні, кордон — ні, тому у вибірку падають українські
+    # обʼєкти: аеродроми, полігони, військові частини. У публічному переліку
+    # цілей їм не місце. Відсів саме тут, а не в site.py: інакше вони лишаються
+    # у targets.json і повертаються на карту при кожній зміні шляху публікації.
+    objects = filter_objects(list(seen.values()), log=log)
     colors = {k: v[0] for k, v in CATEGORIES.items()}
     json.dump({"colors": colors, "objects": objects},
               open(OUT, "w", encoding="utf-8"), ensure_ascii=False)

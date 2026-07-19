@@ -1,0 +1,18 @@
+{
+  "version": 9,
+  "channels": {
+    "vrv_radar": {
+      "last_id": 74080,
+      "last_date": "2026-07-18T17:32:54+00:00"
+    },
+    "kupolrussia": {
+      "last_id": 101820,
+      "last_date": "2026-07-18T17:32:31+00:00"
+    },
+    "lpr1_treugolnik": {
+      "last_id": 245587,
+      "last_date": "2026-07-18T17:32:10+00:00"
+    }
+  },
+  "updated": "2026-07-19T10:16:29.000326+00:00"
+}

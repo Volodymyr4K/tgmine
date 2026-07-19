@@ -1,0 +1,109 @@
+name: update
+
+# Кожні 30 хв: доваантажити нові пости, перебудувати сайт, опублікувати.
+# Розклад GitHub Actions може запізнюватись на кілька хвилин при навантаженні —
+# для «майже реального часу» цього достатньо, точності до секунди тут не буде.
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:          # кнопка «запустити зараз» у вкладці Actions
+  push:
+    branches: [main]
+
+permissions:
+  contents: write             # щоб бот міг комітити оновлені дані
+  pages: write
+  id-token: write
+
+concurrency:
+  group: update
+  cancel-in-progress: false   # не обривати збір на півдорозі
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # Крок збору ходить у мережу й повторює запити з backoff — єдине місце, що
+    # може зависнути надовго. Виміряно локально: тести 7 с, збірка сайту 28 с,
+    # ранжування <1 с. Двадцять хвилин — десятикратний запас, але менше за
+    # інтервал крону (30 хв), тому зависла спроба звільнить чергу до наступної.
+    # Дефолт GitHub — 360 хв, і з `cancel-in-progress: false` одна зависла
+    # спроба блокувала б групу на шість годин.
+    timeout-minutes: 20
+    # Бот комітить дані в main, а `on: push` реагує на main. Зараз петлі нема:
+    # GitHub не перезапускає workflow на події від GITHUB_TOKEN. Але варто
+    # замінити токен на PAT чи deploy key (типово — коли вмикають захист гілки),
+    # і кожен коміт бота запускав би нову збірку. Явна умова не залежить від
+    # цієї неочевидної поведінки.
+    if: github.event_name != 'push' || github.actor != 'github-actions[bot]'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      # Газетир 132 МБ — у репозиторії йому не місце. Кешуємо між запусками,
+      # завантажуємо лише коли кеш порожній.
+      - name: Кеш газетира
+        id: gaz
+        uses: actions/cache@v4
+        with:
+          path: gazetteer
+          key: gazetteer-v1
+
+      - name: Завантажити газетир
+        if: steps.gaz.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p gazetteer && cd gazetteer
+          curl -sL -o RU.zip https://download.geonames.org/export/dump/RU.zip
+          curl -sL -o UA.zip https://download.geonames.org/export/dump/UA.zip
+          curl -sL -o ne.zip https://naciscdn.org/naturalearth/10m/cultural/ne_10m_admin_1_states_provinces.zip
+          unzip -oq RU.zip && unzip -oq UA.zip && unzip -oq ne.zip
+          rm -f *.zip
+
+      - name: Межі областей
+        run: test -f regions.json || python mkregions.py
+
+      # Тести — до збору. Якщо розбір зламано, краще не писати зіпсовані події
+      # у store і не публікувати сайт: дані в data/ не відновлюються.
+      - name: Тести
+        run: python -m unittest discover -s tests -t . -v
+
+      - name: Зібрати нові пости
+        run: python sync.py --since 2d
+
+      # Без цього кроку жар цілей замерзав на останньому ручному запуску:
+      # події накопичувались щодня, а hits/imp лишались старими.
+      # Обовʼязково ПІСЛЯ sync (рахує з подій) і ДО site (копіює файл у сайт).
+      # Результат свідомо НЕ комітиться: hits змінюється майже щоразу, а файл
+      # важить 0.8 МБ — 48 запусків на добу дали б ~40 МБ/добу в історію git.
+      # У репозиторії лишається база обʼєктів з fetch_targets, свіже ранжування
+      # живе лише в опублікованому site/targets.json.
+      - name: Перерахувати важливість цілей
+        run: |
+          if [ -f targets.json ]; then
+            python rank_targets.py
+          else
+            echo "targets.json нема — пропускаю, карти будуть без шару цілей"
+          fi
+
+      - name: Зібрати сайт
+        run: python site.py --days 10 --raids
+
+      - name: Зберегти дані в репозиторій
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A data store regions.json
+          git diff --staged --quiet || git commit -m "дані: $(date -u +%F\ %H:%M) UTC"
+          git push
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4

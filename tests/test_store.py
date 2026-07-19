@@ -268,3 +268,59 @@ class TestPromoIsNoise(unittest.TestCase):
     def test_clean_post_without_promo_is_not_noise(self):
         e = self._event("Фиксация БПЛА в районе Клоково, курс на Тулу")
         self.assertFalse(e["noise"])
+
+
+class TestNearNeedsARealCoordinate(unittest.TestCase):
+    """Привʼязка до цілі — лише для координат, які вказують на місце.
+
+    Регіональні відкати (centroid/region/region-snap) означають «десь у цій
+    області», а область це десятки тисяч кв. км. Ставити їм найближчу ціль —
+    вигадувати точність, якої в даних нема.
+
+    Виміряно до правки: 64% усіх привʼязок (8182 з 12800) стояли на такій
+    координаті, і перекіс був нерівномірний, тому рейтинг брехав. Аеродром
+    Клокове був №1 із 571 привʼязкою, з яких 71% — центр Тули за 5 км, куди
+    падали «Ясногорский район» і «Чернский район» за 50-80 км звідти. Після
+    правки він восьмий зі 167. Сума привʼязок 12759 -> 4629.
+    """
+
+    @needs_store
+    def test_no_target_is_attached_to_a_regional_fallback(self):
+        bad = []
+        for f in sorted((ROOT / "store" / "events").glob("*.jsonl")):
+            with f.open(encoding="utf-8") as fh:
+                for line in fh:
+                    if not line.strip():
+                        continue
+                    e = json.loads(line)
+                    if e.get("near") and e.get("geo_conf") in ST.REGIONAL_FALLBACK:
+                        bad.append((e["id"], e.get("geo_conf"), e["near"]["name"]))
+        self.assertEqual(bad[:5], [],
+                         "ціль привʼязана до центру області — жар цілей роздується")
+
+    @needs_store
+    def test_city_level_attribution_is_the_weakest_mode_left(self):
+        """Межа методу, а не помилка — але вона має лишатись видимою.
+
+        Після відсіву регіональних відкатів решта привʼязок спирається на
+        `city-marker`: «БПЛА над Волгоградом» дає центр Волгограда, а звідти
+        найближча ціль першого ярусу в радіусі 18 км — НПЗ. Це «увага до
+        міста», а не влучання в обʼєкт, і сторінка цілей саме так і написана.
+
+        Тест не забороняє такі привʼязки, а стежить, щоб вони не почали
+        мовчки спиратись на щось слабше за рівень міста.
+        """
+        import collections
+        modes = collections.Counter()
+        for f in sorted((ROOT / "store" / "events").glob("*.jsonl")):
+            with f.open(encoding="utf-8") as fh:
+                for line in fh:
+                    if not line.strip():
+                        continue
+                    e = json.loads(line)
+                    if e.get("near") and e.get("scope") == "точка":
+                        modes[e.get("geo_conf")] += 1
+        weak = sum(v for k, v in modes.items() if k in ("global",))
+        total = sum(modes.values()) or 1
+        self.assertLess(weak / total, 0.10,
+                        f"забагато привʼязок на здогадах за населенням: {modes}")

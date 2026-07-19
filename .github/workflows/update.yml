@@ -120,13 +120,27 @@ jobs:
       # хвилин білду вичерпуються за кілька днів. Тека їде готовою звідси, де
       # вже є Python, газетир і store.
       #
-      # Публікація вимкнена, доки не ввімкнеш явно:
-      #   gh variable set PUBLISH_SITE --body true
-      # Без умови кожен прогін без секретів був би червоним, і справжній збій
-      # загубився б серед них.
+      # Умова на env, а не на vars: крок сам вимикається, доки секрета нема, і
+      # вмикається тієї ж миті, коли той зʼявиться — без ще однієї ручної дії.
+      # Через vars довелося б памʼятати про другий перемикач, а забутий
+      # PUBLISH_SITE при вже покладеному токені виглядає точнісінько як
+      # робочий конвеєр, що мовчки нічого не публікує.
+      #
+      # Секрет не можна читати в `if` напряму (контекст secrets там недоступний),
+      # тому він спершу кладеться в env кроку — цей контекст в `if` видно.
       - name: Публікація на Netlify
-        if: vars.PUBLISH_SITE == 'true'
+        if: env.NETLIFY_AUTH_TOKEN != '' && env.NETLIFY_SITE_ID != ''
         run: npx --yes netlify-cli@17 deploy --prod --dir=site --no-build
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID:    ${{ secrets.NETLIFY_SITE_ID }}
+
+      - name: Чому не опубліковано
+        if: env.NETLIFY_AUTH_TOKEN == '' || env.NETLIFY_SITE_ID == ''
+        run: |
+          echo "::notice::Сайт зібрано, але не опубліковано — нема секрета" \
+               "NETLIFY_AUTH_TOKEN або NETLIFY_SITE_ID. Прогін зелений навмисно:" \
+               "червоні прогони щогодини сховали б справжній збій."
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID:    ${{ secrets.NETLIFY_SITE_ID }}

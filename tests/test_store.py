@@ -215,3 +215,56 @@ class TestStoreInvariants(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPromoIsNoise(unittest.TestCase):
+    """Заклики про донати не мають потрапляти на публічні сторінки.
+
+    Стояло правило «після чистки не лишилось нічого змістовного»
+    (`len(clean) < 25`), і воно пропустило банер збору коштів російського
+    каналу просто на сторінку «Що зараз»: із десяти рядків патерни зняли три,
+    решта 145 символів пройшла як звичайна подія.
+
+    Патерн не спрацював через порядок слів — «Радару требуется ваша
+    поддержка» проти «поддержка радара». Латати формулювання марно, тому
+    ознакою стало поєднання: є промо-рядок І жоден бойовий тег не спрацював.
+
+    Текст укладено дослівно з data/vrv_radar.jsonl (пост 74180) РАЗОМ із
+    переносами рядків: strip_promo працює порядково, плаский переказ дає інший
+    результат.
+    """
+
+    PROMO = ("❤️\nРадару требуется ваша поддержка!\n"
+             "Мы не размещаем рекламу и не зарабатываем на тревогах.\n"
+             "Проект держится на поддержке подписчиков.\n🙌\n"
+             "Если канал вам полезен —\nподдержите\nлюбой суммой.\n"
+             "Даже небольшой донат помогает нам продолжать.\n👉\n"
+             "https://pay.cloudtips.ru/p/01396e10")
+
+    def setUp(self):
+        from tgmine import extract as E
+        self.cfg = E.Config.load(str(ROOT / "configs" / "ru-monitor.yaml"))
+
+    def _event(self, text):
+        st = ST.Store.__new__(ST.Store)      # без диска: потрібен лише розбір
+        post = {"channel": "vrv_radar", "id": 1, "text": text,
+                "date": "2026-07-19T18:02:00+00:00",
+                "url": "https://t.me/vrv_radar/1", "entities": []}
+        return ST.Store._event(st, post, self.cfg)
+
+    def test_donation_banner_is_marked_noise(self):
+        self.assertTrue(self._event(self.PROMO)["noise"],
+                        "банер збору коштів пройшов як звичайна подія")
+
+    def test_real_sighting_with_promo_line_survives(self):
+        # Найнебезпечніший бік правила: спостереження з рекламним хвостом.
+        # Бойовий тег спрацював, отже kind != «інше», отже подія лишається.
+        text = ("Фиксация БПЛА в районе Клоково, курс на Тулу\n"
+                "Подписывайтесь на наш канал")
+        e = self._event(text)
+        self.assertNotEqual(e["kind"], "інше")
+        self.assertFalse(e["noise"], "справжнє спостереження позначено шумом")
+
+    def test_clean_post_without_promo_is_not_noise(self):
+        e = self._event("Фиксация БПЛА в районе Клоково, курс на Тулу")
+        self.assertFalse(e["noise"])

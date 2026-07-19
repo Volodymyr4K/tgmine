@@ -100,6 +100,25 @@ def esc(x):
     return html.escape(str(x or ""))
 
 
+# Ключі регіонів — внутрішні: вони лежать у полі `region` кожної події, у
+# regions.json і в geo конфіга. Перейменувати їх означає розсинхронізувати
+# сховище, тому назва для читача виправляється тут, на рівні подання.
+#
+# «ТОТ_Херсон» з підкресленням і «Ивановська» російською просочувались просто в
+# інтерфейс — обидва помічені при обході сайту.
+REGION_LABEL = {
+    "ТОТ_Донецьк":   "Донеччина (ТОТ)",
+    "ТОТ_Луганськ":  "Луганщина (ТОТ)",
+    "ТОТ_Запоріжжя": "Запоріжжя (ТОТ)",
+    "ТОТ_Херсон":    "Херсонщина (ТОТ)",
+    "Ивановська":    "Іванівська",
+}
+
+
+def region_label(name):
+    return REGION_LABEL.get(name, name)
+
+
 _TGT_BY_TID = None
 
 
@@ -565,7 +584,8 @@ def main():
         "points_6h": sum(1 for e in recent if e["scope"] == "точка"),
         "drones_6h": sum(e.get("drones") or 0 for e in recent),
         "pvo_6h": sum(1 for e in recent if e["kind"] in ("ППО", "збиття")),
-        "alerts": sorted(k for k, v in last_state.items() if v not in ("відбій",)),
+        "alerts": sorted(region_label(k) for k, v in last_state.items()
+                         if v not in ("відбій",)),
         "recent": [{"hhmm": datetime.fromisoformat(e["t"]).strftime("%H:%M"),
                     "kind": e["kind"], "place": e.get("place"),
                     "text": e["text"], "url": e["url"]}
@@ -592,13 +612,13 @@ def main():
         f'<td>{bar(r["drones"], mx_dr, 110, "r")}</td>'
         f'<td class=n>{r["pvo"] or "—"}</td><td class=n>{r["kills"] or "—"}</td>'
         f'<td class=n>{r["deep"]}</td>'
-        f'<td class=big>{esc(", ".join(k for k, _ in r["regions"].most_common(3)))}</td></tr>'
+        f'<td class=big>{esc(", ".join(region_label(k) for k, _ in r["regions"].most_common(3)))}</td></tr>'
         for r in reversed(rows))
 
     mxr = max(reg.values()) if reg else 1
     n_solo, n_reg, solo_share = voice_coverage(st)
     regtab = "\n".join(
-        f'<tr><td>{esc(k)}</td><td class=n>{v}</td><td>{bar(v, mxr, 220)}</td></tr>'
+        f'<tr><td>{esc(region_label(k))}</td><td class=n>{v}</td><td>{bar(v, mxr, 220)}</td></tr>'
         for k, v in reg.most_common(18))
 
     # Найгарячіші цілі за весь період — з рангу targets.json (hits за місяць).
@@ -717,7 +737,7 @@ def main():
     cards = "\n".join(
         f'<a class=card href="day/{r["date"]}.html"><h3>{r["date"]}</h3>'
         f'<p>{r["points"]} спостережень · {r["drones"] or "—"} апаратів · '
-        f'ППО {r["pvo"]}<br>{esc(", ".join(k for k, _ in r["regions"].most_common(3)))}'
+        f'ППО {r["pvo"]}<br>{esc(", ".join(region_label(k) for k, _ in r["regions"].most_common(3)))}'
         f'{" · <span style=color:#38d4dd>є карта</span>" if r["date"] in have else ""}</p></a>'
         for r in reversed(rows))
     nights = (f"<!doctype html><html lang=uk><head><meta charset=utf-8>"

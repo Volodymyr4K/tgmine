@@ -50,13 +50,14 @@ def main():
             print("сховище порожнє")
             return 0
         print(f"{'дата':12}{'подій':>8}{'унік.':>8}{'точкових':>10}"
-              f"{'з коорд.':>10}{'апаратів':>10}")
+              f"{'з коорд.':>10}{'найб.група':>12}{'місць':>7}")
         for r in rows:
             print(f"{r['date']:12}{r['all']:>8}{r['uniq']:>8}{r['points']:>10}"
-                  f"{r['geo']:>10}{r['drones']:>10}")
-        tot = {k: sum(r[k] for r in rows) for k in ("all", "uniq", "points", "drones")}
+                  f"{r['geo']:>10}{r['largest']:>12}{r['count_places']:>7}")
+        tot = {k: sum(r[k] for r in rows) for k in ("all", "uniq", "points")}
+        # найбільшу групу не сумують — це максимум за період
         print(f"{'РАЗОМ':12}{tot['all']:>8}{tot['uniq']:>8}{tot['points']:>10}"
-              f"{'':>10}{tot['drones']:>10}")
+              f"{'':>10}{max(r['largest'] for r in rows):>12}")
         print(f"\nднів: {len(rows)}   {rows[0]['date']} … {rows[-1]['date']}")
         print(f"версія конвеєра: {st.state.get('version')}   "
               f"оновлено: {(st.state.get('updated') or '')[:19]}")

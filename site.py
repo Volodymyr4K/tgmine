@@ -211,7 +211,10 @@ def summarize(events):
     depths = sorted(e["depth"] for e in pts if e.get("depth"))
     return {
         "msgs": len(uniq), "points": len(pts),
-        "drones": sum(e.get("drones") or 0 for e in uniq),
+        # профіль заявлених апаратів рахує store.declared — одна реалізація
+        # на весь проєкт. Раніше та сама сума стояла тут і в store.stat()
+        # окремими рядками, і розʼїхатись вони могли будь-якої правки.
+        **ST.declared(uniq),
         "pvo": kinds["ППО"], "kills": kinds["збиття"], "booms": kinds["вибух"],
         "alerts": len({e["region"] for e in uniq
                        if e["scope"] == "область" and e.get("region")}),
@@ -354,7 +357,8 @@ def day_page(date, ev, s, prev_stats, have_raid, prev_date=None, next_date=None)
 за повідомленнями моніторингових каналів</div>
 <div class=kpi>
   <div class=k><b style="color:var(--cyan)">{s['points']}</b><span>спостережень</span>{cmp(s['points'],'points')}</div>
-  <div class=k><b>{s['drones'] or '—'}</b><span>заявлено апаратів</span>{cmp(s['drones'],'drones')}</div>
+  <div class=k><b>{s['largest'] or '—'}</b><span>найбільша група</span>{cmp(s['largest'],'largest')}</div>
+  <div class=k><b>{s['count_places'] or '—'}</b><span>місць із числом</span></div>
   <div class=k><b style="color:var(--red)">{s['pvo']}</b><span>робота ППО</span></div>
   <div class=k><b>{s['kills']}</b><span>збиття</span></div>
   <div class=k><b style="color:var(--amber)">{s['alerts']}</b><span>областей під тривогою</span></div>
@@ -392,8 +396,10 @@ def day_page(date, ev, s, prev_stats, have_raid, prev_date=None, next_date=None)
 {pager}
 <div class=note>
 «Спостереження» — повідомлення про побачений чи почутий апарат, не підтверджений
-факт. «Заявлено апаратів» — сума чисел, які назвали канали; число вони вказують
-рідко, тому це нижня межа. Збиття і вибухи систематично занижені: канали
+факт. «Найбільша група» — найбільше число, яке назвали канали за добу; число
+вони вказують рідко (3.2% згадок), тому це нижня межа. Суму чисел за добу тут
+свідомо не показано: одна група летить через кілька районів і кожен дає власне
+повідомлення, тож сума рахує її по кілька разів. Збиття і вибухи систематично занижені: канали
 моніторять підліт, а не наслідки. Порівняння «до норми» — з медіаною попередніх
 діб у сховищі.
 </div>
@@ -452,7 +458,7 @@ async function tick(){
       (stale?' · <b style="color:#ff8a1f">оновлення затрималось</b>':'');
     document.getElementById('kpi').innerHTML = `
       <div class=k><b style="color:var(--cyan)">${d.points_6h}</b><span>спостережень за 6 год</span></div>
-      <div class=k><b>${d.drones_6h||'—'}</b><span>заявлено апаратів</span></div>
+      <div class=k><b>${d.drones_6h||'—'}</b><span>найбільша група</span></div>
       <div class=k><b style="color:var(--red)">${d.pvo_6h}</b><span>робота ППО</span></div>
       <div class=k><b style="color:var(--amber)">${d.alerts.length}</b><span>областей під тривогою</span></div>`;
     document.getElementById('alerts').innerHTML = d.alerts.length
@@ -578,7 +584,7 @@ def main():
     live = {
         "generated": datetime.now(timezone.utc).isoformat(),
         "points_6h": sum(1 for e in recent if e["scope"] == "точка"),
-        "drones_6h": sum(e.get("drones") or 0 for e in recent),
+        "drones_6h": ST.declared([e for e in recent if not e.get("dup_of")])["largest"],
         "pvo_6h": sum(1 for e in recent if e["kind"] in ("ППО", "збиття")),
         "alerts": sorted(region_label(k) for k, v in last_state.items()
                          if v not in ("відбій",)),
@@ -593,19 +599,21 @@ def main():
 
     # ---- зведення ---------------------------------------------------------
     tot = {k: sum(r[k] for r in rows) for k in
-           ("msgs", "points", "drones", "pvo", "kills", "booms")}
+           ("msgs", "points", "pvo", "kills", "booms", "with_count")}
+    # найбільшу групу за період не сумують — беруть максимум
+    tot["largest"] = max((r["largest"] for r in rows), default=0)
     reg = collections.Counter()
     for r in rows:
         reg.update(r["regions"])
-    mx_dr = max((r["drones"] for r in rows), default=1)
+    mx_dr = max((r["largest"] for r in rows), default=1)
     mx_pt = max((r["points"] for r in rows), default=1)
 
     daily = "\n".join(
         f'<tr><td>{"<a href=raids/%s.html>%s</a>" % (r["date"], r["date"]) if r["date"] in have else r["date"]}</td>'
         f'<td class=n>{r["points"]}</td>'
         f'<td>{bar(r["points"], mx_pt, 110)}</td>'
-        f'<td class=n>{r["drones"] or "—"}</td>'
-        f'<td>{bar(r["drones"], mx_dr, 110, "r")}</td>'
+        f'<td class=n>{r["largest"] or "—"}</td>'
+        f'<td>{bar(r["largest"], mx_dr, 110, "r")}</td>'
         f'<td class=n>{r["pvo"] or "—"}</td><td class=n>{r["kills"] or "—"}</td>'
         f'<td class=n>{r["deep"]}</td>'
         f'<td class=big>{esc(", ".join(region_label(k) for k, _ in r["regions"].most_common(3)))}</td></tr>'
@@ -664,7 +672,7 @@ def main():
 
 <div class=kpi>
   <div class=k><b style="color:var(--cyan)">{tot['points']}</b><span>спостережень</span></div>
-  <div class=k><b>{tot['drones']}</b><span>заявлено апаратів</span></div>
+  <div class=k><b>{tot['largest']}</b><span>найбільша група за період</span></div>
   <div class=k><b style="color:var(--red)">{tot['pvo']}</b><span>робота ППО</span></div>
   <div class=k><b>{tot['kills']}</b><span>збиття</span></div>
   <div class=k><b style="color:var(--amber)">{len(rows)}</b><span>діб</span></div>
@@ -683,7 +691,7 @@ def main():
 
 <h2>По добах</h2>
 <div class=tw><table>
-<tr><th>доба</th><th class=n>спостережень</th><th></th><th class=n>апаратів</th><th></th>
+<tr><th>доба</th><th class=n>спостережень</th><th></th><th class=n>найбільша група</th><th></th>
     <th class=n>ППО</th><th class=n>збито</th><th class=n>глибина, км</th><th>основні регіони</th></tr>
 {daily}
 </table></div>
@@ -702,9 +710,10 @@ def main():
 
 <div class=note>
 <b>Як це читати.</b> «Спостереження» — це повідомлення про побачений або почутий
-апарат у конкретному місці, а не підтверджений факт. «Заявлено апаратів» —
-сума чисел, які назвали самі канали; вони пишуть число далеко не завжди, тому
-це <b>нижня межа</b>. «Глибина» — 90-й перцентиль відстані від українського
+апарат у конкретному місці, а не підтверджений факт. «Найбільша група» — найбільше
+з чисел, які назвали самі канали; число вони пишуть лише в 3.2% згадок, тому це
+<b>нижня межа</b>. Суми чисел за добу тут нема навмисно: одну групу фіксують
+у кількох районах поспіль, і сума рахує її двічі-тричі. «Глибина» — 90-й перцентиль відстані від українського
 кордону.<br><br>
 <b>Чого тут нема.</b> Наслідків ударів: канали моніторять підліт, а не влучання,
 тому «збито» і «вибухів» тут систематично занижені й не годяться для оцінки
@@ -732,7 +741,7 @@ def main():
     # сторінка-перелік: кожна ніч зі звітом і картою
     cards = "\n".join(
         f'<a class=card href="day/{r["date"]}.html"><h3>{r["date"]}</h3>'
-        f'<p>{r["points"]} спостережень · {r["drones"] or "—"} апаратів · '
+        f'<p>{r["points"]} спостережень · найбільша група {r["largest"] or "—"} · '
         f'ППО {r["pvo"]}<br>{esc(", ".join(region_label(k) for k, _ in r["regions"].most_common(3)))}'
         f'{" · <span style=color:#38d4dd>є карта</span>" if r["date"] in have else ""}</p></a>'
         for r in reversed(rows))

@@ -324,3 +324,57 @@ class TestNearNeedsARealCoordinate(unittest.TestCase):
         total = sum(modes.values()) or 1
         self.assertLess(weak / total, 0.10,
                         f"забагато привʼязок на здогадах за населенням: {modes}")
+
+
+class TestDeclaredProfile(unittest.TestCase):
+    """Профіль заявлених апаратів: чому сума не показується.
+
+    Виміряно на корпусі: 50% подій із числом мають сусіда в межах 20 хв і
+    200 км, тобто одну групу фіксують кілька районів поспіль. Сума складає її
+    по два-три рази — «411 апаратів» у ніч на 24.07 це 58 повідомлень.
+    Кластеризацію повторів пробували й відкинули: без межі діаметра ланцюг
+    злипався через 874 км, з межею перевага над сирою сумою падала до шуму,
+    а сама кількість груп на переборі 324 конфігурацій гуляла ±55%.
+    Тому у видах — лише параметронезалежні числа.
+    """
+
+    def test_swarm_seen_in_three_districts_is_not_multiplied(self):
+        """Той самий рій у трьох районах не має давати потрійне число."""
+        swarm = [{"drones": 12, "place": p, "region": "Калузька"}
+                 for p in ("Жиздра", "Людиново", "Сухиничі")]
+        d = ST.declared(swarm)
+        self.assertEqual(d["largest"], 12, "найбільша група — це 12, не 36")
+        self.assertEqual(d["raw"], 36, "сира сума лишається доступною для звірки")
+        self.assertEqual(d["with_count"], 3)
+
+    def test_places_and_regions_are_deduplicated(self):
+        """Замінник «кількості груп» рахує РІЗНІ місця, а не повідомлення."""
+        evs = [{"drones": 2, "place": "Жиздра", "region": "Калузька"},
+               {"drones": 3, "place": "Жиздра", "region": "Калузька"},
+               {"drones": 4, "place": "Ржев", "region": "Тверська"}]
+        d = ST.declared(evs)
+        self.assertEqual(d["with_count"], 3)
+        self.assertEqual(d["count_places"], 2)
+        self.assertEqual(d["count_regions"], 2)
+
+    def test_events_without_a_number_are_ignored(self):
+        d = ST.declared([{"place": "Тула", "region": "Тульська"}])
+        self.assertEqual(d, {"raw": 0, "largest": 0, "with_count": 0,
+                             "count_places": 0, "count_regions": 0, "median": 0})
+
+    def test_two_nights_differ_by_largest_group_not_by_volume(self):
+        """Головна знахідка: ночі розрізняє маса групи, а не кількість подій.
+
+        23.07 — 58 повідомлень, найбільша група 50, 9 областей.
+        09.06 — 62 повідомлення, найбільша група 10, 18 областей.
+        Обсяг майже однаковий, тактика протилежна. Сира сума це ховала.
+        """
+        concentrated = ([{"drones": 50, "place": "A", "region": "R1"}]
+                        + [{"drones": 3, "place": f"p{i}", "region": "R1"}
+                           for i in range(20)])
+        dispersed = [{"drones": 3, "place": f"q{i}", "region": f"R{i}"}
+                     for i in range(21)]
+        a, b = ST.declared(concentrated), ST.declared(dispersed)
+        self.assertEqual(a["with_count"], b["with_count"])
+        self.assertGreater(a["largest"], b["largest"] * 4)
+        self.assertGreater(b["count_regions"], a["count_regions"] * 4)

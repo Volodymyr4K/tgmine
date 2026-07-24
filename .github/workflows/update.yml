@@ -121,7 +121,7 @@ jobs:
       # прогін, тобто ~5000 хв/міс проти 2000 безкоштовних. Тому вони переїжджають
       # між прогонами кешем, а site.py перебудовує лише свіжі.
       #
-      # Кеш обовʼязковий, а не оптимізація: `netlify deploy --dir=site` публікує
+      # Кеш обовʼязковий, а не оптимізація: `wrangler pages deploy site` публікує
       # рівно те, що в теці. Якби карти не відновлювались, кожен прогін зносив
       # би з сайту весь архів, лишаючи останні дві ночі.
       #
@@ -155,16 +155,22 @@ jobs:
           git diff --staged --quiet || git commit -m "дані: $(date -u +%F\ %H:%M) UTC"
           git push
 
-      # Публікація на Netlify, а не GitHub Pages: безкоштовний Pages роздає лише
-      # з публічного репозиторію, а тут у `data/` лежать сирі пости й уся логіка
-      # відбору — репозиторій лишається приватним.
+      # Публікація на Cloudflare Pages, а не GitHub Pages: безкоштовний Pages
+      # роздає лише з публічного репозиторію, а тут у `data/` лежать сирі пости
+      # й уся логіка відбору — репозиторій лишається приватним.
       #
-      # Netlify тут НЕ звʼязаний з Git. Звʼязка через дашборд виглядає простіше,
-      # але робить дві шкідливі речі: (1) `site/` у .gitignore, тому Netlify
-      # публікує корінь репо — тобто віддає приватні дані по HTTP; (2) білд на
-      # кожен push, а бот комітить дані 24 рази на добу — 300 безкоштовних
-      # хвилин білду вичерпуються за кілька днів. Тека їде готовою звідси, де
-      # вже є Python, газетир і store.
+      # Cloudflare тут НЕ звʼязаний з Git (режим Direct Upload). Звʼязка через
+      # дашборд виглядає простіше, але робить дві шкідливі речі: (1) `site/` у
+      # .gitignore, тому хостинг публікує корінь репо — тобто віддає приватні
+      # дані по HTTP; (2) білд на кожен push, а бот комітить дані 24 рази на
+      # добу. Тека їде готовою звідси, де вже є Python, газетир і store.
+      #
+      # Чому Cloudflare, а не Netlify: 24 деплої на добу = ~720 на місяць, а
+      # безкоштовний план дає 500 БІЛДІВ на місяць. Direct Upload у ту квоту не
+      # входить — вона рахує лише збірки на боці Cloudflare, а тут заливається
+      # готова тека. Плюс безлімітний трафік замість 100 ГБ/міс у Netlify.
+      # Ліміти на розмір із запасом: 20 000 файлів на проєкт (тут 197), 25 МіБ
+      # на файл (найбільший — targets.json, 0.8 МБ).
       #
       # Умова на env, а не на vars: крок сам вимикається, доки секрета нема, і
       # вмикається тієї ж миті, коли той зʼявиться — без ще однієї ручної дії.
@@ -174,23 +180,38 @@ jobs:
       #
       # Секрет не можна читати в `if` напряму (контекст secrets там недоступний),
       # тому він спершу кладеться в env кроку — цей контекст в `if` видно.
-      - name: Публікація на Netlify
-        if: env.NETLIFY_AUTH_TOKEN != '' && env.NETLIFY_SITE_ID != ''
-        # Без --build: у netlify-cli 17 deploy сам нічого не збирає, збірка
-        # запускається лише явним прапорцем. Тека вже готова — її зібрав крок
-        # вище, тут потрібна тільки заливка. (Прапорця --no-build не існує,
-        # команда з ним падає з «unknown option».)
-        run: npx --yes netlify-cli@17 deploy --prod --dir=site
+      - name: Публікація на Cloudflare Pages
+        if: env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != '' && env.CF_PAGES_PROJECT != ''
+        # `project create` — ідемпотентність, а не глушення помилок: на вже
+        # створеному проєкті команда падає з «project already exists», і це
+        # нормальний стан 99% прогонів. Справжня відмова (нема прав, збитий
+        # токен) все одно вилізе наступним кроком — `deploy` на неіснуючому
+        # проєкті червоний.
+        #
+        # --branch=main обовʼязковий. Без нього wrangler вгадує гілку з git, і
+        # деплой, що не збігся з production-гілкою проєкту, тихо стає preview:
+        # прогін зелений, у логах є URL, а бойовий домен показує старе.
+        #
+        # --commit-dirty: `site/` у .gitignore, тому дерево завжди «брудне» —
+        # без прапорця wrangler сипле попередження щопрогону.
+        run: |
+          npx --yes wrangler@4 pages project create "$CF_PAGES_PROJECT" \
+            --production-branch=main || true
+          npx --yes wrangler@4 pages deploy site \
+            --project-name="$CF_PAGES_PROJECT" --branch=main --commit-dirty=true
         env:
-          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
-          NETLIFY_SITE_ID:    ${{ secrets.NETLIFY_SITE_ID }}
+          CLOUDFLARE_API_TOKEN:  ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CF_PAGES_PROJECT:      ${{ secrets.CF_PAGES_PROJECT }}
 
       - name: Чому не опубліковано
-        if: env.NETLIFY_AUTH_TOKEN == '' || env.NETLIFY_SITE_ID == ''
+        if: env.CLOUDFLARE_API_TOKEN == '' || env.CLOUDFLARE_ACCOUNT_ID == '' || env.CF_PAGES_PROJECT == ''
         run: |
           echo "::notice::Сайт зібрано, але не опубліковано — нема секрета" \
-               "NETLIFY_AUTH_TOKEN або NETLIFY_SITE_ID. Прогін зелений навмисно:" \
-               "червоні прогони щогодини сховали б справжній збій."
+               "CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID або CF_PAGES_PROJECT." \
+               "Прогін зелений навмисно: червоні прогони щогодини сховали б" \
+               "справжній збій."
         env:
-          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
-          NETLIFY_SITE_ID:    ${{ secrets.NETLIFY_SITE_ID }}
+          CLOUDFLARE_API_TOKEN:  ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CF_PAGES_PROJECT:      ${{ secrets.CF_PAGES_PROJECT }}

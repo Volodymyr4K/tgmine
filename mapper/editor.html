@@ -531,7 +531,7 @@ const S={
           // державного кордону цих двох
           // кордони країн окремо від меж областей: країна має читатись
           // одразу, область — лише як фон
-          countries:0.72, countryW:1.35, labelDens:1,
+          countries:0.72, countryW:1.35, labelDens:1, labelMax:40,
           // жирний кордон між РФ і Україною — окремо від решти
           uaruW:2.8, uaruCol:'#ffffff'},
     route:{halo:0.12, nodes:true},
@@ -910,11 +910,18 @@ function drawLabels(c){
   // всього театру сотня назв злипається в кашу), але оператор мусить мати
   // ручку: «не всі міста нанесені» — це саме про них. Більша щільність
   // ділить поріг, тобто пускає дрібніші міста.
-  const dens=Math.max(0.3,Math.min(4,ST.base.labelDens===undefined?1:ST.base.labelDens));
-  const base=S.view.k>2.2?12000:S.view.k>1.1?30000:S.view.k>0.55?70000:180000;
-  const minPop=base/dens;
+  // Скільки підписів показувати. Пороги сходинками (15k / 40k / 90k / 250k)
+  // давали стрибок: один щиглик коліщатка — і назв удвічі більше. Тепер
+  // поріг міняється плавно з масштабом, а головне обмеження — не населення,
+  // а КІЛЬКІСТЬ підписів у кадрі: саме вона й читається як «забагато».
+  const dens=Math.max(0.2,Math.min(5,ST.base.labelDens===undefined?1:ST.base.labelDens));
+  const cap=Math.max(0,Math.min(400,ST.base.labelMax===undefined?40:ST.base.labelMax));
+  const k=Math.max(0.02,S.view.k);
+  const minPop=Math.max(3000,Math.min(3e6, 180000*(0.16/k)))/dens;
   const list=(window.LABELS||B.cities||[]).filter(p=>p.p>=minPop);
+  let placed=0;
   for(const ct of list){
+    if(cap&&placed>=cap) break;
     const s2=P(ct.la,ct.lo);
     if(s2[0]<-40||s2[0]>Wp+40||s2[1]<-20||s2[1]>Hp+20) continue;
     const big=ct.p>700000, mid=ct.p>150000;
@@ -927,6 +934,7 @@ function drawLabels(c){
       if(fits(r)){taken.push(r);put=[r.x,r.y+h-4];break;}
     }
     if(!put) continue;
+    placed++;
     c.beginPath();c.arc(s2[0],s2[1],big?2.8:mid?2.1:1.5,0,7);
     c.fillStyle='rgba(255,255,255,.9)';c.fill();
     c.save();c.textAlign='left';shadow(c,'rgba(0,0,0,.95)',7);
@@ -3561,7 +3569,8 @@ function renderStyle(){
     +n('Кордони країн: товщина','base','countryW','type=number step=0.05 min=0.4 max=3')
     +n('Межі областей РФ','base','borders','type=number step=0.05 min=0 max=1')
     +n('Розсип НП','base','places','type=number step=0.05 min=0 max=1')
-    +n('Щільність підписів міст','base','labelDens','type=number step=0.1 min=0.3 max=4')
+    +n('Щільність підписів міст','base','labelDens','type=number step=0.1 min=0.2 max=5')
+    +n('Максимум підписів у кадрі (0 — без межі)','base','labelMax','type=number step=5 min=0 max=400')
     +n('Кордон РФ–Україна: товщина','base','uaruW','type=number step=0.2 min=0 max=8')
     +col('Кордон РФ–Україна: колір','base','uaruCol')
     +'<label style="color:#8fa3b8;margin-top:10px">Маршрути</label>'

@@ -481,6 +481,33 @@ tick(); setInterval(tick,60000);
 </script></body></html>""".replace("__CSS__", CSS).replace("__NAV__", nav("live"))
 
 
+# Редактор карт їде на сайт разом із рештою: інакше показати його комусь
+# можна тільки зі свого ноутбука через localhost. Тека самодостатня —
+# підкладка, шрифт, цілі, підписи й кеш плиток лежать поруч. Плитки важать
+# 16 МБ, але хостинг вантажить лише змінені файли, тож це разова заливка.
+MAPPER_FILES = ("editor.html", "basemap.js", "targets.js", "labels.js",
+                "font.css", "night.js", "README.md")
+
+
+def copy_mapper():
+    src = Path(__file__).resolve().parent / "mapper"
+    if not (src / "editor.html").exists():
+        print("! mapper/editor.html нема — редактор на сайт не поїде")
+        return
+    dst = OUT / "mapper"
+    dst.mkdir(parents=True, exist_ok=True)
+    n = 0
+    for name in MAPPER_FILES:
+        f = src / name
+        if f.exists():
+            shutil.copyfile(f, dst / name)
+            n += 1
+    tiles = src / "tiles"
+    if tiles.is_dir():
+        shutil.copytree(tiles, dst / "tiles", dirs_exist_ok=True)
+    print(f"-> {dst}/editor.html  ({n} файлів + кеш плиток)")
+
+
 def main():
     ap = argparse.ArgumentParser("site")
     ap.add_argument("--days", type=int, default=0, help="скільки останніх днів (0 = всі)")
@@ -525,6 +552,8 @@ def main():
                       open(OUT / name, "w", encoding="utf-8"), ensure_ascii=False)
         else:
             shutil.copyfile(name, OUT / name)
+
+    copy_mapper()
 
     rows = []
     for d in dates:

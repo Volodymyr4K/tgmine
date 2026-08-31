@@ -973,8 +973,8 @@ function objVisible(o){
   return !(k && S.layers[CAT_LAYER[k]]===false);
 }
 // Робота ППО і збиття — один і той самий знак, різниця тільки в кольорі:
-// кільце з чотирма променями. Оператор просив саме так — дві різні форми
-// поруч читались як два різні сорти події, хоча різниця між ними одна.
+// просто кільце. Оператор просив саме так — дві різні форми поруч читались
+// як два різні сорти події, а промені навколо кільця тільки смітили.
 // Влучання лишається спалахом: його ставить людина, і воно справді інше.
 function drawMark(o,c,sel,ST){
   const col=ST.col, glow=ST.glow===undefined?1:ST.glow;
@@ -991,16 +991,8 @@ function drawMark(o,c,sel,ST){
     c.strokeStyle=pass?col:'rgba(4,7,12,.75)';
     const add=pass?0:2;
     c.globalAlpha=pass?1:.55;
-    c.lineWidth=2.2+add;
-    c.beginPath();c.arc(s[0],s[1],r*.62,0,7);c.stroke();
-    c.lineWidth=1.9+add;
-    for(const a of [-135,-45,45,135]){
-      const rad=a*Math.PI/180;
-      c.beginPath();
-      c.moveTo(s[0]+Math.cos(rad)*r*.95,s[1]+Math.sin(rad)*r*.95);
-      c.lineTo(s[0]+Math.cos(rad)*r*1.75,s[1]+Math.sin(rad)*r*1.75);
-      c.stroke();
-    }
+    c.lineWidth=2.4+add;
+    c.beginPath();c.arc(s[0],s[1],r*.95,0,7);c.stroke();
   }
   c.restore();
   markLabel(o,c,s,col,r,sel);
@@ -1275,16 +1267,8 @@ function drawLegend(c,w,h){
     // Значок у легенді — той самий, що на карті: кільце з променями,
     // різниця тільки в кольорі.
     const markIcon=col=>(c,x,y)=>{
-      c.save();c.strokeStyle=col;c.lineCap='round';c.lineWidth=1.8;
-      c.beginPath();c.arc(x+16,y,5,0,7);c.stroke();
-      c.lineWidth=1.5;
-      for(const a of [-135,-45,45,135]){
-        const rad=a*Math.PI/180;
-        c.beginPath();
-        c.moveTo(x+16+Math.cos(rad)*7.5,y+Math.sin(rad)*7.5);
-        c.lineTo(x+16+Math.cos(rad)*12,y+Math.sin(rad)*12);c.stroke();
-      }
-      c.restore();
+      c.save();c.strokeStyle=col;c.lineCap='round';c.lineWidth=2;
+      c.beginPath();c.arc(x+16,y,7,0,7);c.stroke();c.restore();
     };
     if(shown('ppo'))
       rows.push({name:LZ.ppoName||'Робота ППО',

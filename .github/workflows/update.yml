@@ -167,12 +167,18 @@ jobs:
       # Окремий save з `always()` розриває звʼязок: карти зберігаються одразу
       # після збірки сайту, ще до кроку публікації, тож поломка публікації
       # більше не робить наступні прогони холодними.
+      # Разом із картами кешуються дані ночей для редактора
+      # (site/mapper/nights). Без цього кожен прогін не знаходив би їх на
+      # диску й перебудовував усі 131 ніч — це вісім хвилин замість вісімнадцяти
+      # секунд, тобто вихід за безкоштовні хвилини за кілька діб.
       - name: Кеш карт нальотів (відновити)
         uses: actions/cache/restore@v4
         with:
-          path: site/raids
-          key: raids-v3-${{ steps.cachekey.outputs.day }}
-          restore-keys: raids-v3-
+          path: |
+            site/raids
+            site/mapper/nights
+          key: raids-v4-${{ steps.cachekey.outputs.day }}
+          restore-keys: raids-v4-
 
       # Без --days: денні сторінки за всі 93 доби коштують 6 секунд, тобто
       # обрізання архіву економило час не там, де він витрачався. --raid-days 2
@@ -188,8 +194,10 @@ jobs:
         continue-on-error: true
         uses: actions/cache/save@v4
         with:
-          path: site/raids
-          key: raids-v3-${{ steps.cachekey.outputs.day }}
+          path: |
+            site/raids
+            site/mapper/nights
+          key: raids-v4-${{ steps.cachekey.outputs.day }}
 
       - name: Кеш ранжування цілей (зберегти)
         if: always() && hashFiles('.rank/**') != ''

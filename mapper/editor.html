@@ -186,7 +186,9 @@ button.primary{background:rgba(255,62,165,.16);border-color:rgba(255,62,165,.45)
       Клік ставить ціль на карту; вузли маршруту до неї прилипають.</div>
 
     <h2>Підказки з даних</h2>
-    <button id="ghost">Показати маршрути ночі</button>
+    <label>Ніч</label>
+    <select id="nightSel"><option value="">(єдина ніч із night.js)</option></select>
+    <button id="ghost" style="margin-top:6px">Показати маршрути ночі</button>
     <label style="margin-top:6px">Які підказки показувати</label>
     <select id="ghostMin">
       <option value="1">усі, зокрема слабкі</option>
@@ -3174,25 +3176,70 @@ function putStrikes(){
   // Підзаголовок сам стає датою ночі, якщо оператор його ще не міняв:
   // інакше на карті лишається чужа дата з попередньої карти, і це помітно
   // лише після експорту.
-  const D=N.date&&new Date(N.date+'T00:00:00');
-  if(D&&(!S.sub||/^\d/.test(S.sub))){
-    const M=['січня','лютого','березня','квітня','травня','червня','липня',
-             'серпня','вересня','жовтня','листопада','грудня'];
-    S.sub=`ніч на ${D.getDate()+1} ${M[D.getMonth()]} ${D.getFullYear()}`;
-    document.getElementById('mSub').value=S.sub;
+  // Ніч підписується наступною добою, і рахувати це треба датою, а не
+  // «число+1»: 31 серпня давало «ніч на 32 серпня». І оновлювати підпис
+  // треба також тоді, коли там стоїть попередня наша ж дата — інакше при
+  // перемиканні ночей на карті лишається чужа.
+  if(N.date){
+    const D=new Date(N.date+'T00:00:00');
+    D.setDate(D.getDate()+1);
+    const mine=/^ніч на /.test(S.sub||'');
+    if(!S.sub||mine||/^\d/.test(S.sub)){
+      const M=['січня','лютого','березня','квітня','травня','червня','липня',
+               'серпня','вересня','жовтня','листопада','грудня'];
+      S.sub=`ніч на ${D.getDate()} ${M[D.getMonth()]} ${D.getFullYear()}`;
+      document.getElementById('mSub').value=S.sub;
+    }
   }
   refresh();
   console.log(replaced?`шар ночі оновлено: ${replaced} -> ${list.length}`
                      :`покладено ${list.length} позначок`);
 }
+// Ночей у сховищі більше сотні, а редактор бачив рівно одну — ту, що лежала
+// в night.js. Тепер збірка сайту кладе кожну ніч окремим файлом у nights/,
+// а тут лишається випадайка. Локально (без nights/index.json) усе працює
+// як раніше: єдина ніч із night.js.
+function nightSrc(){
+  const sel=document.getElementById('nightSel');
+  const d=sel&&sel.value;
+  return d?('nights/'+d+'.js'):'night.js';
+}
 function loadNight(cb){
-  if(window.NIGHT) return cb(true);
+  const want=nightSrc();
+  if(window.NIGHT&&window.NIGHT.__src===want) return cb(true);
+  window.NIGHT=null;
   const sc=document.createElement('script');
-  sc.src='night.js?'+Date.now();
-  sc.onload=()=>cb(!!window.NIGHT);
+  sc.src=want+'?'+Date.now();
+  sc.onload=()=>{ if(window.NIGHT) window.NIGHT.__src=want; cb(!!window.NIGHT); };
   sc.onerror=()=>cb(false);
   document.head.appendChild(sc);
 }
+// Список ночей: дата, скільки підказок і скільки позначок. Числа в рядку
+// потрібні — інакше вибір дати це лотерея, і оператор клацає по порожніх
+// ночах, поки не натрапить на щось.
+(async()=>{
+  const sel=document.getElementById('nightSel');
+  try{
+    const r=await fetch('nights/index.json',{cache:'no-store'});
+    if(!r.ok) throw 0;
+    const list=await r.json();
+    if(!list.length) throw 0;
+    sel.innerHTML=list.map(n=>
+      `<option value="${n.date}">${n.date} — підказок ${n.routes}, позначок ${n.strikes}</option>`
+    ).join('');
+    sel.onchange=()=>{
+      const hadGhosts=S.ghosts.length, hadMarks=S.objs.some(o=>
+        String(o.origin||'').startsWith('night:'));
+      loadNight(ok=>{
+        if(!ok){toast('ніч не завантажилась');return;}
+        toast('ніч '+sel.value);
+        if(hadMarks) putStrikes();
+        if(hadGhosts) document.getElementById('ghost').click();
+        else draw();
+      });
+    };
+  }catch(e){ /* локальна тека без nights/ — лишається night.js */ }
+})();
 document.getElementById('strikes').onclick=()=>{
   if(!window.NIGHT){loadNight(ok=>ok?putStrikes():alert(
     'Підказок нема. Зроби їх так:\npython3 raid.py <дата>\n'+

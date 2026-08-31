@@ -489,6 +489,30 @@ MAPPER_FILES = ("editor.html", "basemap.js", "targets.js", "labels.js",
                 "font.css", "night.js", "README.md")
 
 
+def night_index(nights: Path):
+    """Список ночей для випадайки в редакторі.
+
+    Читаю саме файли на диску, а не рядки звіту: у кеші хостингу лежить те,
+    що справді зібралось, і список має збігатися з ним, інакше оператор
+    вибирає дату, якої нема.
+    """
+    out = []
+    for f in sorted(nights.glob("*.js")):
+        try:
+            t = f.read_text(encoding="utf-8")
+            d = json.loads(t[t.index("=") + 1:].rstrip().rstrip(";"))
+        except Exception:
+            continue
+        out.append({"date": d.get("date") or f.stem,
+                    "routes": len(d.get("routes") or []),
+                    "strikes": len(d.get("strikes") or [])})
+    out.sort(key=lambda r: r["date"], reverse=True)
+    (nights / "index.json").write_text(
+        json.dumps(out, ensure_ascii=False, separators=(",", ":")),
+        encoding="utf-8")
+    print(f"-> {nights}/index.json  ({len(out)} ночей)")
+
+
 def copy_mapper():
     src = Path(__file__).resolve().parent / "mapper"
     if not (src / "editor.html").exists():
@@ -571,11 +595,18 @@ def main():
         # вчорашньої ночі о 03:00 неповна. Старі — тільки якщо файлу нема.
         rebuild = {r["date"] for r in rows[-a.raid_days:]} if a.raid_days else None
         built = {p.stem for p in (OUT / "raids").glob("*.html")}
+        # Дані ночі для редактора роблю тим самим прогоном: raid_<дата>.json
+        # уже на диску, а mknight з нього дає підказки й позначки. Ніч без
+        # свого файла — це ніч, якої оператор не побачить у списку дат.
+        nights = OUT / "mapper" / "nights"
+        nights.mkdir(parents=True, exist_ok=True)
+        have_night = {p.stem for p in nights.glob("*.js")}
         for r in rows:
             if r["points"] < 40:          # тихі ночі не варті окремої сторінки
                 continue
             d = r["date"]
-            if rebuild is not None and d not in rebuild and d in built:
+            fresh = rebuild is not None and d in rebuild
+            if not fresh and d in built and d in have_night:
                 continue
             try:
                 subprocess.run([sys.executable, "raid.py", d], check=True,
@@ -583,10 +614,17 @@ def main():
                 subprocess.run([sys.executable, "makeraid.py", f"raid_{d}.json"],
                                check=True, capture_output=True, timeout=900)
                 shutil.move(f"raid_{d}.html", OUT / "raids" / f"{d}.html")
+                try:
+                    subprocess.run([sys.executable, "mapper/mknight.py",
+                                    f"raid_{d}.json", str(nights / f"{d}.js")],
+                                   check=True, capture_output=True, timeout=900)
+                except Exception as e:
+                    print(f"  ! ніч для редактора {d}: {e}")
                 Path(f"raid_{d}.json").unlink(missing_ok=True)
                 print(f"  наліт {d} ok")
             except Exception as e:
                 print(f"  ! наліт {d}: {e}")
+        night_index(nights)
 
     have = {p.stem for p in (OUT / "raids").glob("*.html")}
 

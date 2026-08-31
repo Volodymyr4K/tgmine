@@ -27,6 +27,17 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
 /* Панель ховається на будь-якій ширині, а не лише у вузькому вікні: на
    ноутбуці 1280 вона забирає чверть екрана, а карту часто треба бачити
    цілою — надто перед експортом. */
+/* Чиста карта: жодного інтерфейсу, тільки полотно. Потрібне, щоб глянути
+   на роботу так, як її побачить читач, і щоб зняти кадр без панелей. */
+#app.clean{grid-template-columns:1fr}
+#app.clean #tools,#app.clean #side,#app.clean #hud,
+#app.clean #hint2,#app.clean #quick{display:none}
+#exitClean{display:none;position:absolute;right:12px;top:12px;z-index:130;
+  width:auto;background:rgba(6,10,16,.8);border:1px solid var(--line);
+  border-radius:8px;padding:5px 10px;font-size:11.5px;color:var(--dim);
+  opacity:.25;transition:opacity .15s}
+#app.clean #exitClean{display:block}
+#exitClean:hover{opacity:1;color:var(--ink)}
 #app.hidepanel{grid-template-columns:64px 1fr}
 #app.hidepanel #side{display:none}
 @media (max-width:1100px){#app.hidepanel{grid-template-columns:56px 1fr}}
@@ -172,6 +183,7 @@ button.primary{background:rgba(255,62,165,.16);border-color:rgba(255,62,165,.45)
       <button class="hudb" id="zAll" title="Показати все намальоване (F)">усе</button>
       <span class="sep"></span><span id="cursor">—</span>
       <span class="sep"></span><span id="saved" title="Робота зберігається в цьому браузері">—</span>
+      <button class="hudb" id="cleanBtn" title="Тільки карта, без панелей (\\)">⛶</button>
       <button class="hudb" id="helpBtn" title="Клавіші та підказки (?)">?</button>
     </div>
     <div id="hint2"></div>
@@ -179,6 +191,7 @@ button.primary{background:rgba(255,62,165,.16);border-color:rgba(255,62,165,.45)
     <div id="menu"></div>
     <div id="quick"></div>
     <div id="help"><div class="box"></div></div>
+    <button id="exitClean" title="Повернути панелі (Esc або \\)">панелі · Esc</button>
   </div>
 
   <div id="side">
@@ -548,6 +561,7 @@ const S={
           legend:true,header:true,scale:true},
   objs:[], sel:null, selMore:[], draft:null, ghosts:[], redo:[], marquee:null, clip:null,
   hover:null,                   // обʼєкт під курсором у списку — підсвічуємо на карті
+  clean:false,                  // чиста карта: інтерфейс схований
   // k:0 означає «кадр ще не вписано». Це не косметика: якщо fit() на старті
   // не спрацював (полотно ще без розміру — фонова вкладка, панель без
   // розкладки), то з виглядом {0,0,1} карта показувала світ у точці (0,0),
@@ -1903,7 +1917,9 @@ function draw(){
     drawCredit(ctx,f.w,f.h);       // ліцензія CC BY: вимкнути не можна
     ctx.restore();
   }
-  drawFrame(ctx,Wp,Hp);
+  // Рамка експорту — теж інтерфейс: у чистому вигляді її не показуємо,
+  // інакше «тільки карта» лишається з рожевим прямокутником поперек.
+  if(!S.clean) drawFrame(ctx,Wp,Hp);
   renderQuick();          // віконце їде за обʼєктом при панорамі й масштабі
 }
 
@@ -2576,6 +2592,8 @@ addEventListener('keydown',e=>{
     // F — показати вибране, а якщо нічого не вибрано, то всю роботу
     const sel=[S.sel,...S.selMore].filter(Boolean);
     zoomTo(sel.length?sel:S.objs.filter(objVisible)); return;}
+  if(e.key==='\\'){e.preventDefault();cleanMode();return;}
+  if(e.key==='Escape'&&S.clean){cleanMode(false);return;}
   if(e.key==='Tab'){e.preventDefault();
     document.getElementById('panelToggle').click();return;}
   if(e.key==='+'||e.key==='='){zoomBy(1.35);return;}
@@ -3993,12 +4011,25 @@ function wireZones(){
     delete all[sel.value]; zlibWrite(all); renderZoneLib();
   };
 }
+// Чиста карта. Ховає все, лишає полотно на всю ширину; повертає Esc,
+// зворотний слеш або кнопка в кутку, яка проступає під курсором.
+function cleanMode(on){
+  const app=document.getElementById('app');
+  if(on===undefined) on=!app.classList.contains('clean');
+  app.classList.toggle('clean',on);
+  S.clean=on;
+  if(on){ S.sel=null; S.selMore=[]; }
+  setTimeout(()=>{resize();draw();},30);
+  if(on) toast('чиста карта — Esc повертає панелі');
+}
 function wireHud(){
   const on=(id,fn)=>{const el=document.getElementById(id); if(el) el.onclick=fn;};
   on('zIn',()=>zoomBy(1.35));
   on('zOut',()=>zoomBy(1/1.35));
   on('zAll',()=>zoomTo(S.objs.filter(objVisible)));
   on('helpBtn',()=>toggleHelp(true));
+  on('cleanBtn',()=>cleanMode(true));
+  on('exitClean',()=>cleanMode(false));
   const h=document.getElementById('help');
   if(h) h.onclick=e=>{ if(e.target===h) toggleHelp(false); };
   savedTick();

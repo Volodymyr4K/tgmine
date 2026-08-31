@@ -419,7 +419,9 @@ const S={
           marks:{on:true,title:'Зони та позначення',cols:1,width:300,
                  launchName:'Пускові локації',impactName:'Влучання',
                  ppoName:'Робота ППО',downedName:'Збиття',opacity:.9}},
-  brand:{name:'tgmine',handle:'',logo:true},
+  // Шапка — це чужа картка на чужій карті: назва, рядок під нею, заголовок,
+  // дата й знак. Усе це має бути власним, зокрема знак картинкою.
+  brand:{name:'tgmine',handle:'',logo:true,logoImg:'',logoSize:36},
   footer:{left:'',right:''},
   watermark:{on:false,text:'',opacity:.06,step:420},
   // Кожен елемент карти вимикається окремо. Що саме потрібне — вирішує
@@ -1488,6 +1490,19 @@ function drawCredit(c,w,h){
              'нічні вогні: NASA VIIRS Black Marble',w-16,h-14);
   c.restore();
 }
+// Знак видання картинкою. Тримаємо один завантажений Image на адресу: у
+// шапку він малюється щокадру, а створювати Image на кожен кадр означає
+// блимання й купу сміття для збирача.
+let LOGO=null, LOGO_SRC='';
+function logoReady(){
+  const src=(S.brand&&S.brand.logoImg)||'';
+  if(!src){LOGO=null;LOGO_SRC='';return null;}
+  if(LOGO_SRC===src) return (LOGO&&LOGO.complete&&LOGO.naturalWidth)?LOGO:null;
+  LOGO_SRC=src; LOGO=new Image();
+  LOGO.onload=()=>draw();
+  LOGO.src=src;
+  return null;
+}
 function drawHeader(c,w){
   const B=S.brand, t=S.title||'', sb=S.sub||'';
   if(!t&&!sb&&!B.name) return;
@@ -1498,18 +1513,26 @@ function drawHeader(c,w){
   const titleW=c.measureText(t).width;
   c.font='400 12.5px "MapSans",ui-sans-serif,-apple-system,Arial';
   const subW=Math.max(c.measureText(sb).width, c.measureText(B.handle||'').width);
-  const wd=Math.max(240, Math.max(nameW,titleW,subW)+(B.logo?96:36));
-  const hd=B.name&&t?96:74;
+  const img=logoReady();
+  const ls=Math.max(16, Math.min(96, B.logoSize||36));
+  const hasLogo=!!(img||B.logo);
+  const wd=Math.max(240, Math.max(nameW,titleW,subW)+(hasLogo?ls+60:36));
+  const hd=Math.max(B.name&&t?96:74, ls+28);
   c.beginPath();c.roundRect(20,20,wd,hd,8);
   c.fillStyle='rgba(7,11,18,.9)';c.fill();
   c.strokeStyle='rgba(120,150,180,.28)';c.lineWidth=1;c.stroke();
-  const tx=B.logo?80:36;
-  if(B.logo){
-    // Знак видання. У зразку він теж кружком ліворуч — місце під нього
-    // лишається навіть якщо оператор вимкне: інакше блок «стрибає».
-    c.beginPath();c.arc(52,20+hd/2,18,0,7);c.strokeStyle='rgba(255,62,165,.5)';
+  const tx=hasLogo?(36+ls+20):36;
+  if(img){
+    // Свій знак: вписуємо в квадрат ls×ls, пропорції не ламаємо.
+    const k=Math.min(ls/img.naturalWidth, ls/img.naturalHeight);
+    const iw=img.naturalWidth*k, ih=img.naturalHeight*k;
+    c.drawImage(img, 36+(ls-iw)/2, 20+(hd-ih)/2, iw, ih);
+  }else if(B.logo){
+    // Знак за замовчуванням — кружок, як у зразку.
+    c.beginPath();c.arc(36+ls/2,20+hd/2,ls/2,0,7);c.strokeStyle='rgba(255,62,165,.5)';
     c.lineWidth=1.6;c.stroke();
-    c.beginPath();c.arc(52,20+hd/2,6.5,0,7);c.fillStyle='rgba(255,62,165,.85)';c.fill();
+    c.beginPath();c.arc(36+ls/2,20+hd/2,ls*0.18,0,7);
+    c.fillStyle='rgba(255,62,165,.85)';c.fill();
   }
   c.textAlign='left';
   let y=20+(B.name?30:34);
@@ -3024,7 +3047,17 @@ document.getElementById('chromeEdit').onclick=()=>{
     +`<input id="bN" value="${B.name||''}">`
     +'<label>Другий рядок (канал, посилання)</label>'
     +`<input id="bH" value="${B.handle||''}">`
-    +`<button id="bL" style="margin-top:6px">${B.logo?'без знака':'зі знаком'}</button>`
+    +'<label style="margin-top:10px">Заголовок карти</label>'
+    +`<input id="bT" value="${(S.title||'').replace(/"/g,'&quot;')}">`
+    +'<label>Рядок під заголовком (дата)</label>'
+    +`<input id="bS" value="${(S.sub||'').replace(/"/g,'&quot;')}">`
+    +'<label style="margin-top:10px">Знак</label>'
+    +'<div class="row">'
+    +`<button id="bImg">${B.logoImg?'замінити картинку':'своя картинка…'}</button>`
+    +`<button id="bL">${B.logo?'без знака':'кружок'}</button></div>`
+    +(B.logoImg?'<button id="bImgDel" style="margin-top:6px">прибрати картинку</button>':'')
+    +`<label style="margin-top:6px">Розмір знака, px</label>`
+    +`<input id="bLS" type="number" min="16" max="96" value="${B.logoSize||36}">`
     +'<label style="margin-top:10px">Підвал ліворуч</label>'
     +`<input id="fL" value="${F.left||''}">`
     +'<label>Підвал праворуч</label>'
@@ -3043,6 +3076,44 @@ document.getElementById('chromeEdit').onclick=()=>{
   bind('lzT',v=>L.marks.title=v);  bind('lzC',v=>L.marks.cols=Math.max(1,+v||1));
   bind('lzL',v=>L.marks.launchName=v); bind('lzI',v=>L.marks.impactName=v);
   bind('bN',v=>B.name=v); bind('bH',v=>B.handle=v);
+  bind('bLS',v=>B.logoSize=Math.max(16,Math.min(96,+v||36)));
+  // Заголовок і дата редагуються і тут, і вгорі панелі — це те саме поле.
+  bind('bT',v=>{S.title=v;document.getElementById('mTitle').value=v;});
+  bind('bS',v=>{S.sub=v;document.getElementById('mSub').value=v;});
+  // Свій знак: картинка стискається до 256 px по довшому боку й лягає в
+  // карту як data:URL. Без стиснення знак у 4 МБ роздуває і автозбереження
+  // (localStorage має ліміт), і сам файл карти.
+  const pick=document.getElementById('bImg');
+  if(pick) pick.onclick=()=>{
+    const inp=document.createElement('input');
+    inp.type='file'; inp.accept='image/*';
+    inp.onchange=()=>{
+      const f=inp.files&&inp.files[0]; if(!f) return;
+      const rd=new FileReader();
+      rd.onload=()=>{
+        const im=new Image();
+        im.onload=()=>{
+          const k=Math.min(1, 256/Math.max(im.naturalWidth,im.naturalHeight));
+          const cw=Math.max(1,Math.round(im.naturalWidth*k));
+          const ch=Math.max(1,Math.round(im.naturalHeight*k));
+          const cc=document.createElement('canvas');
+          cc.width=cw; cc.height=ch;
+          cc.getContext('2d').drawImage(im,0,0,cw,ch);
+          B.logoImg=cc.toDataURL('image/png');
+          touch();draw();
+          toast(`знак ${cw}×${ch}, ${Math.round(B.logoImg.length/1024)} КБ`);
+          document.getElementById('chromeEdit').click();
+        };
+        im.onerror=()=>toast('це не картинка');
+        im.src=rd.result;
+      };
+      rd.readAsDataURL(f);
+    };
+    inp.click();
+  };
+  const del=document.getElementById('bImgDel');
+  if(del) del.onclick=()=>{B.logoImg='';touch();draw();
+    document.getElementById('chromeEdit').click();};
   bind('fL',v=>F.left=v); bind('fR',v=>F.right=v);
   bind('wT',v=>W.text=v); bind('wO',v=>W.opacity=+v||0.06);
   bind('wS',v=>W.step=+v||420);

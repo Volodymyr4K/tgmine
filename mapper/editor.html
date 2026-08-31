@@ -211,6 +211,10 @@ button.primary{background:rgba(255,62,165,.16);border-color:rgba(255,62,165,.45)
       <h2>Чим малювати<span class="cnt" id="typesCnt"></span></h2>
       <div class="body">
         <div class="types" id="types"></div>
+        <button id="addImg" style="margin-top:8px"
+          title="Фото, схема, знак — лягає на карту як обʼєкт; можна просто перетягнути файл у вікно">Своє зображення…</button>
+        <div class="hint">Картинку можна перетягнути прямо на карту — вона
+          ляже туди, куди кинув.</div>
       </div>
     </section>
 
@@ -1354,6 +1358,60 @@ function renderQuick(){
     if(act==='del'){delSel();return;}
   });
 }
+// Своє зображення на карті: фото, схема, знак підрозділу, будь-що. Тримаємо
+// один Image на адресу — обʼєкт малюється щокадру, а створювати Image на
+// кожен кадр означає блимання й сміття для збирача.
+const IMGS=new Map();
+function imgFor(src){
+  if(!src) return null;
+  let im=IMGS.get(src);
+  if(!im){
+    im=new Image();
+    im.onload=()=>draw();
+    im.src=src;
+    IMGS.set(src,im);
+  }
+  return (im.complete&&im.naturalWidth)?im:null;
+}
+function imgBox(o){
+  // Розмір задається шириною в пікселях полотна: фото на карті поводиться
+  // як наліпка, а не як шар підкладки — при масштабуванні воно лишається
+  // читабельним, а не перетворюється на пляму.
+  const im=imgFor(o.src);
+  const w=o.w||160;
+  const ratio=im?(im.naturalHeight/im.naturalWidth):0.66;
+  const h=w*ratio;
+  const s=P(o.la,o.lo);
+  return {x:s[0]-w/2, y:s[1]-h/2, w, h, cx:s[0], cy:s[1], im};
+}
+function drawImageObj(o,c,sel){
+  const b=imgBox(o);
+  c.save();
+  c.globalAlpha=(o.alpha===undefined?1:o.alpha);
+  if(o.rot){ c.translate(b.cx,b.cy); c.rotate(o.rot*Math.PI/180); c.translate(-b.cx,-b.cy); }
+  if(b.im){
+    c.drawImage(b.im,b.x,b.y,b.w,b.h);
+  }else{
+    // Поки картинка вантажиться — рамка на її місці, щоб обʼєкт не «зникав».
+    c.setLineDash([4,4]);c.strokeStyle='rgba(160,185,210,.6)';c.lineWidth=1;
+    c.strokeRect(b.x,b.y,b.w,b.h);c.setLineDash([]);
+  }
+  if(o.frame){
+    c.globalAlpha=1;
+    c.strokeStyle=o.frameCol||'#dbe8f6';c.lineWidth=o.frameW||2;
+    c.strokeRect(b.x,b.y,b.w,b.h);
+  }
+  c.restore();
+  if(o.label){
+    c.save();c.font='600 12px "MapSans",ui-sans-serif,-apple-system,Arial';
+    c.textAlign='center';c.fillStyle='#dbe8f6';shadow(c,'rgba(0,0,0,.9)',6);
+    c.fillText(o.label,b.cx,b.y+b.h+14);c.restore();
+  }
+  if(sel){
+    c.save();c.setLineDash([3,3]);c.strokeStyle='#fff';c.lineWidth=1;
+    c.strokeRect(b.x-3,b.y-3,b.w+6,b.h+6);c.restore();
+  }
+}
 function drawImpact(o,c,sel){
   const k=catOf(o);
   if(k==='ppo') return drawMark(o,c,sel,S.style.ppo||{col:'#6fe3ff'});
@@ -1493,6 +1551,7 @@ function drawTarget(o,c,sel){
     c.setLineDash([3,3]);c.lineWidth=1;c.stroke();c.setLineDash([]);}
 }
 function drawObj(o,c,sel){
+  if(o.kind==='image') return drawImageObj(o,c,sel);
   if(o.kind==='arrow') return drawArrow(o,c,sel);
   if(o.kind==='zone') return drawZone(o,c,sel);
   if(o.kind==='target') return drawTarget(o,c,sel);
@@ -2242,6 +2301,9 @@ function hit(sx,sy){
            sx<(A[j][0]-A[i][0])*(sy-A[i][1])/((A[j][1]-A[i][1])||1e-9)+A[i][0])
           inside=!inside;
       if(inside) return {o,vertex:-1};
+    }else if(o.kind==='image'){
+      const b=imgBox(o);
+      if(sx>=b.x&&sx<=b.x+b.w&&sy>=b.y&&sy<=b.y+b.h) return {o,vertex:-1};
     }else{
       const s=P(o.la,o.lo);
       const pl=o.__plate;
@@ -2568,7 +2630,14 @@ stage.addEventListener('dragover',e=>{e.preventDefault();});
 stage.addEventListener('drop',e=>{
   e.preventDefault();
   const f=e.dataTransfer.files[0];
-  if(!f||!/\.json$/i.test(f.name)){toast('очікується файл карти .json');return;}
+  // Картинку кладемо туди, куди кинули: це найкоротший шлях «фото на карту».
+  if(f&&/^image\//.test(f.type||'')){
+    const r=cv.getBoundingClientRect();
+    const [la,lo]=baseLL(...unscr(e.clientX-r.left, e.clientY-r.top));
+    addImageFile(f,la,lo);
+    return;
+  }
+  if(!f||!/\.json$/i.test(f.name)){toast('очікується файл карти .json або картинка');return;}
   const rd=new FileReader();
   rd.onload=()=>{
     try{
@@ -2845,6 +2914,17 @@ function refresh(){
       +`<button data-act="pin" style="margin-top:6px">${
          o.pinLabel?'Ховати підпис, поки не вибрано':'Показувати підпис завжди'}</button>`
       +'<button data-act="lab" style="margin-top:6px">Скинути положення підпису</button>';
+  }else if(o.kind==='image'){
+    p.innerHTML=field('Підпис під картинкою',o.label||'','label')
+      +field('Ширина, px',o.w||180,'w','type=number min=24 max=1200')
+      +field('Прозорість 0..1',o.alpha===undefined?1:o.alpha,'alpha',
+             'type=number step=0.05 min=0.05 max=1')
+      +field('Поворот, °',o.rot||0,'rot','type=number step=5 min=-180 max=180')
+      +'<div class="row" style="margin-top:6px">'
+      +`<button data-act="imgFrame">${o.frame?'без рамки':'з рамкою'}</button>`
+      +'<button data-act="imgSwap">Замінити картинку</button></div>'
+      +'<div class="hint">Розмір у пікселях полотна: на будь-якому масштабі '
+      +'картинка лишається такою самою, як наліпка.</div>';
   }else if(o.kind==='zone'){
     p.innerHTML='<label>Тип зони</label><select data-k="zone">'
       +ZONES.map(z=>`<option value="${z.id}" ${z.id===o.zone?'selected':''}>${z.name}</option>`).join('')
@@ -2873,6 +2953,22 @@ function refresh(){
   }
   const pin=p.querySelector('[data-act="pin"]');
   if(pin) pin.onclick=()=>{snapshot();S.sel.pinLabel=!S.sel.pinLabel;refresh();};
+  const imgFrame=p.querySelector('[data-act="imgFrame"]');
+  if(imgFrame) imgFrame.onclick=()=>{snapshot();S.sel.frame=!S.sel.frame;refresh();};
+  const imgSwap=p.querySelector('[data-act="imgSwap"]');
+  if(imgSwap) imgSwap.onclick=()=>{
+    const o=S.sel;
+    const inp=document.createElement('input');
+    inp.type='file'; inp.accept='image/*';
+    inp.onchange=()=>{
+      const f=inp.files&&inp.files[0];
+      if(!f) return;
+      const rd=new FileReader();
+      rd.onload=()=>{snapshot();o.src=rd.result;touch();draw();refresh();};
+      rd.readAsDataURL(f);
+    };
+    inp.click();
+  };
   const cut=p.querySelector('[data-act="cut"]');
   if(cut) cut.onclick=()=>{snapshot();
     S.sel.cut=(S.sel.cut===false)?true:false;refresh();};
@@ -2922,8 +3018,8 @@ function refresh(){
     // У списку теж має бути видно категорію: сімнадцять рядків «влучання»
     // там, де насправді одинадцять разів працювала ППО, — та сама каша.
     const name=o.kind==='impact' ? CAT_NAME[catOf(o)]
-      : {route:'маршрут',launch:'пускова',text:'підпис',
-         zone:'зона',target:'ціль',arrow:'стрілка'}[o.kind];
+      : {route:'маршрут',launch:'пускова',text:'підпис',zone:'зона',
+         target:'ціль',arrow:'стрілка',image:'зображення'}[o.kind];
     const extra=o.kind==='route'?`${o.pts.length} вузлів${o.count>1?' · пучок '+o.count:''}`
       :(o.label||o.text||'');
     const on=o===S.sel||S.selMore.includes(o);
@@ -3978,6 +4074,51 @@ function renderZoneLib(){
         (all[n].pts||[]).length} вузлів</option>`).join('')
     : '<option value="">(порожньо)</option>';
 }
+// Своє зображення на карті. Файл стискається до 900 px по довшому боку:
+// фото з телефона на 4 МБ роздуло б і автозбереження (localStorage має
+// ліміт), і сам файл карти, а на карті воно все одно завширшки з долоню.
+function addImageFile(f, la, lo){
+  if(!f||!/^image\//.test(f.type||'')){toast('це не картинка');return;}
+  const rd=new FileReader();
+  rd.onload=()=>{
+    const im=new Image();
+    im.onload=()=>{
+      const k=Math.min(1, 900/Math.max(im.naturalWidth,im.naturalHeight));
+      const cw=Math.max(1,Math.round(im.naturalWidth*k));
+      const ch=Math.max(1,Math.round(im.naturalHeight*k));
+      const cc=document.createElement('canvas');
+      cc.width=cw;cc.height=ch;
+      cc.getContext('2d').drawImage(im,0,0,cw,ch);
+      const src=cc.toDataURL(/png$/i.test(f.type)?'image/png':'image/jpeg',0.86);
+      snapshot();
+      const o={kind:'image',src,la,lo,w:180,alpha:1,rot:0,label:''};
+      S.objs.push(o);S.sel=o;S.selMore=[];
+      refresh();
+      toast(`зображення ${cw}×${ch}, ${Math.round(src.length/1024)} КБ`);
+    };
+    im.onerror=()=>toast('картинка не читається');
+    im.src=rd.result;
+  };
+  rd.readAsDataURL(f);
+}
+function pickImage(la,lo){
+  const inp=document.createElement('input');
+  inp.type='file'; inp.accept='image/*';
+  inp.onchange=()=>{
+    const f=inp.files&&inp.files[0];
+    if(f) addImageFile(f, la, lo);
+  };
+  inp.click();
+}
+function wireImages(){
+  const b=document.getElementById('addImg');
+  if(!b) return;
+  b.onclick=()=>{
+    // без вказаної точки кладемо в центр кадру
+    const c=baseLL(...unscr(Wp/2,Hp/2));
+    pickImage(c[0],c[1]);
+  };
+}
 function wireZones(){
   const ua=document.getElementById('zoneUA');
   if(!ua) return;
@@ -4044,6 +4185,7 @@ wireHud();
 wireClear();
 wireSlots();
 wireZones();
+wireImages();
 renderChrome();
 renderStyle();
 refresh();

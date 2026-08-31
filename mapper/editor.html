@@ -103,6 +103,21 @@ button.primary{background:rgba(255,62,165,.16);border-color:rgba(255,62,165,.45)
   padding:0;display:inline-block}
 #quick .dot.on{outline:2px solid #fff;outline-offset:1px}
 #quick .sep{width:1px;height:16px;background:var(--line);margin:0 2px}
+/* Панель була однією довгою стрічкою: щоб дійти до шапки чи стилю, треба
+   було прокрутити повз усе інше, а частина налаштувань узагалі ховалась за
+   кнопкою, яка підміняла собою властивості вибраного. Тепер це згортки:
+   відкрито лише те, з чим працюєш. */
+.sec{border-top:1px solid var(--line);padding:2px 0 10px}
+.sec:first-child{border-top:0}
+.sec>h2{display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;
+  margin:12px 0 6px;padding:2px 0}
+.sec>h2:hover{color:var(--ink)}
+.sec>h2::before{content:'▸';font-size:10px;opacity:.7;transition:transform .12s;
+  display:inline-block}
+.sec.open>h2::before{transform:rotate(90deg)}
+.sec>h2 .cnt{margin-left:auto;font-size:10px;color:#5f7386;letter-spacing:0}
+.sec>.body{display:none}
+.sec.open>.body{display:block}
 </style></head><body>
 <div id="app">
   <div id="tools">
@@ -132,72 +147,103 @@ button.primary{background:rgba(255,62,165,.16);border-color:rgba(255,62,165,.45)
   </div>
 
   <div id="side">
-    <h2>Карта</h2>
-    <label>Заголовок</label><input id="mTitle" value="Нічний наліт">
-    <label>Підзаголовок</label><input id="mSub" value="1 серпня 2026">
-    <div class="row" style="margin-top:8px">
-      <button id="fit">Вписати кадр</button>
-      <button id="export" class="primary">Експорт PNG</button>
-      <button id="exportSvg">Експорт SVG</button>
-    </div>
-    <div class="row" style="margin-top:6px">
-      <button id="save">Зберегти</button>
-      <button id="load">Відкрити</button>
-    </div>
+    <section class="sec open" data-sec="props">
+      <h2 id="propsTitle">Вибране<span class="cnt" id="propsCnt"></span></h2>
+      <div class="body">
+        <div id="props"><div class="hint">Нічого не вибрано.</div></div>
+        <h2 style="font-size:10px;margin:12px 0 4px">Обʼєкти на карті</h2>
+        <div id="list"></div>
+      </div>
+    </section>
 
-    <h2>Засіб</h2>
-    <div class="types" id="types"></div>
+    <section class="sec open" data-sec="draw">
+      <h2>Чим малювати<span class="cnt" id="typesCnt"></span></h2>
+      <div class="body">
+        <div class="types" id="types"></div>
+      </div>
+    </section>
 
-    <h2 id="propsTitle">Властивості</h2>
-    <div id="props"><div class="hint">Нічого не вибрано.</div></div>
+    <section class="sec open" data-sec="night">
+      <h2>Дані ночі<span class="cnt" id="nightCnt"></span></h2>
+      <div class="body">
+        <label>Ніч</label>
+        <select id="nightSel"><option value="">(єдина ніч із night.js)</option></select>
+        <button id="ghost" style="margin-top:6px">Показати маршрути ночі</button>
+        <label style="margin-top:6px">Які підказки показувати</label>
+        <select id="ghostMin">
+          <option value="1">усі, зокрема слабкі</option>
+          <option value="2" selected>без слабких</option>
+          <option value="3">лише впевнені</option>
+        </select>
+        <button id="strikes" style="margin-top:6px">Покласти збиття / ППО</button>
+        <div class="hint">Шляхи, зшиті з наших повідомлень, лягають напівпрозорим
+          шаром. Клік по ньому переводить шлях у редагований маршрут.</div>
+      </div>
+    </section>
 
-    <h2>Обʼєкти</h2>
-    <div id="list"></div>
+    <section class="sec" data-sec="brand">
+      <h2>Шапка і знак</h2>
+      <div class="body" id="secBrand"></div>
+    </section>
 
-    <h2>Рамка експорту</h2>
-    <div class="row">
-      <select id="aspect">
-        <option value="">весь кадр (×2)</option>
-      </select>
-      <button id="frameFit">За кадром</button>
-    </div>
-    <div class="hint" id="tplHint">Рамка тягнеться за кути. Експорт віддає
-      рівно її вміст у подвійній щільності.</div>
+    <section class="sec" data-sec="legend">
+      <h2>Легенда, підвал, водяний знак</h2>
+      <div class="body" id="secLegend"></div>
+    </section>
 
-    <h2>Оформлення</h2>
-    <div class="row">
-      <button id="chromeEdit">Легенди, шапка, підвал…</button>
-      <button id="styleEdit">Стиль карти…</button>
-    </div>
+    <section class="sec" data-sec="layers">
+      <h2>Шари<span class="cnt" id="layersCnt"></span></h2>
+      <div class="body">
+        <div id="layers" class="types"></div>
+        <div class="hint">Підпис джерел вимкнути не можна: підкладка під
+          CC BY 4.0, атрибуція має бути на самому зображенні.</div>
+      </div>
+    </section>
 
-    <h2>Шари</h2>
-    <div id="layers" class="types"></div>
-    <div class="hint">Підпис джерел вимкнути не можна: підкладка під
-      CC BY 4.0, і атрибуція має бути на самому зображенні.</div>
+    <section class="sec" data-sec="targets">
+      <h2>Цілі з нашого переліку</h2>
+      <div class="body">
+        <input id="tSearch" placeholder="пошук: аеродром, НПЗ, назва…">
+        <div class="row" style="margin-top:6px">
+          <button id="tGhost">Показати на карті</button>
+        </div>
+        <div id="tList" style="max-height:190px;overflow:auto;margin-top:6px;
+          border:1px solid var(--line);border-radius:6px"></div>
+        <div class="hint">Ярус 1-2 з нашого рейтингу, 538 обʼєктів у театрі.
+          Клік ставить ціль на карту; вузли маршруту до неї прилипають.</div>
+      </div>
+    </section>
 
-    <h2>Цілі (наш перелік)</h2>
-    <input id="tSearch" placeholder="пошук: аеродром, НПЗ, назва…">
-    <div class="row" style="margin-top:6px">
-      <button id="tGhost">Показати на карті</button>
-    </div>
-    <div id="tList" style="max-height:190px;overflow:auto;margin-top:6px;
-      border:1px solid var(--line);border-radius:6px"></div>
-    <div class="hint">Ярус 1-2 з нашого рейтингу, 538 обʼєктів у театрі.
-      Клік ставить ціль на карту; вузли маршруту до неї прилипають.</div>
+    <section class="sec open" data-sec="out">
+      <h2>Кадр і експорт</h2>
+      <div class="body">
+        <label>Заголовок</label><input id="mTitle" value="Нічний наліт">
+        <label>Підзаголовок</label><input id="mSub" value="1 серпня 2026">
+        <label style="margin-top:8px">Рамка експорту</label>
+        <div class="row">
+          <select id="aspect">
+            <option value="">весь кадр (×2)</option>
+          </select>
+          <button id="frameFit">За кадром</button>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button id="fit">Вписати кадр</button>
+          <button id="export" class="primary">Експорт PNG</button>
+          <button id="exportSvg">Експорт SVG</button>
+        </div>
+        <div class="row" style="margin-top:6px">
+          <button id="save">Зберегти</button>
+          <button id="load">Відкрити</button>
+        </div>
+        <div class="hint" id="tplHint">Рамка тягнеться за кути. Експорт віддає
+          рівно її вміст у подвійній щільності.</div>
+      </div>
+    </section>
 
-    <h2>Підказки з даних</h2>
-    <label>Ніч</label>
-    <select id="nightSel"><option value="">(єдина ніч із night.js)</option></select>
-    <button id="ghost" style="margin-top:6px">Показати маршрути ночі</button>
-    <label style="margin-top:6px">Які підказки показувати</label>
-    <select id="ghostMin">
-      <option value="1">усі, зокрема слабкі</option>
-      <option value="2" selected>без слабких</option>
-      <option value="3">лише впевнені</option>
-    </select>
-    <button id="strikes" style="margin-top:6px">Покласти збиття / ППО</button>
-    <div class="hint">Зшиті з наших повідомлень шляхи лягають напівпрозорим шаром.
-      Клік по ньому переводить шлях у редагований маршрут: далі оператор веде його сам.</div>
+    <section class="sec" data-sec="style">
+      <h2>Стиль карти</h2>
+      <div class="body" id="secStyle"></div>
+    </section>
   </div>
 </div>
 
@@ -287,6 +333,7 @@ function retype(){
 // Редагування типу: назва, колір, значок у легенді, видалення.
 function editType(id){
   const t=TYPE[id]; if(!t) return;
+  openSection('props');        // редактор типу малюється у «Вибраному»
   const used=S.objs.filter(o=>o.type===id).length;
   const p=document.getElementById('props');
   const num=(lbl,key,attrs)=>`<label>${lbl}</label>`
@@ -2691,6 +2738,17 @@ function refresh(){
     inp.oninput=()=>{const k=inp.dataset.k;
       S.sel[k]=inp.type==='number'?parseFloat(inp.value)||0:inp.value;touch();draw();};
   });
+  // Заголовки згорток показують, що всередині: скільки обʼєктів, скільки
+  // шарів увімкнено, яка ніч завантажена. Інакше згорнута панель ховає й
+  // те, що вже зроблено.
+  const cnt=(id,txt)=>{const el=document.getElementById(id); if(el) el.textContent=txt;};
+  const nsel=[S.sel,...S.selMore].filter(Boolean).length;
+  cnt('propsCnt', nsel?(nsel>1?`вибрано ${nsel}`:'1 обʼєкт'):`обʼєктів: ${S.objs.length}`);
+  cnt('typesCnt', (TYPE[S.type]||TYPES[0]||{}).name||'');
+  cnt('layersCnt', Object.values(S.layers).filter(Boolean).length+' увімкнено');
+  cnt('nightCnt', (window.NIGHT&&window.NIGHT.date)?window.NIGHT.date:'не завантажено');
+  // Вибрав обʼєкт — його властивості мають бути видимі, а не за згорткою.
+  if(S.sel) openSection('props');
   // Кнопки показують, чи є що скасовувати: класична поведінка панелі.
   document.getElementById('undo').disabled=!S.undo.length;
   document.getElementById('redo').disabled=!S.redo.length;
@@ -3029,66 +3087,86 @@ document.getElementById('tSearch').oninput=e=>renderTargets(e.target.value);
 }
 // Усе оформлення карти в одному вікні: оператор міняє написи, стовпчики,
 // водяний знак — і бачить результат одразу.
-document.getElementById('chromeEdit').onclick=()=>{
-  const p=document.getElementById('props');
+// Оформлення живе двома згортками панелі, а не окремим вікном, яке
+// підміняло собою властивості вибраного: шапка зі знаком — в одній,
+// легенда з підвалом і водяним знаком — у другій. Обидві малює одна
+// функція, бо поля в них зі спільного стану.
+function renderChrome(){
   const L=S.legend, B=S.brand, F=S.footer, W=S.watermark;
-  p.innerHTML='<h2 style="margin-top:0">Оформлення</h2>'
-    +'<label>Легенда маршрутів</label>'
-    +`<input id="lrT" value="${L.routes.title}">`
+  const esc=v=>String(v==null?'':v).replace(/"/g,'&quot;');
+  document.getElementById('secBrand').innerHTML=
+     '<label>Назва видання</label>'
+    +`<input id="bN" value="${esc(B.name)}">`
+    +'<label>Другий рядок (канал, посилання)</label>'
+    +`<input id="bH" value="${esc(B.handle)}">`
+    +'<label>Заголовок карти</label>'
+    +`<input id="bT" value="${esc(S.title)}">`
+    +'<label>Рядок під заголовком (дата)</label>'
+    +`<input id="bS" value="${esc(S.sub)}">`
+    +'<label style="margin-top:10px">Знак</label>'
+    +(B.logoImg?`<div style="margin:4px 0"><img src="${B.logoImg}" alt=""
+        style="max-width:64px;max-height:64px;border:1px solid var(--line);
+        border-radius:6px;background:#0b1119;padding:4px"></div>`:'')
+    +'<div class="row">'
+    +`<button id="bImg">${B.logoImg?'замінити картинку':'своя картинка…'}</button>`
+    +`<button id="bL">${B.logo?'без кружка':'типовий кружок'}</button></div>`
+    +(B.logoImg?'<button id="bImgDel" style="margin-top:6px">прибрати картинку</button>':'')
+    +'<label style="margin-top:6px">Розмір знака, px</label>'
+    +`<input id="bLS" type="number" min="16" max="96" value="${B.logoSize||36}">`
+    +'<label>Відступ усередині картки, px</label>'
+    +`<input id="bPad" type="number" min="8" max="48" value="${B.pad===undefined?20:B.pad}">`
+    +'<div class="hint">Картинка стискається до 256 px і їде разом із картою.</div>';
+
+  document.getElementById('secLegend').innerHTML=
+     '<label>Легенда маршрутів</label>'
+    +`<input id="lrT" value="${esc(L.routes.title)}">`
     +'<div class="row" style="margin-top:6px">'
     +`<input id="lrC" type="number" min="1" max="4" value="${L.routes.cols}" title="стовпчиків">`
     +`<button id="lrOn">${L.routes.on?'сховати':'показати'}</button>`
     +`<button id="lrAll">${L.routes.allTypes?'лише вжиті':'усі типи'}</button></div>`
     +'<label style="margin-top:10px">Легенда зон і позначень</label>'
-    +`<input id="lzT" value="${L.marks.title}">`
-    +`<input id="lzL" value="${L.marks.launchName}" style="margin-top:4px">`
-    +`<input id="lzI" value="${L.marks.impactName}" style="margin-top:4px">`
+    +`<input id="lzT" value="${esc(L.marks.title)}">`
+    +`<input id="lzL" value="${esc(L.marks.launchName)}" style="margin-top:4px">`
+    +`<input id="lzI" value="${esc(L.marks.impactName)}" style="margin-top:4px">`
     +'<div class="row" style="margin-top:6px">'
     +`<input id="lzC" type="number" min="1" max="3" value="${L.marks.cols}">`
     +`<button id="lzOn">${L.marks.on?'сховати':'показати'}</button></div>`
-    +'<label style="margin-top:10px">Назва видання</label>'
-    +`<input id="bN" value="${B.name||''}">`
-    +'<label>Другий рядок (канал, посилання)</label>'
-    +`<input id="bH" value="${B.handle||''}">`
-    +'<label style="margin-top:10px">Заголовок карти</label>'
-    +`<input id="bT" value="${(S.title||'').replace(/"/g,'&quot;')}">`
-    +'<label>Рядок під заголовком (дата)</label>'
-    +`<input id="bS" value="${(S.sub||'').replace(/"/g,'&quot;')}">`
-    +'<label style="margin-top:10px">Знак</label>'
-    +'<div class="row">'
-    +`<button id="bImg">${B.logoImg?'замінити картинку':'своя картинка…'}</button>`
-    +`<button id="bL">${B.logo?'без знака':'кружок'}</button></div>`
-    +(B.logoImg?'<button id="bImgDel" style="margin-top:6px">прибрати картинку</button>':'')
-    +`<label style="margin-top:6px">Розмір знака, px</label>`
-    +`<input id="bLS" type="number" min="16" max="96" value="${B.logoSize||36}">`
-    +'<label>Відступ усередині картки, px</label>'
-    +`<input id="bPad" type="number" min="8" max="48" value="${B.pad===undefined?20:B.pad}">`
     +'<label style="margin-top:10px">Підвал ліворуч</label>'
-    +`<input id="fL" value="${F.left||''}">`
+    +`<input id="fL" value="${esc(F.left)}">`
     +'<label>Підвал праворуч</label>'
-    +`<input id="fR" value="${F.right||''}">`
+    +`<input id="fR" value="${esc(F.right)}">`
     +'<label style="margin-top:10px">Водяний знак</label>'
-    +`<input id="wT" value="${W.text||''}" placeholder="текст">`
+    +`<input id="wT" value="${esc(W.text)}" placeholder="текст">`
     +'<div class="row" style="margin-top:6px">'
     +`<input id="wO" type="number" step="0.01" min="0.01" max="0.3" value="${W.opacity}">`
     +`<input id="wS" type="number" min="150" max="900" step="20" value="${W.step}">`
     +`<button id="wOn">${W.on?'вимкнути':'увімкнути'}</button></div>`
     +'<div class="hint">Рядок джерел підкладки не вимикається: підкладка під '
     +'CC BY 4.0, атрибуція має бути на зображенні.</div>';
+
   const bind=(id,fn)=>{const el=document.getElementById(id);
-    el.oninput=()=>{fn(el.value);touch();draw();};};
+    if(el) el.oninput=()=>{fn(el.value);touch();draw();};};
   bind('lrT',v=>L.routes.title=v); bind('lrC',v=>L.routes.cols=Math.max(1,+v||1));
   bind('lzT',v=>L.marks.title=v);  bind('lzC',v=>L.marks.cols=Math.max(1,+v||1));
   bind('lzL',v=>L.marks.launchName=v); bind('lzI',v=>L.marks.impactName=v);
   bind('bN',v=>B.name=v); bind('bH',v=>B.handle=v);
   bind('bLS',v=>B.logoSize=Math.max(16,Math.min(96,+v||36)));
   bind('bPad',v=>B.pad=Math.max(8,Math.min(48,+v||20)));
-  // Заголовок і дата редагуються і тут, і вгорі панелі — це те саме поле.
   bind('bT',v=>{S.title=v;document.getElementById('mTitle').value=v;});
   bind('bS',v=>{S.sub=v;document.getElementById('mSub').value=v;});
+  bind('fL',v=>F.left=v); bind('fR',v=>F.right=v);
+  bind('wT',v=>W.text=v); bind('wO',v=>W.opacity=+v||0.06);
+  bind('wS',v=>W.step=+v||420);
+  const tog=(id,fn)=>{const el=document.getElementById(id);
+    if(el) el.onclick=()=>{fn();touch();draw();renderChrome();};};
+  tog('lrOn',()=>L.routes.on=!L.routes.on);
+  tog('lrAll',()=>L.routes.allTypes=!L.routes.allTypes);
+  tog('lzOn',()=>L.marks.on=!L.marks.on);
+  tog('bL',()=>B.logo=!B.logo);
+  tog('wOn',()=>W.on=!W.on);
   // Свій знак: картинка стискається до 256 px по довшому боку й лягає в
-  // карту як data:URL. Без стиснення знак у 4 МБ роздуває і автозбереження
-  // (localStorage має ліміт), і сам файл карти.
+  // карту як data:URL. Без стиснення знак у кілька мегабайт роздуває і
+  // автозбереження (localStorage має ліміт), і сам файл карти.
   const pick=document.getElementById('bImg');
   if(pick) pick.onclick=()=>{
     const inp=document.createElement('input');
@@ -3106,9 +3184,8 @@ document.getElementById('chromeEdit').onclick=()=>{
           cc.width=cw; cc.height=ch;
           cc.getContext('2d').drawImage(im,0,0,cw,ch);
           B.logoImg=cc.toDataURL('image/png');
-          touch();draw();
+          touch();draw();renderChrome();
           toast(`знак ${cw}×${ch}, ${Math.round(B.logoImg.length/1024)} КБ`);
-          document.getElementById('chromeEdit').click();
         };
         im.onerror=()=>toast('це не картинка');
         im.src=rd.result;
@@ -3118,30 +3195,18 @@ document.getElementById('chromeEdit').onclick=()=>{
     inp.click();
   };
   const del=document.getElementById('bImgDel');
-  if(del) del.onclick=()=>{B.logoImg='';touch();draw();
-    document.getElementById('chromeEdit').click();};
-  bind('fL',v=>F.left=v); bind('fR',v=>F.right=v);
-  bind('wT',v=>W.text=v); bind('wO',v=>W.opacity=+v||0.06);
-  bind('wS',v=>W.step=+v||420);
-  const tog=(id,fn)=>{document.getElementById(id).onclick=()=>{
-    fn();touch();draw();document.getElementById('chromeEdit').click();};};
-  tog('lrOn',()=>L.routes.on=!L.routes.on);
-  tog('lrAll',()=>L.routes.allTypes=!L.routes.allTypes);
-  tog('lzOn',()=>L.marks.on=!L.marks.on);
-  tog('bL',()=>B.logo=!B.logo);
-  tog('wOn',()=>W.on=!W.on);
-};
+  if(del) del.onclick=()=>{B.logoImg='';touch();draw();renderChrome();};
+}
 // Стиль карти: усе, що раніше стояло числами в коді. Кожне поле — те, що
 // оператор реально хоче крутити під конкретну карту: темнішу підкладку,
 // слабші вогні, більший спалах, тонші підказки.
-document.getElementById('styleEdit').onclick=()=>{
-  const p=document.getElementById('props'), ST=S.style;
+function renderStyle(){
+  const p=document.getElementById('secStyle'), ST=S.style;
   const n=(lbl,grp,key,attrs)=>`<label>${lbl}</label>`
     +`<input data-g="${grp}" data-k="${key}" value="${ST[grp][key]}" ${attrs}>`;
   const col=(lbl,grp,key)=>`<label>${lbl}</label>`
     +`<input type="color" data-g="${grp}" data-k="${key}" value="${ST[grp][key]}">`;
-  p.innerHTML='<h2 style="margin-top:0">Стиль карти</h2>'
-    +'<label style="color:#8fa3b8">Підкладка</label>'
+  p.innerHTML='<label style="color:#8fa3b8">Підкладка</label>'
     +n('Яскравість супутника','base','bright','type=number step=0.05 min=0.1 max=1.5')
     +n('Насиченість, %','base','sat','type=number step=5 min=0 max=100')
     +n('Сила нічних вогнів','base','nightGlow','type=number step=0.05 min=0 max=1')
@@ -3177,13 +3242,14 @@ document.getElementById('styleEdit').onclick=()=>{
     el.oninput=f; el.onchange=f;});
   document.getElementById('stReset').onclick=()=>{
     S.style=JSON.parse(JSON.stringify(STYLE_DEFAULT));
-    touch();draw();document.getElementById('styleEdit').click();};
+    touch();draw();renderStyle();};
   document.getElementById('stZones').onclick=editZones;
-};
+}
 // Зони — такий самий словник, як типи: назва, колір, штрих, додати, видалити.
 function editZones(){
-  const p=document.getElementById('props');
-  p.innerHTML='<h2 style="margin-top:0">Зони</h2>'
+  openSection('style');        // зони живуть у згортці стилю
+  const p=document.getElementById('secStyle');
+  p.innerHTML='<label style="color:#8fa3b8">Зони</label>'
     +ZONES.map((z,i)=>
       `<div class="row" style="margin-bottom:6px;align-items:center">
          <input data-i="${i}" data-k="name" value="${z.name}">
@@ -3208,7 +3274,7 @@ function editZones(){
       ZONES.splice(i,1);
     }
     rezone();touch();draw();editZones();});
-  document.getElementById('zDone').onclick=()=>refresh();
+  document.getElementById('zDone').onclick=()=>renderStyle();
 }
 document.getElementById('ghostMin').onchange=e=>{
   S.ghostMin=+e.target.value;draw();};
@@ -3386,11 +3452,39 @@ S.sub=document.getElementById('mSub').value;
 // марні запити в мережу там, де тайли лежать поруч.
 fetch('tiles/index.json').then(r=>r.ok?r.json():{}).catch(()=>({}))
   .then(idx=>{TILE.local=idx||{};start();});
+// Згортки панелі. Стан памʼятається між сеансами: оператор, який щоночі
+// працює з даними ночі й шапкою, не має щоразу їх розкривати.
+const SEC_KEY='tgmine-panel';
+function secState(){
+  try{ return JSON.parse(localStorage.getItem(SEC_KEY)||'null')||null; }
+  catch(e){ return null; }
+}
+function initSections(){
+  const saved=secState();
+  document.querySelectorAll('#side .sec').forEach(sec=>{
+    const id=sec.dataset.sec;
+    if(saved&&id in saved) sec.classList.toggle('open',!!saved[id]);
+    sec.querySelector('h2').onclick=()=>{
+      sec.classList.toggle('open');
+      const st=secState()||{};
+      document.querySelectorAll('#side .sec').forEach(x=>{
+        st[x.dataset.sec]=x.classList.contains('open');});
+      try{ localStorage.setItem(SEC_KEY,JSON.stringify(st)); }catch(e){}
+    };
+  });
+}
+function openSection(id){
+  const sec=document.querySelector(`#side .sec[data-sec="${id}"]`);
+  if(sec&&!sec.classList.contains('open')) sec.querySelector('h2').click();
+}
 function start(){
 STYLE_DEFAULT=JSON.parse(JSON.stringify(S.style));
 resize();fit();S.ready=true;
 if(restore()) console.log('відновлено з автозбереження');
 if(viewBroken()) fit();   // автозбереження могло зберегти нечинний вигляд
+initSections();
+renderChrome();
+renderStyle();
 refresh();
 setTool('select');
 renderTargets('');

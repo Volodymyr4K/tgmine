@@ -24,8 +24,12 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
         box-shadow:-12px 0 30px rgba(0,0,0,.5)}
   #app.hidepanel #side{display:none}
 }
-#panelToggle{display:none}
-@media (max-width:820px){#panelToggle{display:flex}}
+/* Панель ховається на будь-якій ширині, а не лише у вузькому вікні: на
+   ноутбуці 1280 вона забирає чверть екрана, а карту часто треба бачити
+   цілою — надто перед експортом. */
+#app.hidepanel{grid-template-columns:64px 1fr}
+#app.hidepanel #side{display:none}
+@media (max-width:1100px){#app.hidepanel{grid-template-columns:56px 1fr}}
 #tools{background:var(--panel);border-right:1px solid var(--line);
   display:flex;flex-direction:column;align-items:center;padding:10px 0;gap:6px}
 .tool{width:48px;min-height:44px;border-radius:8px;border:1px solid transparent;
@@ -202,14 +206,14 @@ button.primary{background:rgba(255,62,165,.16);border-color:rgba(255,62,165,.45)
       <div class="body">
         <label>Ніч</label>
         <select id="nightSel"><option value="">(єдина ніч із night.js)</option></select>
-        <button id="ghost" style="margin-top:6px">Показати маршрути ночі</button>
+        <button id="ghost" style="margin-top:6px" title="Шар-привид зі зшитих шляхів; клік по шляху робить із нього маршрут">Показати маршрути ночі</button>
         <label style="margin-top:6px">Які підказки показувати</label>
         <select id="ghostMin">
           <option value="1">усі, зокрема слабкі</option>
           <option value="2" selected>без слабких</option>
           <option value="3">лише впевнені</option>
         </select>
-        <button id="strikes" style="margin-top:6px">Покласти збиття / ППО</button>
+        <button id="strikes" style="margin-top:6px" title="Позначки тієї ночі; повторний клік замінює попередній шар">Покласти збиття / ППО</button>
         <div class="hint">Шляхи, зшиті з наших повідомлень, лягають напівпрозорим
           шаром. Клік по ньому переводить шлях у редагований маршрут.</div>
       </div>
@@ -239,7 +243,7 @@ button.primary{background:rgba(255,62,165,.16);border-color:rgba(255,62,165,.45)
       <div class="body">
         <input id="tSearch" placeholder="пошук: аеродром, НПЗ, назва…">
         <div class="row" style="margin-top:6px">
-          <button id="tGhost">Показати на карті</button>
+          <button id="tGhost" title="Показати наш перелік цілей шаром-привидом">Показати на карті</button>
         </div>
         <div id="tList" style="max-height:190px;overflow:auto;margin-top:6px;
           border:1px solid var(--line);border-radius:6px"></div>
@@ -258,23 +262,23 @@ button.primary{background:rgba(255,62,165,.16);border-color:rgba(255,62,165,.45)
           <select id="aspect">
             <option value="">весь кадр (×2)</option>
           </select>
-          <button id="frameFit">За кадром</button>
+          <button id="frameFit" title="Рамка експорту на весь видимий кадр">За кадром</button>
         </div>
         <div class="row" style="margin-top:8px">
-          <button id="fit">Вписати кадр</button>
-          <button id="export" class="primary">Експорт PNG</button>
-          <button id="exportSvg">Експорт SVG</button>
+          <button id="fit" title="Вписати весь театр у кадр">Вписати кадр</button>
+          <button id="export" class="primary" title="Растрова картинка рамки у подвійній щільності">Експорт PNG</button>
+          <button id="exportSvg" title="Вектор: лінії й підписи лишаються різкими на будь-якому розмірі">Експорт SVG</button>
         </div>
         <div class="row" style="margin-top:6px">
-          <button id="save">Зберегти</button>
-          <button id="load">Відкрити</button>
+          <button id="save" title="Зберегти карту у файл .json (Ctrl+S)">Зберегти</button>
+          <button id="load" title="Відкрити файл карти .json (Ctrl+O), або просто перетягни файл у вікно">Відкрити</button>
         </div>
-        <button id="clear" style="margin-top:6px">Нова карта (стерти все)</button>
+        <button id="clear" style="margin-top:6px" title="Стерти все намальоване; повертається через Ctrl+Z">Нова карта (стерти все)</button>
         <label style="margin-top:10px">Мої карти в браузері</label>
         <select id="slotSel"></select>
         <div class="row" style="margin-top:6px">
-          <button id="slotSave">Зберегти як…</button>
-          <button id="slotOpen">Відкрити</button>
+          <button id="slotSave" title="Зберегти карту в цьому браузері під назвою">Зберегти як…</button>
+          <button id="slotOpen" title="Відкрити вибрану карту з браузера">Відкрити</button>
           <button id="slotDel" style="max-width:44px" title="видалити">✕</button>
         </div>
         <div class="hint" id="tplHint">Рамка тягнеться за кути. Експорт віддає
@@ -2522,6 +2526,8 @@ addEventListener('keydown',e=>{
     // F — показати вибране, а якщо нічого не вибрано, то всю роботу
     const sel=[S.sel,...S.selMore].filter(Boolean);
     zoomTo(sel.length?sel:S.objs.filter(objVisible)); return;}
+  if(e.key==='Tab'){e.preventDefault();
+    document.getElementById('panelToggle').click();return;}
   if(e.key==='+'||e.key==='='){zoomBy(1.35);return;}
   if(e.key==='-'||e.key==='_'){zoomBy(1/1.35);return;}
   if(e.key==='Enter') finishRoute();
@@ -2656,13 +2662,13 @@ function delSel(){
 // ПАНЕЛІ
 // ==========================================================================
 const HINTS={
-  select:'Клік — вибрати · Shift+клік — додати · рамка по порожньому — кілька · пробіл+тягнути — панорама',
-  route:'Маршрут: клік ставить вузол, Enter або подвійний клік завершує, Esc скасовує',
+  select:'Клік — вибрати · Shift+клік — додати · тягнути по порожньому — панорама · Shift+тягнути — рамка вибору',
+  route:'Маршрут: клік ставить вузол (Enter завершує), або натисни й веди — лінія малюється одним рухом',
   launch:'Пускова: клікни там, де ставити позначку',
-  impact:'Влучання: клікни там, де ставити спалах',
+  impact:'Позначка: клікни, де поставити. Категорія (ППО / збиття / влучання) — у віконці над нею',
   text:'Підпис: клікни, де почати текст (далі редагуй у панелі праворуч)',
   arrow:'Стрілка: натисни й тягни від початку до кінця',
-  zone:'Зона: клікай по кутах, Enter замикає, Esc скасовує',
+  zone:'Зона: клікай по кутах (Enter замикає), або натисни й обведи одним рухом',
   ruler:'Лінійка: два кліки — відстань між ними',
 };
 const CURSORS={select:'default',text:'text',ruler:'crosshair'};
@@ -2680,14 +2686,24 @@ function setTool(t){
   h.textContent=HINTS[t]||'';
   h.style.opacity=1;
   clearTimeout(setTool._t);
-  setTool._t=setTimeout(()=>{h.style.opacity=0;},4500);
+  // Підказка для інструмента малювання тримається, поки він активний: вона
+  // описує режим, а не подію. Для «вибору» — гасне, бо це стан за
+  // замовчуванням і постійна смуга під картою тільки заважає.
+  if(t==='select') setTool._t=setTimeout(()=>{h.style.opacity=0;},4500);
 }
 document.querySelectorAll('.tool[data-tool]').forEach(b=>
   b.onclick=()=>setTool(b.dataset.tool));
 document.getElementById('panelToggle').onclick=()=>{
-  document.getElementById('app').classList.toggle('hidepanel');
+  const app=document.getElementById('app');
+  app.classList.toggle('hidepanel');
+  try{ localStorage.setItem('tgmine-side',app.classList.contains('hidepanel')?'0':'1'); }
+  catch(e){}
   setTimeout(resize,50);
 };
+try{
+  if(localStorage.getItem('tgmine-side')==='0')
+    document.getElementById('app').classList.add('hidepanel');
+}catch(e){}
 document.getElementById('undo').onclick=undo;
 document.getElementById('redo').onclick=redo;
 document.getElementById('dup').onclick=duplicate;

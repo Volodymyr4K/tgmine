@@ -22,3 +22,14 @@ __pycache__/
 # Кеш ранжування цілей у CI: жар рахується раз на добу, targets.json
 # лишається байт-стабільним між прогонами й не перезаливається на хостинг.
 .rank/
+
+# Тайли підкладки редактора (супутник + нічні вогні) і завантажений Natural
+# Earth: разом сотні мегабайт, відтворюються `mapper/mktiles.py` і
+# `mapper/mkbase.py`. Дрібні basemap.js/labels.js/targets.js навпаки
+# комітяться — без них редактор не відкриється.
+mapper/tiles/
+mapper/ne/
+mapper/*.png
+mapper/night.js
+# проміжний файл збірки підкладки: редактор читає basemap.js, а не .json
+mapper/basemap.json

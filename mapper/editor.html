@@ -1,0 +1,2866 @@
+<!doctype html>
+<html lang="uk"><head><meta charset="utf-8">
+<title>tgmine · редактор карт нальоту</title>
+<!-- Inter (SIL OFL), лише кирилиця й латиниця, вбудований у файл: карта має
+     виглядати однаково на будь-якій машині, а системний шрифт у кожного свій.
+     font-display:block — щоб експорт не зловив запасний шрифт. -->
+<link rel="stylesheet" href="font.css">
+<style>
+:root{
+  --bg:#05080d; --panel:#0a0f16; --line:#1b2530; --ink:#e6eef7; --dim:#7d93a8;
+  --accent:#ff3ea5;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
+  font:13px/1.5 'MapSans',"MapSans",ui-sans-serif,-apple-system,Arial,sans-serif;overflow:hidden}
+#app{display:grid;grid-template-columns:64px 1fr 300px;height:100vh}
+/* У вузькому вікні (панель браузера, ноутбук) карта стискалась до нуля:
+   бічна панель тримала свої 300 px незалежно ні від чого. Тепер панель
+   вужча, а зовсім у вузькому — ховається кнопкою. */
+@media (max-width:1100px){#app{grid-template-columns:56px 1fr 250px}}
+@media (max-width:820px){
+  #app{grid-template-columns:56px 1fr}
+  #side{position:absolute;right:0;top:0;bottom:0;width:260px;z-index:50;
+        box-shadow:-12px 0 30px rgba(0,0,0,.5)}
+  #app.hidepanel #side{display:none}
+}
+#panelToggle{display:none}
+@media (max-width:820px){#panelToggle{display:flex}}
+#tools{background:var(--panel);border-right:1px solid var(--line);
+  display:flex;flex-direction:column;align-items:center;padding:10px 0;gap:6px}
+.tool{width:48px;min-height:44px;border-radius:8px;border:1px solid transparent;
+  background:transparent;color:var(--dim);cursor:pointer;display:flex;
+  flex-direction:column;align-items:center;justify-content:center;gap:1px;
+  font-size:17px;padding:5px 0}
+.tool small{font-size:8.5px;letter-spacing:.2px;opacity:.8;font-weight:600}
+.tool:disabled{opacity:.35;cursor:default}
+.tool:hover{background:#111925;color:var(--ink)}
+.tool.on{background:rgba(255,62,165,.14);border-color:rgba(255,62,165,.5);color:#fff}
+#stage{position:relative;overflow:hidden;background:#04070c}
+#cv{position:absolute;inset:0;cursor:crosshair}
+#side{background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;padding:14px}
+h2{font-size:11px;letter-spacing:1.4px;text-transform:uppercase;color:var(--dim);
+  margin:18px 0 8px;font-weight:600}
+h2:first-child{margin-top:0}
+label{display:block;font-size:11.5px;color:var(--dim);margin:8px 0 3px}
+input,select,textarea,button{width:100%;background:#0e141d;color:var(--ink);
+  border:1px solid var(--line);border-radius:6px;padding:7px 9px;font:inherit;font-size:12.5px}
+button{cursor:pointer}
+button:hover{border-color:#2f3f52;background:#131b26}
+button.primary{background:rgba(255,62,165,.16);border-color:rgba(255,62,165,.45);color:#fff}
+.row{display:flex;gap:6px}
+.row>*{flex:1}
+.types{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-top:6px}
+.type{display:flex;align-items:center;gap:6px;padding:6px 7px;border:1px solid var(--line);
+  border-radius:6px;cursor:pointer;font-size:11.5px;color:var(--dim);background:#0c121a}
+.type.on{border-color:#3a4c60;color:var(--ink);background:#111a24}
+.sw{width:16px;height:3px;border-radius:2px;flex:none}
+#list{margin-top:6px;max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:6px}
+.item{padding:6px 9px;border-bottom:1px solid #131c26;font-size:11.5px;color:var(--dim);
+  cursor:pointer;display:flex;justify-content:space-between;gap:8px}
+.item:hover{background:#0f1620;color:var(--ink)}
+.item.on{background:rgba(255,62,165,.12);color:#fff}
+.hint{font-size:11px;color:#5f7386;line-height:1.5;margin-top:8px}
+#hud{position:absolute;right:12px;top:12px;background:rgba(6,10,16,.85);
+  border:1px solid var(--line);border-radius:8px;padding:7px 11px;font-size:11.5px;color:var(--dim)}
+/* Рядок підказки показує, що робити ЗАРАЗ. Раніше він зʼявлявся лише для
+   маршруту, тому решта інструментів мовчали: людина натискала кнопку й не
+   розуміла, чи щось сталось. */
+/* Підказка стоїть ВНИЗУ: зверху вона лягала просто на шапку карти. І гасне
+   через кілька секунд — постійна смуга через увесь кадр заважає дивитись. */
+#hint2{position:absolute;left:50%;transform:translateX(-50%);bottom:56px;
+  opacity:0;transition:opacity .2s;
+  background:rgba(6,10,16,.92);border:1px solid var(--line);border-radius:8px;
+  padding:7px 14px;font-size:12px;color:var(--ink);pointer-events:none;
+  white-space:nowrap;max-width:92%;overflow:hidden;text-overflow:ellipsis}
+/* Коротке повідомлення про дію: класична поведінка — програма підтверджує,
+   що зробила те, що просили. */
+#toast{position:absolute;left:50%;transform:translateX(-50%);bottom:22px;
+  background:rgba(6,10,16,.95);border:1px solid rgba(120,150,180,.35);
+  border-radius:8px;padding:8px 16px;font-size:12.5px;color:var(--ink);
+  opacity:0;transition:opacity .18s;pointer-events:none;z-index:60}
+#toast.on{opacity:1}
+/* Контекстне меню правою кнопкою — теж класика. */
+#menu{position:absolute;z-index:80;background:#0b1119;border:1px solid var(--line);
+  border-radius:8px;padding:5px;display:none;min-width:190px;
+  box-shadow:0 12px 30px rgba(0,0,0,.55)}
+#menu button{width:100%;text-align:left;background:transparent;border:0;
+  padding:7px 10px;border-radius:6px;font-size:12.5px;color:var(--ink)}
+#menu button:hover{background:#16202c}
+#menu .sep{height:1px;background:var(--line);margin:4px 2px}
+#menu .k{float:right;color:#5f7386;font-size:11px}
+</style></head><body>
+<div id="app">
+  <div id="tools">
+    <button class="tool on" data-tool="select" title="Вибір / переміщення (V)">✥<small>вибір</small></button>
+    <button class="tool" data-tool="route" title="Маршрут — клік по точках, Enter завершити (R)">↝<small>маршрут</small></button>
+    <button class="tool" data-tool="launch" title="Пускова локація (L)">▲<small>пускова</small></button>
+    <button class="tool" data-tool="impact" title="Влучання (I)">✷<small>влучання</small></button>
+    <button class="tool" data-tool="text" title="Підпис (T)">T<small>підпис</small></button>
+    <button class="tool" data-tool="arrow" title="Стрілка — тягни від початку до кінця (A)">➤<small>стрілка</small></button>
+    <button class="tool" data-tool="zone" title="Зона — клік по кутах, Enter замкнути (Z)">⬟<small>зона</small></button>
+    <button class="tool" data-tool="ruler" title="Лінійка: два кліки — відстань (M)">⟺<small>лінійка</small></button>
+    <div style="flex:1"></div>
+    <button class="tool" id="panelToggle" title="Сховати/показати панель">☰<small>панель</small></button>
+    <button class="tool" id="undo" title="Скасувати (Ctrl+Z)">⟲<small>назад</small></button>
+    <button class="tool" id="redo" title="Повторити (Ctrl+Shift+Z)">⟳<small>вперед</small></button>
+    <button class="tool" id="dup" title="Дублювати (Ctrl+D)">⧉<small>копія</small></button>
+    <button class="tool" id="del" title="Видалити вибране (Del)">🗑<small>стерти</small></button>
+  </div>
+
+  <div id="stage">
+    <canvas id="cv"></canvas>
+    <div id="hud">масштаб <span id="zoom">100%</span> · <span id="cursor">—</span></div>
+    <div id="hint2"></div>
+    <div id="toast"></div>
+    <div id="menu"></div>
+  </div>
+
+  <div id="side">
+    <h2>Карта</h2>
+    <label>Заголовок</label><input id="mTitle" value="Нічний наліт">
+    <label>Підзаголовок</label><input id="mSub" value="1 серпня 2026">
+    <div class="row" style="margin-top:8px">
+      <button id="fit">Вписати кадр</button>
+      <button id="export" class="primary">Експорт PNG</button>
+      <button id="exportSvg">Експорт SVG</button>
+    </div>
+    <div class="row" style="margin-top:6px">
+      <button id="save">Зберегти</button>
+      <button id="load">Відкрити</button>
+    </div>
+
+    <h2>Засіб</h2>
+    <div class="types" id="types"></div>
+
+    <h2 id="propsTitle">Властивості</h2>
+    <div id="props"><div class="hint">Нічого не вибрано.</div></div>
+
+    <h2>Обʼєкти</h2>
+    <div id="list"></div>
+
+    <h2>Рамка експорту</h2>
+    <div class="row">
+      <select id="aspect">
+        <option value="">весь кадр (×2)</option>
+      </select>
+      <button id="frameFit">За кадром</button>
+    </div>
+    <div class="hint" id="tplHint">Рамка тягнеться за кути. Експорт віддає
+      рівно її вміст у подвійній щільності.</div>
+
+    <h2>Оформлення</h2>
+    <div class="row">
+      <button id="chromeEdit">Легенди, шапка, підвал…</button>
+      <button id="styleEdit">Стиль карти…</button>
+    </div>
+
+    <h2>Шари</h2>
+    <div id="layers" class="types"></div>
+    <div class="hint">Підпис джерел вимкнути не можна: підкладка під
+      CC BY 4.0, і атрибуція має бути на самому зображенні.</div>
+
+    <h2>Цілі (наш перелік)</h2>
+    <input id="tSearch" placeholder="пошук: аеродром, НПЗ, назва…">
+    <div class="row" style="margin-top:6px">
+      <button id="tGhost">Показати на карті</button>
+    </div>
+    <div id="tList" style="max-height:190px;overflow:auto;margin-top:6px;
+      border:1px solid var(--line);border-radius:6px"></div>
+    <div class="hint">Ярус 1-2 з нашого рейтингу, 538 обʼєктів у театрі.
+      Клік ставить ціль на карту; вузли маршруту до неї прилипають.</div>
+
+    <h2>Підказки з даних</h2>
+    <button id="ghost">Показати маршрути ночі</button>
+    <label style="margin-top:6px">Які підказки показувати</label>
+    <select id="ghostMin">
+      <option value="1">усі, зокрема слабкі</option>
+      <option value="2" selected>без слабких</option>
+      <option value="3">лише впевнені</option>
+    </select>
+    <button id="strikes" style="margin-top:6px">Покласти збиття / ППО</button>
+    <div class="hint">Зшиті з наших повідомлень шляхи лягають напівпрозорим шаром.
+      Клік по ньому переводить шлях у редагований маршрут: далі оператор веде його сам.</div>
+  </div>
+</div>
+
+<script src="basemap.js"></script>
+<script src="targets.js"></script>
+<script src="labels.js"></script>
+<script>
+// ==========================================================================
+// РЕДАКТОР КАРТ НАЛЬОТУ
+//
+// Головне рішення: карту малює ОПЕРАТОР, а не алгоритм. Автозшивання давало
+// розсип обрізків, бо з наших повідомлень цілий маршрут не виводиться —
+// частина шляху просто не спостерігалась. Людина цю прогалину закриває
+// знанням, якого в даних нема; інструмент має їй не заважати.
+//
+// Дані з конвеєра лишаються, але як ПІДКАЗКА (шар-привид), а не як результат.
+// ==========================================================================
+
+// Типи засобів — це ДАНІ карти, а не константа коду. Оператор додає свої,
+// перейменовує, міняє колір і значок; набір зберігається у файлі карти.
+// Стартовий список загальний: модель («Шахед», «Гербера») з наших даних не
+// виводиться, і писати її за замовчуванням означало б стверджувати те, чого
+// ми не знаємо. Але вписати руками оператор може будь-що.
+const TYPES_DEFAULT=[
+  // Це карта ударів ПО РФ, тому номенклатура українська. Список не вигаданий
+  // і не переписаний із чужої карти (там був російський: «Калібр»,
+  // «Іскандер», «Х-101» — ними бʼють у зворотний бік). Тут те, що РОСІЙСЬКІ
+  // моніторингові канали справді називають у наших даних за 45 діб:
+  //   Хорнет 1748, Дартс 321, Фламінго 135, Нептун 97, Лютий 31,
+  //   Рубака 21, морські дрони 7, Storm Shadow/SCALP 3.
+  // Жодної згадки не мають Бобер, Грім-2, Сапсан, HIMARS, Паляниця, Пекло —
+  // тому їх у стартовому наборі нема, але оператор може додати будь-що.
+  // Кожен тип несе ВЕСЬ стиль: колір, значок, товщину, скільки ліній у
+  // пучку, розкид, стрілки вздовж і пунктир. Новий маршрут успадковує все
+  // одразу, і будь-що перебивається вже на самому обʼєкті.
+  {id:'uav',     name:'БпЛА (тип не вказано)', col:'#ff3ea5', icon:'arrow',
+   width:1.6, count:6, spread:14, arrows:0, dash:false},
+  {id:'hornet',  name:'БпЛА «Хорнет»',         col:'#ff8ad4', icon:'arrow',
+   width:1.5, count:8, spread:15, arrows:2, dash:false},
+  {id:'darts',   name:'БпЛА «Дартс»',          col:'#c77dff', icon:'arrow',
+   width:1.5, count:5, spread:12, arrows:0, dash:false},
+  {id:'lutyi',   name:'БпЛА «Лютий»',          col:'#ffd166', icon:'arrow',
+   width:1.6, count:4, spread:10, arrows:0, dash:false},
+  {id:'rubaka',  name:'БпЛА «Рубака»',         col:'#ffa03f', icon:'arrow',
+   width:1.6, count:3, spread:9,  arrows:0, dash:false},
+  // «Фламінго» канали пишуть як БпЛА, насправді це крилата ракета —
+  // підписуємо класом, а не тим, як його назвав канал.
+  {id:'flamingo',name:'КР «Фламінго»',         col:'#ff5252', icon:'line',
+   width:1.8, count:2, spread:6,  arrows:3, dash:false},
+  {id:'neptune', name:'ПКР «Нептун»',          col:'#4ade80', icon:'line',
+   width:1.8, count:2, spread:5,  arrows:3, dash:false},
+  {id:'storm',   name:'Storm Shadow / SCALP',  col:'#38d4dd', icon:'line',
+   width:1.8, count:1, spread:0,  arrows:3, dash:false},
+  {id:'naval',   name:'Морський дрон',         col:'#7fd3ff', icon:'circle',
+   width:1.6, count:3, spread:8,  arrows:0, dash:false},
+  {id:'unknown', name:'Невстановлено',         col:'#9fb3c8', icon:'plane',
+   width:1.4, count:1, spread:0,  arrows:0, dash:true},
+];
+// TYPES живе у стані; TYPE — покажчик за id, перебудовується при зміні
+let TYPES=JSON.parse(JSON.stringify(TYPES_DEFAULT));
+let STYLE_DEFAULT=null;   // знімок стандартного стилю, робиться на старті
+let TYPE=Object.fromEntries(TYPES.map(t=>[t.id,t]));
+function retype(){
+  TYPE=Object.fromEntries(TYPES.map(t=>[t.id,t]));
+  const box=document.getElementById('types');
+  box.innerHTML=TYPES.map(t=>
+    `<div class="type${t.id===S.type?' on':''}" data-t="${t.id}">
+       <span class="sw" style="background:${t.col}"></span>${t.name}</div>`).join('')
+    +'<div class="type" data-t="__add" style="justify-content:center">+ новий тип</div>';
+  box.querySelectorAll('[data-t]').forEach(el=>el.onclick=()=>{
+    if(el.dataset.t==='__add'){
+      const id='t'+Date.now().toString(36);
+      TYPES.push({id,name:'Новий тип',col:'#8fd7ff',icon:'arrow'});
+      S.type=id;snapshot();retype();editType(id);return;
+    }
+    S.type=el.dataset.t;
+    if(S.sel&&S.sel.kind!=='text'&&S.sel.kind!=='zone'){snapshot();S.sel.type=S.type;}
+    retype();refresh();
+  });
+  box.querySelectorAll('[data-t]').forEach(el=>el.oncontextmenu=e=>{
+    e.preventDefault();e.stopPropagation();
+    if(el.dataset.t!=='__add') editType(el.dataset.t);
+  });
+}
+// Редагування типу: назва, колір, значок у легенді, видалення.
+function editType(id){
+  const t=TYPE[id]; if(!t) return;
+  const used=S.objs.filter(o=>o.type===id).length;
+  const p=document.getElementById('props');
+  const num=(lbl,key,attrs)=>`<label>${lbl}</label>`
+    +`<input data-k="${key}" value="${t[key]===undefined?'':t[key]}" ${attrs}>`;
+  p.innerHTML='<h2 style="margin-top:0">Тип засобу</h2>'
+    +`<label>Назва в легенді</label><input data-k="name" value="${t.name}">`
+    +`<label>Колір</label><input type="color" data-k="col" value="${t.col}">`
+    +'<label>Значок у легенді</label><select data-k="icon">'
+    +['arrow','line','cross','plus','plane','circle'].map(v=>
+      `<option value="${v}" ${v===t.icon?'selected':''}>${
+        {arrow:'стрілка',line:'лінія',cross:'хрест',plus:'плюс',
+         plane:'літак',circle:'коло'}[v]}</option>`).join('')
+    +'</select>'
+    +num('Товщина лінії','width','type=number step=0.1 min=0.5 max=8')
+    +num('Ліній у пучку','count','type=number min=1 max=40')
+    +num('Розкид пучка','spread','type=number min=0 max=60')
+    +num('Стрілок уздовж лінії','arrows','type=number min=0 max=12')
+    +`<button data-a="dash" style="margin-top:8px">${
+        t.dash?'зробити суцільною':'зробити пунктиром'}</button>`
+    +'<div class="row" style="margin-top:8px">'
+    +'<button data-a="up">вище в легенді</button>'
+    +'<button data-a="down">нижче</button></div>'
+    +'<div class="row" style="margin-top:6px">'
+    +'<button data-a="dup">Дублювати</button>'
+    +`<button data-a="apply">Застосувати до ${used}</button></div>`
+    +'<div class="row" style="margin-top:6px">'
+    +'<button data-a="del">Видалити тип</button>'
+    +'<button data-a="done" class="primary">Готово</button></div>'
+    +'<div class="hint">Нові маршрути цього типу беруть увесь стиль звідси. '
+    +'«Застосувати до N» переписує стиль уже намальованим — зокрема те, що '
+    +'оператор міняв на конкретній лінії руками.</div>';
+  const upd=()=>{
+    p.querySelectorAll('[data-k]').forEach(el=>{
+      const k=el.dataset.k;
+      t[k]= el.type==='number' ? (parseFloat(el.value)||0) : el.value;
+    });
+    touch();retype();draw();
+  };
+  p.querySelectorAll('[data-k]').forEach(el=>{el.oninput=upd;el.onchange=upd;});
+  const act={
+    dash:()=>{t.dash=!t.dash;},
+    up:()=>{const i=TYPES.indexOf(t);
+            if(i>0) TYPES.splice(i-1,0,TYPES.splice(i,1)[0]);},
+    down:()=>{const i=TYPES.indexOf(t);
+              if(i<TYPES.length-1) TYPES.splice(i+1,0,TYPES.splice(i,1)[0]);},
+    dup:()=>{const c=JSON.parse(JSON.stringify(t));
+             c.id='t'+Date.now().toString(36);c.name=t.name+' (копія)';
+             TYPES.splice(TYPES.indexOf(t)+1,0,c);id=c.id;},
+    apply:()=>{
+      if(!used){toast('цим типом ще нічого не намальовано');return;}
+      snapshot();
+      for(const o of S.objs) if(o.type===id&&o.kind==='route'){
+        o.width=t.width;o.count=t.count;o.spread=t.spread;
+        o.arrows=t.arrows;o.dash=!!t.dash;delete o.col;
+      }
+      toast(`стиль застосовано до ${used}`);
+    },
+    del:()=>{
+      if(used){toast('тип зайнятий обʼєктами');return false;}
+      TYPES=TYPES.filter(x=>x.id!==id);
+      if(S.type===id) S.type=TYPES[0]&&TYPES[0].id;
+      refresh();return 'closed';
+    },
+    done:()=>{refresh();return 'closed';},
+  };
+  p.querySelectorAll('[data-a]').forEach(b=>b.onclick=()=>{
+    const r=act[b.dataset.a]();
+    touch();retype();draw();
+    if(r!=='closed'&&r!==false) editType(id);
+  });
+}
+
+// Зони — те, що на оглядових картах показують заливкою: окупована територія,
+// закрита зона, район роботи ППО. Готові пресети, бо оператор має ставити
+// зону за два кліки, а не підбирати колір.
+let ZONES=[
+  {id:'occupied', name:'Окупована територія', col:'#ff5252', hatch:true},
+  {id:'exclusion',name:'Зона відчуження',     col:'#4ade80', hatch:true},
+  {id:'airdef',   name:'Район роботи ППО',    col:'#38d4dd', hatch:false},
+  {id:'area',     name:'Довільна зона',       col:'#ffb01f', hatch:false},
+];
+// знімок стандартних зон для «скинути» — робиться після оголошення ZONES,
+// інакше звернення до ще не ініціалізованого let валить увесь скрипт
+const ZONES_DEFAULT=JSON.parse(JSON.stringify(ZONES));
+let ZONE=Object.fromEntries(ZONES.map(z=>[z.id,z]));
+function rezone(){ ZONE=Object.fromEntries(ZONES.map(z=>[z.id,z])); }
+
+// Шаблони задають РОЗМІР ФАЙЛА, а не лише пропорцію. Пропорції мало:
+// експорт множив рамку на 2, тож на маленькому вікні виходив дрібний файл,
+// на великому — величезний, і той самий шаблон давав різні плакати.
+const TPL=[
+  {id:'tg-post',  name:'Telegram-пост 4:5',   w:1280, h:1600},
+  {id:'tg-wide',  name:'Telegram превʼю 16:9', w:1280, h:720},
+  {id:'square',   name:'Квадрат 1:1',          w:1400, h:1400},
+  {id:'banner',   name:'Широкий банер 2:1',    w:2000, h:1000},
+  {id:'a3',       name:'Друк A3, 300 dpi',     w:3508, h:4961},
+];
+
+const S={
+  tool:'select', type:'uav', zone:'occupied',
+  frame:null, aspect:0, tpl:null, targetsOn:false, ruler:null, bias:0, ready:false,
+  spacePan:false, ghostMin:2,
+  // СТИЛЬ КАРТИ. Тут те, що раніше стояло числами просто в коді: яскравість
+  // підкладки, сила нічних вогнів, вигляд влучання, пускової, підказок і
+  // плашок. Оператор міняє під конкретну карту, набір їде у файлі разом
+  // з обʼєктами.
+  style:{
+    base:{bright:0.55, sat:20, nightGlow:0.34, water:0.30, borders:0.26,
+          places:0.45, labelScale:1.0},
+    route:{halo:0.12, nodes:true},
+    impact:{col:'#ffd66e', rays:8, size:9, glow:1.0},
+    launch:{col:'#ffd166', pin:'#ffffff'},
+    ghost:{col:'#7fd3ff', weakCol:'#8fa3b8', alpha:1.0},
+    plate:{bg:0.86, border:0.4, text:'#dbe8f6'},
+  },
+  // Усе оформлення — дані карти. Оператор міняє написи, кількість стовпчиків,
+  // прозорість; набір їде разом із файлом карти.
+  legend:{routes:{on:true,title:'Види маршрутів',cols:1,allTypes:false,opacity:.9},
+          marks:{on:true,title:'Зони та позначення',cols:1,width:300,
+                 launchName:'Пускові локації',impactName:'Влучання',opacity:.9}},
+  brand:{name:'tgmine',handle:'',logo:true},
+  footer:{left:'',right:''},
+  watermark:{on:false,text:'',opacity:.06,step:420},
+  // Кожен елемент карти вимикається окремо. Що саме потрібне — вирішує
+  // оператор під конкретну карту: на кадрі однієї області назви областей
+  // зайві, на оглядовій — навпаки, а нічні вогні іноді забивають маршрут.
+  layers:{sat:true,night:true,water:true,borders:true,cities:true,
+          regions:true,places:true,targets:false,
+          legend:true,header:true,scale:true},
+  objs:[], sel:null, selMore:[], draft:null, ghosts:[], redo:[], marquee:null, clip:null,
+  view:{x:0,y:0,k:1},           // зсув і масштаб у пікселях підкладки
+  title:'Нічний наліт', sub:'',
+  undo:[],
+};
+
+// ---- проєкція: світ у пікселях Web Mercator ------------------------------
+// Було: один великий растр і координати від його рамки. Через це деталізація
+// впиралась у роздільність того файла — на зумі 200% підкладка розмивалась.
+// Тепер базова система — пікселі Web Mercator зуму 8 (світ 65536 px), а
+// підкладка збирається з тайлів того зуму, який потрібен ПОТОЧНОМУ кадру.
+const Z0=8, WORLD=256*2**Z0;
+const merc=la=>Math.log(Math.tan(Math.PI/4+la*Math.PI/360));
+function baseXY(la,lo){
+  const x=(lo+180)/360*WORLD;
+  const y=(1-merc(la)/Math.PI)/2*WORLD;
+  return [x,y];
+}
+function baseLL(x,y){
+  const lo=x/WORLD*360-180;
+  const la=(2*Math.atan(Math.exp(Math.PI*(1-2*y/WORLD)))-Math.PI/2)*180/Math.PI;
+  return [la,lo];
+}
+// екран <-> база
+const scr=(x,y)=>[(x-S.view.x)*S.view.k,(y-S.view.y)*S.view.k];
+const unscr=(sx,sy)=>[sx/S.view.k+S.view.x, sy/S.view.k+S.view.y];
+const P=(la,lo)=>{const b=baseXY(la,lo);return scr(b[0],b[1]);};
+
+// ---- тайли ---------------------------------------------------------------
+// Локальний кеш має пріоритет: театр уже викачано, і без мережі він працює.
+// Чого нема локально — тягнеться з джерела (CORS дозволений обома, тому
+// полотно не «отруюється» і експорт PNG лишається можливим).
+// Вигляд підказки за впевненістю (див. tgmine/routes.py)
+// Підказка має бути помітною, інакше з нею неможливо працювати: перший
+// варіант із прозорістю 0.22-0.55 на оглядовому масштабі просто зникав.
+function GHOST_STYLE(conf){
+  const G=S.style.ghost, a=(G.alpha===undefined?1:G.alpha);
+  if(conf==='strong') return {col:G.col,    w:2.4,a:.85*a,dash:[]};
+  if(conf==='weak')   return {col:G.weakCol,w:1.3,a:.38*a,dash:[2,6]};
+  return                     {col:G.col,    w:1.7,a:.60*a,dash:[7,5]};
+}
+function ghostVisible(g){
+  const lvl={strong:3,ok:2,weak:1}[g.conf||'ok'];
+  return lvl>=S.ghostMin;
+}
+const TILE={cache:new Map(), noLocal:new Set(), local:{}, redraw:null};
+const SRC={
+  sat:{local:z=>`tiles/sat/${z}/`, remote:(z,x,y)=>
+    `https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/g/${z}/${y}/${x}.jpg`,
+    maxz:12},
+  night:{local:z=>`tiles/night/${z}/`, remote:(z,x,y)=>
+    `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_Black_Marble/`+
+    `default/2016-01-01/GoogleMapsCompatible_Level8/${z}/${y}/${x}.png`,
+    maxz:8},
+};
+function tile(kind,z,x,y){
+  const key=kind+'/'+z+'/'+x+'/'+y;
+  if(TILE.cache.has(key)) return TILE.cache.get(key);
+  const im=new Image(); im.crossOrigin='anonymous';
+  const src=SRC[kind], zk=kind+'/'+z;
+  // Перехід на мережу після невдачі з локальним кешем НЕ ПРАЦЮВАВ: перевірка
+  // була `im.src.indexOf('http')!==0`, а локальний шлях теж перетворюється
+  // на абсолютний http://localhost/... Тобто умова завжди хибна, і на
+  // машині без викачаних тайлів підкладка лишалась порожньою. Мене це
+  // не зачіпало рівно тому, що тайли лежали поруч.
+  im.onerror=()=>{
+    if(im.__remote) return;
+    im.__remote=true;
+    TILE.noLocal.add(zk);        // цей зум локально відсутній — більше не пробуємо
+    im.src=src.remote(z,x,y);
+  };
+  im.onload=()=>{ clearTimeout(TILE.redraw); TILE.redraw=setTimeout(draw,60); };
+  const haveLocal=(TILE.local[kind]||[]).includes(z) && !TILE.noLocal.has(zk);
+  if(haveLocal) im.src=src.local(z)+x+'_'+y+'.img';
+  else { im.__remote=true; im.src=src.remote(z,x,y); }
+  TILE.cache.set(key,im);
+  // Кеш ріс без обмеження: година роботи з панорамою — тисячі зображень у
+  // памʼяті. Викидаємо найдавніші, Map зберігає порядок вставки.
+  if(TILE.cache.size>1200){
+    const old=[...TILE.cache.keys()].slice(0,200);
+    for(const k of old) TILE.cache.delete(k);
+  }
+  return im;
+}
+// Який зум тайлів відповідає масштабу. bias піднімає деталізацію: експорт
+// малює у подвійній щільності, і без цього плакат виходив м'яким — на екрані
+// тайл займав 256 px, а у файлі 512.
+function tileZoom(kind,bias){
+  const z=Math.round(Z0+Math.log2(S.view.k))+(bias||0);
+  return Math.max(3,Math.min(SRC[kind].maxz,z));
+}
+// Чекаємо, поки потрібні тайли справді завантажаться. Без цього експорт
+// віддавав напівпорожню карту: вона домальовується асинхронно, а toDataURL
+// знімає полотно негайно.
+function tilesReady(bias,ms=8000){
+  const need=[];
+  for(const kind of ['sat','night']){
+    const z=tileZoom(kind,bias), n=2**z, sc=256*2**(Z0-z);
+    const a=unscr(0,0), b=unscr(Wp,Hp);
+    for(let x=Math.max(0,Math.floor(a[0]/sc));x<=Math.min(n-1,Math.ceil(b[0]/sc));x++)
+      for(let y=Math.max(0,Math.floor(a[1]/sc));y<=Math.min(n-1,Math.ceil(b[1]/sc));y++)
+        need.push(tile(kind,z,x,y));
+  }
+  const pend=need.filter(im=>!im.complete);
+  if(!pend.length) return Promise.resolve(need.length);
+  return new Promise(res=>{
+    let left=pend.length, done=false;
+    const fin=()=>{if(!done&&--left<=0){done=true;res(need.length);}};
+    pend.forEach(im=>{im.addEventListener('load',fin,{once:true});
+                      im.addEventListener('error',fin,{once:true});});
+    setTimeout(()=>{if(!done){done=true;res(need.length);}},ms);
+  });
+}
+function drawTiles(c,kind,alpha,filter,comp,bias){
+  // Без цього браузер масштабує тайли найдешевшим фільтром — на експорті
+  // це видно як мило.
+  c.imageSmoothingEnabled=true; c.imageSmoothingQuality='high';
+  const z=tileZoom(kind,bias), n=2**z, sc=256*2**(Z0-z);   // база на тайл
+  const a=unscr(0,0), b=unscr(Wp,Hp);
+  const x0=Math.max(0,Math.floor(a[0]/sc)), x1=Math.min(n-1,Math.ceil(b[0]/sc));
+  const y0=Math.max(0,Math.floor(a[1]/sc)), y1=Math.min(n-1,Math.ceil(b[1]/sc));
+  if((x1-x0)*(y1-y0)>900) return;                    // запобіжник від лавини
+  c.save();
+  if(filter) c.filter=filter;
+  if(comp) c.globalCompositeOperation=comp;
+  c.globalAlpha=alpha;
+  for(let x=x0;x<=x1;x++) for(let y=y0;y<=y1;y++){
+    const im=tile(kind,z,x,y);
+    if(!im.complete||!im.naturalWidth) continue;
+    const p=scr(x*sc,y*sc), q=scr((x+1)*sc,(y+1)*sc);
+    // +1 px перекриття: інакше між тайлами видно щілини на дробовому масштабі
+    c.drawImage(im,p[0],p[1],q[0]-p[0]+1,q[1]-p[1]+1);
+  }
+  c.restore();
+}
+
+// #rrggbb + прозорість -> rgba(): стилі задаються кольором, а малюються
+// з альфою; інакше кожен колір довелось би тримати у двох виглядах.
+function hexa(hex,a){
+  const h=(hex||'#ffffff').replace('#','');
+  const n=parseInt(h.length===3?h.split('').map(c=>c+c).join(''):h,16);
+  return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`;
+}
+// Розмір тіні canvas НЕ залежить від перетворення полотна: shadowBlur
+// рахується в пікселях пристрою. Тому на екрані ореол під підписом один, а
+// в експорті ×2.6 — утричі тонший. Тримаємо коефіцієнт і множимо на нього.
+let RSCALE=1;
+function shadow(c,col,blur){ c.shadowColor=col; c.shadowBlur=blur*RSCALE; }
+const cv=document.getElementById('cv'), ctx=cv.getContext('2d');
+let Wp=0,Hp=0,DPR=Math.min(2,devicePixelRatio||1);
+function resize(){
+  const r=document.getElementById('stage').getBoundingClientRect();
+  Wp=r.width;Hp=r.height;
+  cv.width=Wp*DPR;cv.height=Hp*DPR;cv.style.width=Wp+'px';cv.style.height=Hp+'px';
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  if(S.ready) draw();          // до вписування кадру малювати нема чого
+}
+addEventListener('resize',resize);
+
+// ==========================================================================
+// МАЛЮВАННЯ
+// ==========================================================================
+function ring(g,to){to.beginPath();for(let i=0;i<g.length;i++){
+  const p=P(g[i][0],g[i][1]); i?to.lineTo(p[0],p[1]):to.moveTo(p[0],p[1]);}to.closePath();}
+function path(g,to){to.beginPath();for(let i=0;i<g.length;i++){
+  const p=P(g[i][0],g[i][1]); i?to.lineTo(p[0],p[1]):to.moveTo(p[0],p[1]);}}
+
+// У SVG растрова підкладка (супутник + нічні вогні) вшивається окремим
+// шаром ПІД усім вектором. Непрозора заливка тла після цього закривала її
+// повністю: у файлі був растр на 4 МБ, якого не було видно.
+let NOBG=false;
+function drawBase(c){
+  const L=S.layers, ST=S.style;
+  c.save();
+  if(!NOBG){ c.fillStyle='#04070c';c.fillRect(0,0,Wp,Hp); }
+  // 1. супутник, притемнений і знебарвлений просто на льоту: те саме, що
+  //    робив python для статичного растра, лише фільтром полотна
+  if(L.sat) drawTiles(c,'sat',1,
+    `saturate(${ST.base.sat}%) contrast(1.06) brightness(${ST.base.bright})`,
+    null,S.bias);
+  // 2. холодний зсув: підкладка стає нічною, а не сірою. Тільки під
+  //    супутником: над чорним тлом він і так нічого не робить, а в SVG
+  //    (де растр уже готовий і зсув у ньому) лягав би вдруге — уся карта
+  //    виходила синішою за PNG на 20/255.
+  if(L.sat){
+    c.save();c.globalCompositeOperation='multiply';
+    c.fillStyle='rgba(150,170,205,1)';c.fillRect(0,0,Wp,Hp);c.restore();
+  }
+  // 3. нічні вогні екранним змішуванням — міста читаються без підписів
+  if(L.night) drawTiles(c,'night',ST.base.nightGlow,
+    'saturate(130%) brightness(0.7)','screen',S.bias);
+
+  const B=window.BASE;
+  if(L.water){
+    for(const g of B.lakes){ring(g,c);c.fillStyle='rgba(6,12,20,.55)';c.fill();}
+    c.strokeStyle=`rgba(120,165,205,${ST.base.water})`;c.lineWidth=1;c.lineJoin='round';
+    for(const g of B.rivers){path(g,c);c.stroke();}
+  }
+  if(L.borders) for(const [a3,rings] of Object.entries(B.admin)){
+    c.strokeStyle = a3==='RUS' ? `rgba(170,195,220,${ST.base.borders})`
+                                : `rgba(170,195,220,${ST.base.borders*0.55})`;
+    c.lineWidth=.9;
+    for(const g of rings){ring(g,c);c.stroke();}
+  }
+  // Розсип населених пунктів. Шар був у перемикачах, але його малювання
+  // загубилось при одній із правок — тепер повернуто й теж зі стилю.
+  if(L.places&&B.places) for(const q of B.places){
+    const s2=P(q[0],q[1]);
+    c.beginPath();c.arc(s2[0],s2[1],q[2]===2?1.15:.75,0,7);
+    c.fillStyle=q[2]===2?`rgba(206,222,238,${ST.base.places})`
+                        :`rgba(186,204,222,${ST.base.places*0.58})`;
+    c.fill();
+  }
+  drawLabels(c);
+  c.restore();
+}
+
+// Назва області — розріджений капітел, як на оглядових картах. Показуємо
+// лише в середньому масштабі: на карті всієї країни вони перекривають одна
+// одну, а на кадрі району вже нічого не пояснюють, бо межа за краєм.
+function drawRegionLabels(c,taken){
+  const B=window.BASE;
+  if(!B.regionLabels||S.view.k<0.28||S.view.k>3.2) return;
+  const fits=r=>!taken.some(t=>!(r.x+r.w<t.x||t.x+t.w<r.x||r.y+r.h<t.y||t.y+t.h<r.y));
+  const alpha=Math.min(.44,Math.max(.24,S.view.k*0.34));
+  for(const r of B.regionLabels){
+    const s2=P(r.la,r.lo);
+    if(s2[0]<20||s2[0]>Wp-20||s2[1]<20||s2[1]>Hp-20) continue;
+    // великій області — більший кегль: інакше Волгоградська і Тульська
+    // виглядають однаково важливими
+    const size=Math.max(10.5,Math.min(15,8+Math.sqrt(r.a)*1.6));
+    c.save();
+    c.font=`500 ${size}px "MapSans",ui-sans-serif,-apple-system,Arial`;
+    c.letterSpacing=(size*0.28).toFixed(1)+'px';
+    const w=c.measureText(r.n).width;
+    const box={x:s2[0]-w/2,y:s2[1]-size,w,h:size+4};
+    if(!fits(box)){c.restore();continue;}
+    taken.push(box);
+    c.textAlign='center';c.fillStyle=`rgba(176,198,220,${alpha})`;
+    shadow(c,'rgba(0,0,0,.8)',6);
+    c.fillText(r.n,s2[0],s2[1]);
+    c.restore();
+  }
+}
+
+// Підписи за рівнями. На оглядовій карті країни підписані обласні центри, а
+// на кадрі однієї області — райцентри. Один сталий поріг дає або порожньо,
+// або кашу, тому поріг залежить від масштабу.
+function drawLabels(c){
+  const B=window.BASE, taken=TAKEN;
+  // Підписи областей ідуть ПЕРШИМИ: вони найбільші й мають право на місце,
+  // а місто підпис переставить сам. У зворотному порядку область раз у раз
+  // не влізала й зникала — саме вона й потрібна для орієнтування.
+  if(S.layers.regions) drawRegionLabels(c,taken);
+  const fits=r=>!taken.some(t=>!(r.x+r.w<t.x||t.x+t.w<r.x||r.y+r.h<t.y||t.y+t.h<r.y));
+  if(!S.layers.cities) return;
+  const minPop=S.view.k>2.2?15000:S.view.k>1.1?40000:S.view.k>0.55?90000:250000;
+  const list=(window.LABELS||B.cities||[]).filter(p=>p.p>=minPop);
+  for(const ct of list){
+    const s2=P(ct.la,ct.lo);
+    if(s2[0]<-40||s2[0]>Wp+40||s2[1]<-20||s2[1]>Hp+20) continue;
+    const big=ct.p>700000, mid=ct.p>150000;
+    const size=big?14:mid?12:10.5;
+    c.font=`${big?600:mid?500:400} ${size}px "MapSans",ui-sans-serif,-apple-system,Arial`;
+    const w=c.measureText(ct.n).width, h=size+2;
+    let put=null;
+    for(const [dx,dy] of [[7,4],[-w-9,4],[7,-h+2],[-w-9,-h+2],[7,14],[7,-14]]){
+      const r={x:s2[0]+dx,y:s2[1]+dy-h+4,w,h};
+      if(fits(r)){taken.push(r);put=[r.x,r.y+h-4];break;}
+    }
+    if(!put) continue;
+    c.beginPath();c.arc(s2[0],s2[1],big?2.8:mid?2.1:1.5,0,7);
+    c.fillStyle='rgba(255,255,255,.9)';c.fill();
+    c.save();c.textAlign='left';shadow(c,'rgba(0,0,0,.95)',7);
+    c.fillStyle=big?'rgba(242,248,255,.96)':mid?'rgba(220,234,248,.86)':'rgba(198,216,234,.72)';
+    c.fillText(ct.n,put[0],put[1]);c.restore();
+  }
+}
+
+// Крива маршруту: Катмул-Ром через вузли оператора.
+// Крива маршруту. За замовчуванням — Катмул-Ром через вузли: плавно й без
+// зайвих дій оператора. Але щоб зігнути ОДНУ ділянку, раніше доводилось
+// ставити зайвий вузол, і він же ламав плавність сусідніх. Тому кожна ланка
+// має власний прогин `bow` (зсув по нормалі, в градусах): ланка з прогином
+// малюється квадратичною кривою через свою керувальну точку, решта лишається
+// сплайном. Оператор тягне ручку посередині ланки — вузлів не додається.
+function bowPoint(pts,i,bow){
+  const a=pts[i], b=pts[i+1];
+  const mid=[(a[0]+b[0])/2,(a[1]+b[1])/2];
+  const dla=b[0]-a[0], dlo=(b[1]-a[1])*Math.cos(mid[0]*Math.PI/180);
+  const len=Math.hypot(dla,dlo)||1e-9;
+  // нормаль до ланки; довгота ділиться на косинус, інакше на північ прогин
+  // виходить вужчим, ніж на південь того самого кадру
+  return [mid[0]+(-dlo/len)*bow, mid[1]+(dla/len)*bow/Math.cos(mid[0]*Math.PI/180)];
+}
+// Крива віддає шлях і полотну, і SVG-приймачу. Path2D — це об'єкт браузера,
+// у SVG він не існує, тому для приймача збираємо той самий шлях рядком:
+// інакше маршрути просто не потрапляли у вектор (перевірено — їх не було).
+function newPath(c){
+  if(!c || !c.__svg) return new Path2D();
+  const d=[];
+  return {
+    __path:d,
+    moveTo:(x,y)=>d.push(`M${+x.toFixed(2)} ${+y.toFixed(2)}`),
+    lineTo:(x,y)=>d.push(`L${+x.toFixed(2)} ${+y.toFixed(2)}`),
+    bezierCurveTo:(a1,b1,c1,d1,e1,f1)=>d.push(
+      `C${+a1.toFixed(2)} ${+b1.toFixed(2)} ${+c1.toFixed(2)} ${+d1.toFixed(2)} `+
+      `${+e1.toFixed(2)} ${+f1.toFixed(2)}`),
+    quadraticCurveTo:(a1,b1,c1,d1)=>d.push(
+      `Q${+a1.toFixed(2)} ${+b1.toFixed(2)} ${+c1.toFixed(2)} ${+d1.toFixed(2)}`),
+    closePath:()=>d.push('Z'),
+    get __d(){ return d.join(''); },
+  };
+}
+function spline(pts,c,bows,tension){
+  const t=(tension===undefined?1:tension);
+  const A=pts.map(p=>P(p[0],p[1]));
+  const pa=newPath(c);pa.moveTo(A[0][0],A[0][1]);
+  for(let i=0;i<A.length-1;i++){
+    const bow=bows&&bows[i];
+    if(bow){
+      const cp=bowPoint(pts,i,bow), s2=P(cp[0],cp[1]);
+      pa.quadraticCurveTo(s2[0],s2[1],A[i+1][0],A[i+1][1]);
+      continue;
+    }
+    const p0=A[i-1]||A[i],p1=A[i],p2=A[i+1],p3=A[i+2]||A[i+1];
+    pa.bezierCurveTo(p1[0]+(p2[0]-p0[0])/6*t,p1[1]+(p2[1]-p0[1])/6*t,
+                     p2[0]-(p3[0]-p1[0])/6*t,p2[1]-(p3[1]-p1[1])/6*t,p2[0],p2[1]);
+  }
+  return pa;
+}
+// Пучок: та сама лінія, зсунута по нормалі. Так на оглядових картах
+// показують групу — не одна лінія й не N окремих маршрутів.
+function bundlePaths(pts,n,spread){
+  if(n<=1) return [pts];
+  const out=[];
+  for(let k=0;k<n;k++){
+    const t=(k/(n-1)-0.5)*2;                 // -1..1
+    out.push(pts.map((p,i)=>{
+      const u=pts.length>1 ? i/(pts.length-1) : 0;
+      // Нитки більше не строго паралельні. Рівновіддалені лінії читаються як
+      // мотузка, а не як група: у групі апарати сходяться й розходяться.
+      // Розкид детермінований (від номера нитки й позиції на шляху), а не
+      // випадковий — інакше пучок «кипів» би на кожному перемальовуванні.
+      const wander=1+0.35*Math.sin(3.1*u+k*2.4)+0.15*Math.sin(6.7*u+k*1.1);
+      const w=Math.sin(Math.PI*u)*wander;     // на кінцях сходиться в точку
+      const prev=pts[Math.max(0,i-1)], next=pts[Math.min(pts.length-1,i+1)];
+      const dla=next[0]-prev[0], dlo=next[1]-prev[1];
+      const len=Math.hypot(dla,dlo)||1;
+      return [p[0]+(-dlo/len)*t*spread*w*0.01, p[1]+(dla/len)*t*spread*w*0.01];
+    }));
+  }
+  return out;
+}
+// Точки вздовж кривої з кутом дотичної. Path2D не вміє себе виміряти, тому
+// проходимо ті самі безьє, що й у spline(), і рахуємо їх напряму.
+function samplePath(pts,bows,tension,n){
+  const t=(tension===undefined?1:tension);
+  const A=pts.map(p=>P(p[0],p[1])), segs=[];
+  for(let i=0;i<A.length-1;i++){
+    const bow=bows&&bows[i];
+    if(bow){
+      const cp=P(...bowPoint(pts,i,bow));
+      segs.push({q:true,p0:A[i],c:cp,p1:A[i+1]});
+    }else{
+      const p0=A[i-1]||A[i],p1=A[i],p2=A[i+1],p3=A[i+2]||A[i+1];
+      segs.push({q:false,p0:p1,
+        c1:[p1[0]+(p2[0]-p0[0])/6*t,p1[1]+(p2[1]-p0[1])/6*t],
+        c2:[p2[0]-(p3[0]-p1[0])/6*t,p2[1]-(p3[1]-p1[1])/6*t],p1:p2});
+    }
+  }
+  const at=(s,u)=>{
+    if(s.q){
+      const x=(1-u)*(1-u)*s.p0[0]+2*(1-u)*u*s.c[0]+u*u*s.p1[0];
+      const y=(1-u)*(1-u)*s.p0[1]+2*(1-u)*u*s.c[1]+u*u*s.p1[1];
+      return [x,y];
+    }
+    const v=1-u;
+    return [v*v*v*s.p0[0]+3*v*v*u*s.c1[0]+3*v*u*u*s.c2[0]+u*u*u*s.p1[0],
+            v*v*v*s.p0[1]+3*v*v*u*s.c1[1]+3*v*u*u*s.c2[1]+u*u*u*s.p1[1]];
+  };
+  const out=[];
+  for(let k=1;k<=n;k++){
+    const g=(k/(n+1))*segs.length, i=Math.min(segs.length-1,Math.floor(g));
+    const u=g-i, a=at(segs[i],Math.max(0,u-0.02)), b=at(segs[i],Math.min(1,u+0.02));
+    out.push({x:(a[0]+b[0])/2,y:(a[1]+b[1])/2,ang:Math.atan2(b[1]-a[1],b[0]-a[0])});
+  }
+  return out;
+}
+// Ручка стоїть на самій кривій, а не на хорді: інакше при великому прогині
+// вона відлітає від лінії, і оператор тягне «повітря».
+function bowHandle(o,i){
+  const bow=o.kind==='arrow' ? (o.bow||0) : ((o.bows&&o.bows[i])||0);
+  if(!bow){
+    const a=o.pts[i],b=o.pts[i+1];
+    return [(a[0]+b[0])/2,(a[1]+b[1])/2];
+  }
+  const cp=bowPoint(o.pts,i,bow), a=o.pts[i], b=o.pts[i+1];
+  return [0.25*a[0]+0.5*cp[0]+0.25*b[0], 0.25*a[1]+0.5*cp[1]+0.25*b[1]];
+}
+function drawRoute(o,c,sel){
+  // Колір за типом засобу — правило, а не догма: у карті на кілька хвиль
+  // оператору треба розрізняти дві групи «шахедів», і для цього є власний
+  // колір обʼєкта. Легенда лишається за типами.
+  const col=o.col||(TYPE[o.type]||TYPES[0]).col;
+  const lines=bundlePaths(o.pts,o.count||1,o.spread||0);
+  const A=(o.alpha===undefined?1:o.alpha);
+  const w=o.width||1.6;
+
+  // ОДИН ореол на весь пучок, по центральній лінії. Раніше ореол малювався
+  // під КОЖНОЮ ниткою: дев'ять розмитих смуг накладались і пучок злипався в
+  // суцільну стрічку, де окремих ліній не видно.
+  c.save();
+  // Ореол двома штрихами, а не shadowBlur: розмиття тіні рахується в
+  // ЕКРАННИХ пікселях, тому при експорті ×2.6 давало бруд замість ореолу.
+  const halo=S.style.route.halo*A, hw=w*3.2+(o.spread||0)*0.35;
+  c.lineJoin='round';c.lineCap='round';c.strokeStyle=col;
+  const hp=spline(o.pts,c,o.bows,o.tension);
+  c.globalAlpha=halo*0.55;c.lineWidth=hw*1.7;c.stroke(hp);
+  c.globalAlpha=halo;c.lineWidth=hw;c.stroke(hp);
+  c.restore();
+
+  // самі нитки: тонкі, без сяйва, крайні трохи тьмяніші — так пучок
+  // читається як пучок, а не як мазок
+  c.save();c.lineCap='round';
+  if(o.dash) c.setLineDash([(o.width||1.6)*4,(o.width||1.6)*3]);
+  lines.forEach((L,i)=>{
+    if(L.length<2) return;
+    const edge=lines.length>1 ? Math.abs(i-(lines.length-1)/2)/((lines.length-1)/2) : 0;
+    c.strokeStyle=col;
+    c.globalAlpha=(lines.length>1 ? (0.80-0.30*edge) : 0.95)*A;
+    c.lineWidth=lines.length>1 ? Math.max(0.9,w*0.8) : w;
+    c.stroke(spline(L,c,o.bows,o.tension));
+  });
+  c.restore();
+
+  // Шеврони вздовж шляху: на довгій дузі одне вістря в кінці не показує,
+  // куди саме йде рух, і два маршрути, що перетинаються, читаються однаково.
+  if(o.arrows){
+    for(const s2 of samplePath(o.pts,o.bows,o.tension,o.arrows)){
+      // Світлий шеврон із темним обідком: тим самим кольором, що й лінія,
+      // він просто зникав на пучку — намальований поверх власного кольору.
+      c.save();c.translate(s2.x,s2.y);c.rotate(s2.ang);
+      c.globalAlpha=A;c.lineCap='round';c.lineJoin='round';
+      c.beginPath();c.moveTo(-4.5,-4);c.lineTo(2,0);c.lineTo(-4.5,4);
+      c.strokeStyle='rgba(4,7,12,.85)';c.lineWidth=3.6;c.stroke();
+      c.strokeStyle='rgba(255,255,255,.92)';c.lineWidth=1.7;c.stroke();
+      c.restore();
+    }
+  }
+
+  // Вістря — ОДНЕ, на центральній лінії. Дев'ять вістер на кінцях ниток
+  // накладались одне на одне й перетворювались на пляму; до того ж кінець
+  // пучка й так сходиться в точку.
+  {
+    const P0=o.pts[o.pts.length-2], P1=o.pts[o.pts.length-1];
+    const a=P(P0[0],P0[1]), b=P(P1[0],P1[1]);
+    const ang=Math.atan2(b[1]-a[1],b[0]-a[0]);
+    const hs=Math.max(7,w*4.5);
+    c.save();c.translate(b[0],b[1]);c.rotate(ang);c.globalAlpha=A;
+    c.beginPath();c.moveTo(hs*0.35,0);c.lineTo(-hs*0.8,hs*0.45);
+    c.lineTo(-hs*0.55,0);c.lineTo(-hs*0.8,-hs*0.45);c.closePath();
+    c.fillStyle=col;c.fill();c.restore();
+  }
+
+  if(o.showTime&&(o.t0||o.t1)){
+    // вузли тут — масиви [широта, довгота], а не обʼєкти: у редакторі
+    // маршрут редагується покоординатно
+    const f=o.pts[0], l=o.pts[o.pts.length-1];
+    const fs=P(f[0],f[1]), ls=P(l[0],l[1]);
+    c.save();c.font='600 11px "MapSans",ui-sans-serif,-apple-system,Arial';
+    c.fillStyle=col;shadow(c,'rgba(0,0,0,.9)',6);
+    c.textAlign='right';if(o.t0) c.fillText(o.t0,fs[0]-8,fs[1]+4);
+    c.textAlign='left'; if(o.t1) c.fillText(o.t1,ls[0]+10,ls[1]+4);
+    c.restore();
+  }
+  if(sel){
+    c.save();c.setLineDash([4,4]);c.strokeStyle='#fff';c.globalAlpha=.5;
+    c.lineWidth=1;c.stroke(spline(o.pts,c,o.bows,o.tension));c.restore();
+    o.pts.forEach(p=>{const s2=P(p[0],p[1]);
+      c.beginPath();c.arc(s2[0],s2[1],4,0,7);c.fillStyle='#fff';c.fill();
+      c.beginPath();c.arc(s2[0],s2[1],4,0,7);c.strokeStyle=col;c.lineWidth=1.5;c.stroke();});
+    for(let i=0;i<o.pts.length-1;i++){
+      const h=bowHandle(o,i), s2=P(h[0],h[1]);
+      c.beginPath();c.arc(s2[0],s2[1],6,0,7);
+      c.fillStyle='rgba(4,7,12,.85)';c.fill();
+      c.strokeStyle='rgba(255,255,255,.95)';c.lineWidth=1.6;c.stroke();
+      c.beginPath();c.arc(s2[0],s2[1],1.8,0,7);c.fillStyle='#fff';c.fill();
+    }
+  }
+}
+// Зайняті прямокутники кадру: спільні для підписів міст і плашок обʼєктів.
+// Поки плашки їх не бачили, шар збиттів під Москвою складався в стос із
+// шести карток одна на одній.
+let TAKEN=[];
+function fitsBox(r){
+  return !TAKEN.some(t=>!(r.x+r.w<t.x||t.x+t.w<r.x||r.y+r.h<t.y||t.y+t.h<r.y));
+}
+function placeBox(x,y,w,h){
+  for(const [dx,dy] of [[12,-h/2],[-w-12,-h/2],[12,-h-8],[-w-12,-h-8],
+                        [12,8],[-w-12,8],[12,-h*1.6],[12,h*0.8]]){
+    const r={x:x+dx,y:y+dy,w,h};
+    if(fitsBox(r)){TAKEN.push(r);return [r.x,r.y];}
+  }
+  return null;
+}
+function plate(c,x,y,lines,accent,obj){
+  c.font='600 12px "MapSans",ui-sans-serif,-apple-system,Arial';
+  const w=Math.max(...lines.map(l=>c.measureText(l).width))+18, h=lines.length*15+10;
+  let px,py;
+  if(obj&&obj.lab){
+    // Ручне положення підпису має пріоритет над автоукладанням: оператор
+    // знає, де підпис не заважає, а укладальник знає лише, де є місце.
+    px=x+obj.lab[0]; py=y+obj.lab[1];
+    TAKEN.push({x:px,y:py,w,h});
+  }else{
+    const pos=placeBox(x,y,w,h);
+    if(!pos) return null;                  // місця нема — краще без підпису
+    px=pos[0]; py=pos[1];
+  }
+  if(obj) obj.__plate={x:px,y:py,w,h,ax:x,ay:y};
+  c.beginPath();c.roundRect(px,py,w,h,4);
+  c.fillStyle=`rgba(6,10,16,${S.style.plate.bg})`;c.fill();
+  c.strokeStyle=hexa(accent,S.style.plate.border);c.lineWidth=1;c.stroke();
+  lines.forEach((l,i)=>{
+    c.font=`${i?400:600} ${i?10.5:12}px "MapSans",ui-sans-serif,-apple-system,Arial`;
+    c.fillStyle=i?S.style.plate.text:accent;
+    c.textAlign='left';c.fillText(l,px+9,py+16+i*14);
+  });
+  return {x:px,y:py,w,h};
+}
+function drawLaunch(o,c,sel){
+  const s=P(o.la,o.lo);
+  c.beginPath();c.moveTo(s[0],s[1]-14);c.lineTo(s[0],s[1]+2);
+  c.strokeStyle='rgba(255,255,255,.8)';c.lineWidth=1.2;c.stroke();
+  c.beginPath();c.arc(s[0],s[1]+3,2.6,0,7);c.fillStyle=S.style.launch.pin;c.fill();
+  const t=TYPE[o.type]||TYPES[0];
+  c.beginPath();c.moveTo(s[0]+7,s[1]-13);c.lineTo(s[0]+15,s[1]-8.5);
+  c.lineTo(s[0]+7,s[1]-4);c.closePath();c.fillStyle=t.col;c.fill();
+  plate(c,s[0]+14,s[1]-9,[o.label||'Пускова локація',
+        o.sub||('Місце запуску · '+t.name)],S.style.launch.col,o);
+  if(sel){c.beginPath();c.arc(s[0],s[1],16,0,7);c.strokeStyle='#fff';
+    c.setLineDash([3,3]);c.lineWidth=1;c.stroke();c.setLineDash([]);}
+}
+function drawImpact(o,c,sel){
+  const IM=S.style.impact;
+  const s=P(o.la,o.lo), r=o.size||IM.size||9;
+  const g=c.createRadialGradient(s[0],s[1],0,s[0],s[1],r*2.2);
+  g.addColorStop(0,hexa(IM.col,.95*IM.glow));
+  g.addColorStop(.45,`rgba(255,120,40,${.55*IM.glow})`);
+  g.addColorStop(1,'rgba(255,80,20,0)');
+  c.beginPath();c.arc(s[0],s[1],r*2.2,0,7);c.fillStyle=g;c.fill();
+  const RAYS=Math.max(3,IM.rays||8);
+  for(let i=0;i<RAYS;i++){
+    const a=i*2*Math.PI/RAYS, l=r*(i%2?1.5:2.3);
+    c.beginPath();c.moveTo(s[0]+Math.cos(a)*r*.4,s[1]+Math.sin(a)*r*.4);
+    c.lineTo(s[0]+Math.cos(a)*l,s[1]+Math.sin(a)*l);
+    c.strokeStyle=hexa(IM.col,.85);c.lineWidth=1.6;c.stroke();
+  }
+  c.beginPath();c.arc(s[0],s[1],r*.5,0,7);c.fillStyle='#fff6df';c.fill();
+  if(o.label) plate(c,s[0]+8,s[1],[o.label],'#ffb01f',o);
+  if(sel){c.beginPath();c.arc(s[0],s[1],r*2.6,0,7);c.strokeStyle='#fff';
+    c.setLineDash([3,3]);c.lineWidth=1;c.stroke();c.setLineDash([]);}
+}
+// Проста стрілка-вказівник: не маршрут, а розмітка. Маршрут описує рух і
+// потрапляє в легенду, стрілка лише показує «звідси туди» — на неї не мають
+// поширюватись ані пучок, ані клас засобу.
+function drawArrow(o,c,sel){
+  const a=P(o.pts[0][0],o.pts[0][1]), b=P(o.pts[1][0],o.pts[1][1]);
+  const col=o.col||'#e8f2fc', w=o.width||2.2, head=o.head||10;
+  // прогин: керувальна точка на нормалі до хорди
+  const mid=[(o.pts[0][0]+o.pts[1][0])/2,(o.pts[0][1]+o.pts[1][1])/2];
+  const cp=o.bow?P(...bowPoint(o.pts,0,o.bow)):[(a[0]+b[0])/2,(a[1]+b[1])/2];
+  c.save();
+  if(o.dash) c.setLineDash([w*3,w*2.2]);
+  c.strokeStyle=col;c.lineWidth=w;c.lineCap='round';
+  c.globalAlpha=(o.alpha===undefined?1:o.alpha);
+  if(o.glow){shadow(c,col,10);}
+  c.beginPath();c.moveTo(a[0],a[1]);c.quadraticCurveTo(cp[0],cp[1],b[0],b[1]);
+  c.stroke();c.setLineDash([]);
+  // кут дотичної в кінці — від керувальної точки, інакше головка «дивиться»
+  // повз криву на великому прогині
+  const ang=Math.atan2(b[1]-cp[1],b[0]-cp[0]);
+  const drawHead=(x,y,rot)=>{
+    c.save();c.translate(x,y);c.rotate(rot);
+    c.beginPath();c.moveTo(0,0);c.lineTo(-head,head*0.45);
+    c.lineTo(-head*0.72,0);c.lineTo(-head,-head*0.45);c.closePath();
+    c.fillStyle=col;c.fill();c.restore();
+  };
+  drawHead(b[0],b[1],ang);
+  if(o.both) drawHead(a[0],a[1],Math.atan2(a[1]-cp[1],a[0]-cp[0]));
+  c.restore();
+  if(o.label){
+    const t=[(a[0]+b[0])/2,(a[1]+b[1])/2];
+    c.save();c.font=`600 ${o.size||12}px "MapSans",ui-sans-serif,-apple-system,Arial`;
+    c.fillStyle=col;c.textAlign='center';
+    shadow(c,'rgba(0,0,0,.9)',6);
+    c.fillText(o.label,(t[0]+cp[0])/2,(t[1]+cp[1])/2-6);c.restore();
+  }
+  if(sel){
+    [a,b].forEach(s2=>{c.beginPath();c.arc(s2[0],s2[1],4,0,7);
+      c.fillStyle='#fff';c.fill();c.strokeStyle=col;c.lineWidth=1.4;c.stroke();});
+    const h=bowHandle(o,0), hs=P(h[0],h[1]);
+    c.beginPath();c.arc(hs[0],hs[1],5.5,0,7);
+    c.fillStyle='rgba(4,7,12,.85)';c.fill();
+    c.strokeStyle='rgba(255,255,255,.9)';c.lineWidth=1.5;c.stroke();
+  }
+}
+function drawText(o,c,sel){
+  const s=P(o.la,o.lo), size=o.size||14, lh=size*1.25;
+  const lines=String(o.text||'підпис').split('\n');
+  c.save();c.font=`${o.weight||600} ${size}px "MapSans",ui-sans-serif,-apple-system,Arial`;
+  c.fillStyle=o.col||'rgba(232,242,252,.95)';
+  c.textAlign=o.align||'left';
+  shadow(c,'rgba(0,0,0,.9)',7);
+  c.letterSpacing=(o.ls||0)+'px';
+  let w=0;
+  lines.forEach((ln,i)=>{
+    w=Math.max(w,c.measureText(ln).width);
+    c.fillText(ln,s[0],s[1]+i*lh);
+  });
+  c.restore();
+  if(sel){
+    const x=o.align==='center'?s[0]-w/2:o.align==='right'?s[0]-w:s[0];
+    c.strokeStyle='#fff';c.setLineDash([3,3]);c.lineWidth=1;
+    c.strokeRect(x-3,s[1]-size,w+6,lh*lines.length+4);c.setLineDash([]);
+  }
+}
+function drawZone(o,c,sel){
+  const z=Object.assign({},ZONE[o.zone]||ZONE.area);
+  if(o.col) z.col=o.col;
+  if(o.pts.length<3) return;
+  // Межі беремо з САМОГО полігона, а не з розміру вікна. Заливка «від 0 до
+  // Wp» працювала лише на екрані: в експорті полотно зсунуте на рамку, і
+  // частина зони за межами того прямокутника лишалась незафарбованою.
+  const xs=o.pts.map(p=>P(p[0],p[1])[0]), ys=o.pts.map(p=>P(p[0],p[1])[1]);
+  const bx=Math.min(...xs)-4, by=Math.min(...ys)-4;
+  const bw=Math.max(...xs)-bx+8, bh=Math.max(...ys)-by+8;
+  c.save();ring(o.pts,c);c.clip();
+  c.fillStyle=z.col+'14';c.fillRect(bx,by,bw,bh);
+  if(z.hatch){
+    // Штрих, а не суцільна заливка: зона має читатись як позначка на карті,
+    // а не як зафарбований шматок країни.
+    c.strokeStyle=z.col+'30';c.lineWidth=1;
+    for(let d=bx-bh;d<bx+bw;d+=12){
+      c.beginPath();c.moveTo(d,by);c.lineTo(d+bh,by+bh);c.stroke();}
+  }
+  c.restore();
+  ring(o.pts,c);c.strokeStyle=z.col+'88';c.lineWidth=1.4;c.stroke();
+  if(o.label){
+    const mid=o.pts.reduce((a,p)=>[a[0]+p[0]/o.pts.length,a[1]+p[1]/o.pts.length],[0,0]);
+    const s2=P(mid[0],mid[1]);
+    c.save();c.font='600 12px "MapSans",ui-sans-serif,-apple-system,Arial';c.textAlign='center';
+    c.fillStyle=z.col+'dd';shadow(c,'rgba(0,0,0,.9)',6);
+    c.fillText(o.label,s2[0],s2[1]);c.restore();
+  }
+  if(sel) o.pts.forEach(p=>{const s2=P(p[0],p[1]);
+    c.beginPath();c.arc(s2[0],s2[1],4,0,7);c.fillStyle='#fff';c.fill();});
+}
+function drawTarget(o,c,sel){
+  const s2=P(o.la,o.lo), col=(window.TARGETS&&TARGETS.colors[o.cat])||'#ffd166';
+  c.save();c.translate(s2[0],s2[1]);c.rotate(Math.PI/4);
+  c.fillStyle=col;c.fillRect(-4,-4,8,8);
+  c.strokeStyle='rgba(0,0,0,.6)';c.lineWidth=1;c.strokeRect(-4,-4,8,8);c.restore();
+  plate(c,s2[0]+6,s2[1],[o.label||'ціль'],col,o);
+  if(sel){c.beginPath();c.arc(s2[0],s2[1],14,0,7);c.strokeStyle='#fff';
+    c.setLineDash([3,3]);c.lineWidth=1;c.stroke();c.setLineDash([]);}
+}
+function drawObj(o,c,sel){
+  if(o.kind==='arrow') return drawArrow(o,c,sel);
+  if(o.kind==='zone') return drawZone(o,c,sel);
+  if(o.kind==='target') return drawTarget(o,c,sel);
+  if(o.kind==='route') drawRoute(o,c,sel);
+  else if(o.kind==='launch') drawLaunch(o,c,sel);
+  else if(o.kind==='impact') drawImpact(o,c,sel);
+  else if(o.kind==='text') drawText(o,c,sel);
+}
+
+// легенда збирається з того, що оператор реально поставив
+// Значок типу в легенді. У зразку кожен клас має свій — стрілка, хрест,
+// смуга: інакше десяток рожевих ліній у списку не розрізнити.
+function legendIcon(c,x,y,t){
+  // Значок показує саме те, чим малюється маршрут — товщину й пунктир теж.
+  // Інакше в легенді все однакове, а на карті різне.
+  c.save();c.strokeStyle=t.col;c.fillStyle=t.col;
+  c.lineWidth=Math.max(1.6,(t.width||1.6)*1.3);c.lineCap='round';
+  if(t.dash) c.setLineDash([(t.width||1.6)*4,(t.width||1.6)*3]);
+  const k=t.icon||'arrow';
+  if(k==='arrow'||k==='line'){
+    c.beginPath();c.moveTo(x,y);c.lineTo(x+26,y);c.stroke();
+    if(k==='arrow'){c.beginPath();c.moveTo(x+32,y);c.lineTo(x+24,y-4.5);
+      c.lineTo(x+24,y+4.5);c.closePath();c.fill();}
+  }else if(k==='cross'||k==='plus'){
+    c.beginPath();c.moveTo(x+6,y);c.lineTo(x+26,y);
+    c.moveTo(x+16,y-8);c.lineTo(x+16,y+8);c.stroke();
+    if(k==='cross'){c.beginPath();c.moveTo(x+10,y-6);c.lineTo(x+22,y+6);
+      c.moveTo(x+22,y-6);c.lineTo(x+10,y+6);c.stroke();}
+  }else if(k==='plane'){
+    c.beginPath();c.moveTo(x+4,y+5);c.lineTo(x+26,y-5);
+    c.moveTo(x+12,y-4);c.lineTo(x+18,y+4);c.stroke();
+  }else{
+    c.beginPath();c.arc(x+16,y,6,0,7);c.stroke();
+  }
+  c.restore();
+}
+// Кадр легенди: заголовок у власній смужці, рядки в стовпчиках. Кількість
+// стовпчиків задає оператор: у зразку типів дванадцять, і в один стовпчик
+// вони не влазять.
+function legendBox(c,L,rows,x,y,w,cols){
+  const lh=22, hd=30, perCol=Math.ceil(rows.length/cols);
+  const H=hd+perCol*lh+14;
+  c.beginPath();c.roundRect(x,y,w,H,8);
+  c.fillStyle='rgba(7,11,18,'+(L.opacity===undefined?0.9:L.opacity)+')';c.fill();
+  c.strokeStyle='rgba(120,150,180,.28)';c.lineWidth=1;c.stroke();
+  c.beginPath();c.roundRect(x,y,w,hd,[8,8,0,0]);
+  c.fillStyle='rgba(122,152,182,.13)';c.fill();
+  c.save();c.font='600 11px "MapSans",ui-sans-serif,-apple-system,Arial';
+  c.fillStyle='rgba(198,216,234,.9)';c.letterSpacing='1.4px';c.textAlign='left';
+  c.fillText((L.title||'').toUpperCase(),x+14,y+19);c.restore();
+  const cw=(w-20)/cols;
+  rows.forEach((r,i)=>{
+    const col=Math.floor(i/perCol), row=i%perCol;
+    const rx=x+12+col*cw, ry=y+hd+16+row*lh;
+    r.draw(c,rx,ry);
+    c.save();c.font='400 12px "MapSans",ui-sans-serif,-apple-system,Arial';
+    c.fillStyle='rgba(214,228,242,.9)';c.textAlign='left';
+    c.fillText(r.name,rx+40,ry+4);c.restore();
+  });
+  return H;
+}
+function drawLegend(c,w,h){
+  const LR=S.legend.routes, LZ=S.legend.marks;
+  // Місце під підвал і рядок джерел резервується: інакше нижня легенда
+  // лягала просто на «Ліцензія…» і на підпис підкладки.
+  let y=h-(S.footer.left||S.footer.right?52:32);
+  if(LZ.on){
+    // Друга легенда: зони й позначки. У зразку вона окремим блоком — і це
+    // правильно, бо описує не класи засобів, а те, що на карті намальовано.
+    const rows=[];
+    if(S.objs.some(o=>o.kind==='launch'))
+      rows.push({name:LZ.launchName||'Пускові локації',draw:(c,x,y)=>{
+        c.save();c.strokeStyle='rgba(255,255,255,.85)';c.lineWidth=1.4;
+        c.beginPath();c.moveTo(x+16,y-8);c.lineTo(x+16,y+4);c.stroke();
+        c.beginPath();c.arc(x+16,y+5,2.4,0,7);c.fillStyle='#fff';c.fill();
+        c.restore();
+      }});
+    if(S.objs.some(o=>o.kind==='impact'))
+      rows.push({name:LZ.impactName||'Влучання',draw:(c,x,y)=>{
+        const g=c.createRadialGradient(x+16,y,0,x+16,y,10);
+        g.addColorStop(0,'rgba(255,214,110,.95)');g.addColorStop(1,'rgba(255,80,20,0)');
+        c.save();c.beginPath();c.arc(x+16,y,10,0,7);c.fillStyle=g;c.fill();
+        c.restore();
+      }});
+    for(const z of ZONES){
+      if(!S.objs.some(o=>o.kind==='zone'&&o.zone===z.id)) continue;
+      rows.push({name:z.name,draw:(c,x,y)=>{
+        c.save();c.beginPath();c.rect(x+4,y-7,24,14);c.clip();
+        c.fillStyle=z.col+'22';c.fillRect(x+4,y-7,24,14);
+        if(z.hatch){
+          c.strokeStyle=z.col+'55';c.lineWidth=1;
+          for(let d=-14;d<26;d+=6){
+            c.beginPath();c.moveTo(x+4+d,y+7);c.lineTo(x+4+d+14,y-7);c.stroke();
+          }
+        }
+        c.restore();
+        c.strokeStyle=z.col+'88';c.lineWidth=1;c.strokeRect(x+4,y-7,24,14);
+      }});
+    }
+    if(rows.length){
+      // ширина рахується з найдовшого напису, а не задається наосліп
+      c.font='400 12px "MapSans",ui-sans-serif,-apple-system,Arial';
+      const cols=LZ.cols||1;
+      const wd=LZ.width||Math.max(260,
+        (Math.max(...rows.map(r=>c.measureText(r.name).width))+70)*cols);
+      const H=legendBox(c,LZ,rows,20,y-(30+Math.ceil(rows.length/cols)*22+14),wd,cols);
+      y-=H+12;
+    }
+  }
+  if(LR.on){
+    const used=[...new Set(S.objs.filter(o=>o.kind==='route').map(o=>o.type))]
+      .filter(Boolean).map(id=>TYPE[id]).filter(Boolean);
+    const list=LR.allTypes?TYPES:used;
+    if(list.length){
+      const cols=LR.cols||1;
+      const wd=LR.width||Math.max(230,...list.map(t=>{
+        c.font='400 12px "MapSans",ui-sans-serif,-apple-system,Arial';
+        return c.measureText(t.name).width+70;}))*(cols>1?cols*0.9:1);
+      const H=30+Math.ceil(list.length/cols)*22+14;
+      legendBox(c,LR,list.map(t=>({name:t.name,
+        draw:(c,x,y)=>legendIcon(c,x,y,t)})),20,y-H,wd,cols);
+    }
+  }
+}
+// Підпис джерел. Sentinel-2 cloudless — CC BY 4.0, тобто похідні дозволені
+// РІВНО за умови атрибуції. Тому рядок малюється в експорті, а не лежить
+// десь у README, звідки його ніхто не перенесе на картинку.
+function drawCredit(c,w,h){
+  c.save();c.font='400 10.5px "MapSans",ui-sans-serif,-apple-system,Arial';
+  c.textAlign='right';c.fillStyle='rgba(150,172,194,.65)';
+  shadow(c,'rgba(0,0,0,.9)',5);
+  c.fillText('підкладка: Sentinel-2 cloudless © EOX IT Services, CC BY 4.0 · '+
+             'нічні вогні: NASA VIIRS Black Marble',w-16,h-14);
+  c.restore();
+}
+function drawHeader(c,w){
+  const B=S.brand, t=S.title||'', sb=S.sub||'';
+  if(!t&&!sb&&!B.name) return;
+  c.save();
+  c.font='700 22px "MapSans",ui-sans-serif,-apple-system,Arial';
+  const nameW=B.name?c.measureText(B.name).width:0;
+  c.font='700 21px "MapSans",ui-sans-serif,-apple-system,Arial';
+  const titleW=c.measureText(t).width;
+  c.font='400 12.5px "MapSans",ui-sans-serif,-apple-system,Arial';
+  const subW=Math.max(c.measureText(sb).width, c.measureText(B.handle||'').width);
+  const wd=Math.max(240, Math.max(nameW,titleW,subW)+(B.logo?96:36));
+  const hd=B.name&&t?96:74;
+  c.beginPath();c.roundRect(20,20,wd,hd,8);
+  c.fillStyle='rgba(7,11,18,.9)';c.fill();
+  c.strokeStyle='rgba(120,150,180,.28)';c.lineWidth=1;c.stroke();
+  const tx=B.logo?80:36;
+  if(B.logo){
+    // Знак видання. У зразку він теж кружком ліворуч — місце під нього
+    // лишається навіть якщо оператор вимкне: інакше блок «стрибає».
+    c.beginPath();c.arc(52,20+hd/2,18,0,7);c.strokeStyle='rgba(255,62,165,.5)';
+    c.lineWidth=1.6;c.stroke();
+    c.beginPath();c.arc(52,20+hd/2,6.5,0,7);c.fillStyle='rgba(255,62,165,.85)';c.fill();
+  }
+  c.textAlign='left';
+  let y=20+(B.name?30:34);
+  if(B.name){
+    c.font='700 22px "MapSans",ui-sans-serif,-apple-system,Arial';c.fillStyle='#eef4fb';
+    c.fillText(B.name,tx,y); y+=20;
+    if(B.handle){
+      c.font='400 12px "MapSans",ui-sans-serif,-apple-system,Arial';
+      c.fillStyle='rgba(146,170,194,.9)';c.fillText(B.handle,tx,y); y+=20;
+    }
+  }
+  if(t){
+    c.font='700 21px "MapSans",ui-sans-serif,-apple-system,Arial';c.fillStyle='#eef4fb';
+    c.fillText(t,tx,y); y+=20;
+  }
+  if(sb){
+    c.font='400 12.5px "MapSans",ui-sans-serif,-apple-system,Arial';
+    c.fillStyle='rgba(146,170,194,.92)';c.fillText(sb,tx,y);
+  }
+  c.restore();
+}
+// Підвал: два вільні написи оператора (ліцензія, автор) плюс обовʼязковий
+// рядок джерел підкладки, який окремо і не вимикається.
+function drawFooter(c,w,h){
+  const F=S.footer;
+  if(!F.left&&!F.right) return;
+  c.save();c.font='400 11.5px "MapSans",ui-sans-serif,-apple-system,Arial';
+  c.fillStyle='rgba(180,200,220,.85)';shadow(c,'rgba(0,0,0,.9)',5);
+  if(F.left){c.textAlign='left';c.fillText(F.left,20,h-34);}
+  if(F.right){c.textAlign='right';c.fillText(F.right,w-20,h-34);}
+  c.restore();
+}
+// Водяний знак: у зразку назва видання повторюється по всьому полю. Не
+// прикраса — так простіше довести походження, коли карту перепощують.
+function drawWatermark(c,w,h){
+  const W=S.watermark;
+  if(!W.on||!W.text) return;
+  c.save();
+  c.font='700 26px "MapSans",ui-sans-serif,-apple-system,Arial';
+  c.fillStyle=`rgba(255,255,255,${W.opacity})`;
+  c.textAlign='center';
+  const step=W.step||420;
+  for(let y=step/2;y<h;y+=step)
+    for(let x=(Math.floor(y/step)%2?step/2:0)+step/2;x<w;x+=step)
+      c.fillText(W.text,x,y);
+  c.restore();
+}
+
+// Масштабна лінійка. У Меркаторі кілометр на піксель залежить від широти:
+// лінійка, порахована внизу кадру, завищувала відстань у центрі на 27%
+// (Москва-Воронеж виходила 590 км замість 465). Тому вимір робиться на
+// широті ЦЕНТРА кадру, і ця широта підписана — інакше число виглядає
+// точнішим, ніж воно є.
+function drawScale(c,w,h){
+  const cy=h/2, mid=baseLL(...unscr(w/2,cy));
+  const a=baseLL(...unscr(w/2-100,cy)), b=baseLL(...unscr(w/2+100,cy));
+  const R=6371, dla=(b[0]-a[0])*Math.PI/180, dlo=(b[1]-a[1])*Math.PI/180;
+  const km200=2*R*Math.asin(Math.sqrt(Math.sin(dla/2)**2+
+    Math.cos(a[0]*Math.PI/180)*Math.cos(b[0]*Math.PI/180)*Math.sin(dlo/2)**2));
+  const nice=[25,50,100,200,300,500,1000].reduce((p,v)=>
+    Math.abs(v-km200)<Math.abs(p-km200)?v:p);
+  const px=200*nice/km200;
+  const x=w-40-px, y=h-48;   // вище рядка джерел: підпис широти йде під смугою
+  c.save();c.strokeStyle='rgba(226,238,250,.8)';c.lineWidth=1.4;
+  c.beginPath();c.moveTo(x,y);c.lineTo(x+px,y);
+  c.moveTo(x,y-5);c.lineTo(x,y+5);c.moveTo(x+px,y-5);c.lineTo(x+px,y+5);c.stroke();
+  c.font='600 11.5px "MapSans",ui-sans-serif,-apple-system,Arial';c.textAlign='center';
+  c.fillStyle='rgba(226,238,250,.9)';shadow(c,'rgba(0,0,0,.9)',6);
+  c.fillText(nice+' км',x+px/2,y-10);
+  c.font='400 9.5px "MapSans",ui-sans-serif,-apple-system,Arial';
+  c.fillStyle='rgba(180,200,220,.6)';
+  c.fillText(`на широті ${mid[0].toFixed(0)}°`,x+px/2,y+14);
+  c.restore();
+}
+function drawFrame(c,w,h){
+  if(!S.frame) return;
+  const f=S.frame;
+  c.save();c.fillStyle='rgba(3,5,9,.62)';
+  c.beginPath();c.rect(0,0,w,h);
+  c.rect(f.x,f.y,f.w,f.h);c.fill('evenodd');
+  c.strokeStyle='rgba(255,62,165,.75)';c.lineWidth=1.4;c.strokeRect(f.x,f.y,f.w,f.h);
+  [[f.x,f.y],[f.x+f.w,f.y],[f.x,f.y+f.h],[f.x+f.w,f.y+f.h]].forEach(p=>{
+    c.fillStyle='#ff3ea5';c.fillRect(p[0]-4,p[1]-4,8,8);});
+  c.font='600 11px "MapSans",ui-sans-serif,-apple-system,Arial';c.fillStyle='rgba(255,62,165,.9)';
+  c.textAlign='left';c.fillText(`рамка експорту ${Math.round(f.w)}×${Math.round(f.h)}`,
+    f.x+8,f.y+16);
+  c.restore();
+}
+// Плашки (шапка, легенда, низ) малюються ПІСЛЯ підписів, тому розкладник
+// про них не знав і клав назви міст просто під них — на експорті було видно
+// «Тула · робота ППО» під шапкою. Тепер їхні прямокутники займають місце
+// заздалегідь, і підпис шукає собі інше положення або зникає.
+let MCV=null;
+function chromeBoxes(f){
+  if(!MCV){ MCV=document.createElement('canvas'); MCV.width=MCV.height=8; }
+  const m=MCV.getContext('2d'), rec=[];
+  const rr=m.roundRect.bind(m);
+  m.roundRect=(x,y,w,h,r)=>{ rec.push({x,y,w,h}); rr(x,y,w,h,r); };
+  const rs=RSCALE; RSCALE=1;
+  try{
+    if(S.layers.header) drawHeader(m,f.w);
+    if(S.layers.legend) drawLegend(m,f.w,f.h);
+  }catch(e){ /* вимір не має ламати малювання */ }
+  RSCALE=rs; m.roundRect=rr;
+  // низ картки: рядок джерел, футер і масштабна смуга
+  if(S.layers.scale||S.footer.left||S.footer.right) rec.push({x:0,y:f.h-64,w:f.w,h:64});
+  return rec.map(r=>({x:r.x+f.x-2,y:r.y+f.y-2,w:r.w+4,h:r.h+4}));
+}
+function seedChrome(){
+  const f=S.frame||{x:0,y:0,w:Wp,h:Hp};
+  TAKEN=chromeBoxes(f);
+}
+function draw(){
+  if(!S.ready) return;
+  seedChrome();
+  document.getElementById('zoom').textContent=
+    (S.view.k<0.1?(S.view.k*100).toFixed(1):Math.round(S.view.k*100))+'%';
+  ctx.clearRect(0,0,Wp,Hp);
+  ctx.fillStyle='#04070c';ctx.fillRect(0,0,Wp,Hp);
+  drawBase(ctx);
+  // Шар-привид: підказки з наших даних. Малюються ПО-РІЗНОМУ за впевненістю,
+  // бо вони різні за силою: ланцюг із кількох заявлених ланок — це рух,
+  // підтверджений кількома повідомленнями, а одна ланка на 480 км — лише
+  // твердження каналу, якого ніщо не підтримує.
+  if(S.ghosts.length){
+    ctx.save();
+    for(const g of S.ghosts){
+      if(!ghostVisible(g)) continue;
+      const st=GHOST_STYLE(g.conf);
+      // spline() чекає точки як [широта, довгота] — так само, як у маршрутів.
+      // Передані обʼєкти {la,lo} давали NaN, і лінія не малювалась узагалі:
+      // на карті лишались тільки кружки кінців.
+      const pa=spline(g.pts,ctx,null,1);
+      // темна підкладка під лінією: на світлих ділянках супутника блакитна
+      // підказка інакше губиться
+      ctx.setLineDash([]);ctx.strokeStyle='rgba(4,7,12,.55)';
+      ctx.lineWidth=st.w+2.4;ctx.globalAlpha=.5;ctx.stroke(pa);
+      // Ланки малюються окремо: заявлений напрямок суцільніше, асоціація
+      // рідше, а добудова назад («звідки прийшли») — найрідшим пунктиром.
+      // За нуль-тестом половина добудов випадкова, і на карті це має бути
+      // видно як припущення, а не як спостереження.
+      if(g.legs&&g.legs.length===g.pts.length-1){
+        for(let i=0;i<g.pts.length-1;i++){
+          const seg=spline([g.pts[i],g.pts[i+1]],ctx,null,1);
+          const back=g.back&&g.back[i];
+          ctx.setLineDash(back?[2,7]:(g.legs[i]==='declared'?st.dash:[4,6]));
+          ctx.strokeStyle=st.col;ctx.lineWidth=back?st.w*0.8:st.w;
+          ctx.globalAlpha=back?st.a*0.6:st.a;
+          ctx.stroke(seg);
+        }
+      }else{
+        ctx.setLineDash(st.dash);
+        ctx.strokeStyle=st.col;ctx.lineWidth=st.w;ctx.globalAlpha=st.a;
+        ctx.stroke(pa);
+      }
+      // початок і кінець — маленькі вузли, щоб було видно, звідки й куди
+      const e0=P(g.pts[0][0],g.pts[0][1]);
+      const e1=P(g.pts[g.pts.length-1][0],g.pts[g.pts.length-1][1]);
+      ctx.setLineDash([]);ctx.globalAlpha=st.a;
+      ctx.beginPath();ctx.arc(e0[0],e0[1],2.2,0,7);ctx.fillStyle=st.col;ctx.fill();
+      ctx.beginPath();ctx.arc(e1[0],e1[1],3.2,0,7);ctx.fill();
+      // кількість згадок: три канали про той самий коридор — це сила
+      // свідчення, а не три різні маршрути
+      if(g.claims>1){
+        const m=P(g.pts[0][0],g.pts[0][1]);
+        ctx.setLineDash([]);ctx.globalAlpha=.85;
+        ctx.font='600 10px "MapSans",ui-sans-serif,-apple-system,Arial';
+        ctx.fillStyle=st.col;ctx.fillText('×'+g.claims,m[0]+6,m[1]-6);
+      }
+    }
+    ctx.restore();
+  }
+  for(const o of S.objs){
+    if(o.hidden) continue;
+    drawObj(o,ctx,o===S.sel||S.selMore.includes(o));
+  }
+  if(S.marquee){
+    const m=S.marquee;
+    ctx.save();ctx.setLineDash([5,4]);ctx.strokeStyle='rgba(255,62,165,.9)';
+    ctx.lineWidth=1;ctx.fillStyle='rgba(255,62,165,.08)';
+    ctx.fillRect(m.x,m.y,m.w,m.h);ctx.strokeRect(m.x,m.y,m.w,m.h);ctx.restore();
+  }
+  if(S.draft&&S.draft.pts.length){
+    const d={...S.draft};
+    if(d.kind==='zone'&&d.pts.length>1) drawZone(d,ctx,true);
+    else if(d.pts.length>1) drawRoute(d,ctx,false);
+    d.pts.forEach(p=>{const s=P(p[0],p[1]);
+      ctx.beginPath();ctx.arc(s[0],s[1],3.5,0,7);ctx.fillStyle='#fff';ctx.fill();});
+  }
+  if(S.ruler&&S.ruler.length===2){
+    const a=P(...S.ruler[0]), b=P(...S.ruler[1]);
+    ctx.save();ctx.setLineDash([5,4]);ctx.strokeStyle='#ffd166';ctx.lineWidth=1.4;
+    ctx.beginPath();ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);ctx.stroke();
+    ctx.setLineDash([]);
+    const R=6371,p1=S.ruler[0],p2=S.ruler[1];
+    const dla=(p2[0]-p1[0])*Math.PI/180, dlo=(p2[1]-p1[1])*Math.PI/180;
+    const km=2*R*Math.asin(Math.sqrt(Math.sin(dla/2)**2+
+      Math.cos(p1[0]*Math.PI/180)*Math.cos(p2[0]*Math.PI/180)*Math.sin(dlo/2)**2));
+    plate(ctx,(a[0]+b[0])/2,(a[1]+b[1])/2,[Math.round(km)+' км'],'#ffd166');
+    ctx.restore();
+  }
+  {
+    const f=S.frame||{x:0,y:0,w:Wp,h:Hp};
+    ctx.save();ctx.translate(f.x,f.y);
+    drawWatermark(ctx,f.w,f.h);
+    if(S.layers.scale) drawScale(ctx,f.w,f.h);
+    if(S.layers.legend) drawLegend(ctx,f.w,f.h);
+    if(S.layers.header) drawHeader(ctx,f.w);
+    drawFooter(ctx,f.w,f.h);
+    drawCredit(ctx,f.w,f.h);       // ліцензія CC BY: вимкнути не можна
+    ctx.restore();
+  }
+  drawFrame(ctx,Wp,Hp);
+}
+
+
+// ==========================================================================
+// SVG: той самий код малювання, інший приймач команд
+//
+// Чому це важливо. PNG — це пікселі: збільшив удвічі, отримав мило. У SVG
+// лінія, вістря й підпис лишаються формулами, тому карта різка на будь-якому
+// розмірі, а в Illustrator чи Figma її можна доробити руками.
+//
+// Приймач реалізує ту саму підмножину API полотна, яку використовує наше
+// малювання (шляхи, заливки, текст, градієнти, обрізка, зображення). Тому
+// жодну функцію малювання переписувати не довелось: drawBase, drawRoute і
+// решта просто отримують інший `c`.
+//
+// Растр лишається растром: супутник — це фотографія, і векторним він не
+// стане. Він вкладається одним <image>. Якщо оператор вимкне супутник і
+// нічні вогні, SVG виходить повністю векторним.
+// ==========================================================================
+function SvgCtx(w,h){
+  const meas=document.createElement('canvas').getContext('2d');
+  const st=()=>({fill:'#000',stroke:'#000',lw:1,alpha:1,font:'12px sans-serif',
+                 align:'left',dash:null,cap:'butt',join:'miter',ls:'0px',
+                 m:[1,0,0,1,0,0], clip:null, blur:0, blend:null});
+  let cur=st(), stack=[], defs=[], out=[], path=[], id=0, gradId=null;
+  const uid=()=>'g'+(++id);
+  const mm=(a,b)=>[a[0]*b[0]+a[2]*b[1], a[1]*b[0]+a[3]*b[1],
+                   a[0]*b[2]+a[2]*b[3], a[1]*b[2]+a[3]*b[3],
+                   a[0]*b[4]+a[2]*b[5]+a[4], a[1]*b[4]+a[3]*b[5]+a[5]];
+  const esc=t=>String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+                        .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const mstr=m=>`matrix(${m.map(v=>+v.toFixed(4)).join(',')})`;
+  const paint=v=>{
+    if(typeof v==='string') return v;
+    if(v&&v.__grad) return `url(#${v.__grad})`;
+    return '#000';
+  };
+  function emit(tag){ out.push(tag); }
+  function common(extra=''){
+    const s=[];
+    s.push(`transform="${mstr(cur.m)}"`);
+    if(cur.alpha!==1) s.push(`opacity="${+cur.alpha.toFixed(3)}"`);
+    if(cur.clip) s.push(`clip-path="url(#${cur.clip})"`);
+    const fid=shadowId();
+    if(fid) s.push(`filter="url(#${fid})"`);
+    if(cur.blend) s.push(`style="mix-blend-mode:${cur.blend}"`);
+    return s.join(' ')+(extra?' '+extra:'');
+  }
+  const api={
+    // --- стан ---
+    save(){ stack.push(JSON.parse(JSON.stringify({...cur,m:cur.m.slice()}))); },
+    restore(){ if(stack.length) cur=stack.pop(); },
+    translate(x,y){ cur.m=mm(cur.m,[1,0,0,1,x,y]); },
+    rotate(a){ const c=Math.cos(a),s2=Math.sin(a); cur.m=mm(cur.m,[c,s2,-s2,c,0,0]); },
+    scale(x,y){ cur.m=mm(cur.m,[x,0,0,y,0,0]); },
+    setTransform(a,b,c,d,e,f){ cur.m=[a,b,c,d,e,f]; },
+    // --- шляхи ---
+    beginPath(){ path=[]; },
+    moveTo(x,y){ path.push(`M${+x.toFixed(2)} ${+y.toFixed(2)}`); },
+    lineTo(x,y){ path.push(`L${+x.toFixed(2)} ${+y.toFixed(2)}`); },
+    bezierCurveTo(a,b,c,d,e,f){
+      path.push(`C${+a.toFixed(2)} ${+b.toFixed(2)} ${+c.toFixed(2)} ${+d.toFixed(2)} ${+e.toFixed(2)} ${+f.toFixed(2)}`); },
+    quadraticCurveTo(a,b,c,d){
+      path.push(`Q${+a.toFixed(2)} ${+b.toFixed(2)} ${+c.toFixed(2)} ${+d.toFixed(2)}`); },
+    closePath(){ path.push('Z'); },
+    arc(x,y,r,a0,a1){
+      // повне коло малюємо двома дугами: SVG не має «кола шляхом»
+      const p0=[x+r*Math.cos(a0), y+r*Math.sin(a0)];
+      const full=Math.abs(a1-a0)>=2*Math.PI-1e-6;
+      if(full){
+        path.push(`M${(x-r).toFixed(2)} ${y.toFixed(2)}`+
+                  `a${r.toFixed(2)},${r.toFixed(2)} 0 1,0 ${(2*r).toFixed(2)},0`+
+                  `a${r.toFixed(2)},${r.toFixed(2)} 0 1,0 ${(-2*r).toFixed(2)},0`);
+      }else{
+        const p1=[x+r*Math.cos(a1), y+r*Math.sin(a1)];
+        const large=Math.abs(a1-a0)>Math.PI?1:0;
+        path.push(`M${p0[0].toFixed(2)} ${p0[1].toFixed(2)}`+
+                  `A${r.toFixed(2)},${r.toFixed(2)} 0 ${large},1 ${p1[0].toFixed(2)} ${p1[1].toFixed(2)}`);
+      }
+    },
+    rect(x,y,w2,h2){ path.push(`M${x} ${y}h${w2}v${h2}h${-w2}Z`); },
+    roundRect(x,y,w2,h2,r){
+      const rr=Array.isArray(r)?r:[r,r,r,r];
+      const [a,b,c,d]=rr.map(v=>Math.min(v,Math.min(w2,h2)/2));
+      path.push(`M${x+a} ${y}h${w2-a-b}a${b},${b} 0 0,1 ${b},${b}`+
+                `v${h2-b-c}a${c},${c} 0 0,1 ${-c},${c}`+
+                `h${-(w2-c-d)}a${d},${d} 0 0,1 ${-d},${-d}`+
+                `v${-(h2-d-a)}a${a},${a} 0 0,1 ${a},${-a}Z`);
+    },
+    // --- малювання ---
+    fill(p2,rule){
+      const d=(p2&&p2.__d)||path.join('');
+      if(!d) return;
+      emit(`<path d="${d}" fill="${paint(cur.fill)}" fill-rule="${rule||'nonzero'}" ${common()}/>`);
+    },
+    stroke(p2){
+      const d=(p2&&p2.__d)||path.join('');
+      if(!d) return;
+      const dash=cur.dash&&cur.dash.length?` stroke-dasharray="${cur.dash.join(',')}"`:'';
+      emit(`<path d="${d}" fill="none" stroke="${paint(cur.stroke)}" `+
+           `stroke-width="${+cur.lw.toFixed(2)}" stroke-linecap="${cur.cap}" `+
+           `stroke-linejoin="${cur.join}"${dash} ${common()}/>`);
+    },
+    fillRect(x,y,w2,h2){
+      emit(`<rect x="${x}" y="${y}" width="${w2}" height="${h2}" `+
+           `fill="${paint(cur.fill)}" ${common()}/>`);
+    },
+    strokeRect(x,y,w2,h2){
+      emit(`<rect x="${x}" y="${y}" width="${w2}" height="${h2}" fill="none" `+
+           `stroke="${paint(cur.stroke)}" stroke-width="${cur.lw}" ${common()}/>`);
+    },
+    fillText(t,x,y){
+      if(t===undefined||t===null||t==='') return;
+      const f=parseFont(cur.font);
+      const anchor=cur.align==='center'?'middle':cur.align==='right'?'end':'start';
+      const ls=parseFloat(cur.ls)||0;
+      emit(`<text x="${+x.toFixed(2)}" y="${+y.toFixed(2)}" fill="${paint(cur.fill)}" `+
+           `font-family="${f.family}" font-size="${f.size}" font-weight="${f.weight}" `+
+           `text-anchor="${anchor}"${ls?` letter-spacing="${ls}"`:''} ${common()}>`+
+           `${esc(t)}</text>`);
+    },
+    measureText(t){ meas.font=cur.font; return meas.measureText(t); },
+    drawImage(img,x,y,w2,h2){
+      let href='';
+      try{ href=img.toDataURL?img.toDataURL('image/png'):imgToData(img); }catch(e){ return; }
+      emit(`<image href="${href}" x="${x}" y="${y}" width="${w2}" height="${h2}" `+
+           `preserveAspectRatio="none" ${common()}/>`);
+    },
+    clip(){
+      const d=path.join(''); if(!d) return;
+      const cid=uid();
+      defs.push(`<clipPath id="${cid}" clipPathUnits="userSpaceOnUse">`+
+                `<path d="${d}" transform="${mstr(cur.m)}"/></clipPath>`);
+      cur.clip=cid;
+    },
+    createRadialGradient(x0,y0,r0,x1,y1,r1){
+      const gid=uid(); const stops=[];
+      const g={__grad:gid, addColorStop:(o,c)=>{stops.push(`<stop offset="${o}" stop-color="${c}"/>`);}};
+      // додаємо у defs при завершенні документа
+      g.__flush=()=>defs.push(
+        `<radialGradient id="${gid}" gradientUnits="userSpaceOnUse" `+
+        `cx="${x1}" cy="${y1}" r="${r1}" fx="${x0}" fy="${y0}">${stops.join('')}</radialGradient>`);
+      grads.push(g);
+      return g;
+    },
+    // те, чого у векторі нема — приймаємо й ігноруємо
+    set filter(v){}, get filter(){return 'none';},
+    set imageSmoothingEnabled(v){}, set imageSmoothingQuality(v){},
+    // Режими змішування у SVG є, але звуться інакше. Без цього «холодний
+    // зсув» підкладки (multiply) лягав непрозорою світлою плашкою поверх
+    // усієї карти — саме це й було видно на першому SVG.
+    set globalCompositeOperation(v){
+      cur.blend={'multiply':'multiply','screen':'screen','overlay':'overlay',
+                 'source-over':null}[v]||null;
+    },
+    get globalCompositeOperation(){ return cur.blend||'source-over'; },
+    // Фільтр не створюємо на кожне присвоєння: колір і розмиття задають
+    // двома окремими рядками, тож будуємо ліниво й один раз на пару значень.
+    set shadowColor(v){ cur._shadowCol=v; }, get shadowColor(){return cur._shadowCol;},
+    set shadowBlur(v){ cur.blur=v; },
+    get shadowBlur(){ return cur.blur; },
+  };
+  const grads=[], shadows=new Map();
+  function shadowId(){
+    if(!cur.blur) return null;
+    const col=cur._shadowCol||'#000', key=cur.blur.toFixed(2)+'|'+col;
+    let id=shadows.get(key);
+    if(!id){
+      id=uid(); shadows.set(key,id);
+      defs.push(`<filter id="${id}" x="-50%" y="-50%" width="200%" height="200%">`+
+        `<feDropShadow dx="0" dy="0" stdDeviation="${(cur.blur/2).toFixed(2)}" `+
+        `flood-color="${col}" flood-opacity="0.9"/></filter>`);
+    }
+    return id;
+  }
+  // прості властивості стану
+  Object.defineProperties(api,{
+    fillStyle:{get:()=>cur.fill,set:v=>cur.fill=v},
+    strokeStyle:{get:()=>cur.stroke,set:v=>cur.stroke=v},
+    lineWidth:{get:()=>cur.lw,set:v=>cur.lw=v},
+    globalAlpha:{get:()=>cur.alpha,set:v=>cur.alpha=v},
+    font:{get:()=>cur.font,set:v=>cur.font=v},
+    textAlign:{get:()=>cur.align,set:v=>cur.align=v},
+    lineCap:{get:()=>cur.cap,set:v=>cur.cap=v},
+    lineJoin:{get:()=>cur.join,set:v=>cur.join=v},
+    letterSpacing:{get:()=>cur.ls,set:v=>cur.ls=v},
+  });
+  api.setLineDash=a=>{cur.dash=a&&a.length?a:null;};
+  api.getLineDash=()=>cur.dash||[];
+  // Шрифт вшивається у сам файл: у чужому переглядачі «MapSans» не існує,
+  // і без цього підписи поїхали б на системний шрифт з іншими ширинами.
+  api.__svg=(css)=>{
+    grads.forEach(g=>g.__flush&&g.__flush());
+    const style=css?`<style type="text/css"><![CDATA[${css}]]></style>`:'';
+    return `<svg xmlns="http://www.w3.org/2000/svg" `+
+      `xmlns:xlink="http://www.w3.org/1999/xlink" width="${w}" height="${h}" `+
+      `viewBox="0 0 ${w} ${h}">`+
+      `<defs>${style}${defs.join('')}</defs>${out.join('')}</svg>`;
+  };
+  return api;
+}
+function parseFont(f){
+  // «600 12px "MapSans",ui-sans-serif,Arial» -> вага, розмір, сімʼя
+  const m=/^\s*(\d{3})?\s*([\d.]+)px\s+(.+)$/.exec(f||'');
+  if(!m) return {weight:400,size:12,family:'sans-serif'};
+  return {weight:m[1]||400, size:parseFloat(m[2]),
+          family:m[3].replace(/"/g,'&quot;')};
+}
+function imgToData(img){
+  const c=document.createElement('canvas');
+  c.width=img.naturalWidth||img.width; c.height=img.naturalHeight||img.height;
+  c.getContext('2d').drawImage(img,0,0);
+  return c.toDataURL('image/png');
+}
+
+// ==========================================================================
+// ВЗАЄМОДІЯ
+// ==========================================================================
+function snapshot(){
+  touch();
+  S.undo.push(JSON.stringify(S.objs));
+  if(S.undo.length>80) S.undo.shift();
+  S.redo.length=0;                       // нова дія обриває гілку повтору
+  autosave();
+}
+// Автозбереження. Оператор малює годину, браузер перезавантажується — і без
+// цього все зникає. Ключ один, бо це страховка, а не історія версій.
+// Збереження за позначкою «змінено», а не за подією миші.
+// Спроба писати в обробнику pointerup не спрацьовувала: обробник виконувався
+// (drag обнулявся), а стан у сховищі лишався від початку тягання. Замість
+// полювання на цю причину — джерело правди одне: будь-яка зміна ставить
+// прапорець, таймер раз на 1.5 с його зчитує. Тягання вузла, прогин, зміна
+// властивості й видалення тепер зберігаються однаково.
+let dirty=false;
+function touch(){dirty=true;}
+setInterval(()=>{if(dirty){dirty=false;autosave();}},1500);
+function autosave(){
+  try{ localStorage.setItem('tgmine-map',
+    JSON.stringify({title:S.title,sub:S.sub,objs:S.objs,view:S.view,
+                    frame:S.frame,aspect:S.aspect,types:TYPES,zones:ZONES,
+                    style:S.style,legend:S.legend,brand:S.brand,
+                    footer:S.footer,watermark:S.watermark}));
+  }catch(e){}
+}
+function restore(){
+  try{
+    const d=JSON.parse(localStorage.getItem('tgmine-map')||'null');
+    if(d&&d.objs&&d.objs.length){
+      S.objs=d.objs;S.title=d.title||S.title;S.sub=d.sub||S.sub;
+      if(d.view)S.view=d.view;
+      if(d.frame){S.frame=d.frame;S.aspect=d.aspect||0;}
+      if(d.types){TYPES=d.types;retype();}
+      if(d.zones){ZONES=d.zones;rezone();}
+      if(d.style)S.style=d.style;
+      if(d.legend)S.legend=d.legend;
+      if(d.brand)S.brand=d.brand;
+      if(d.footer)S.footer=d.footer;
+      if(d.watermark)S.watermark=d.watermark;
+      document.getElementById('mTitle').value=S.title;
+      document.getElementById('mSub').value=S.sub;
+      return true;
+    }
+  }catch(e){}
+  return false;
+}
+// Найближча підказка під курсором (лише видимі за поточним порогом).
+function ghostAt(sx,sy){
+  for(const g of S.ghosts){
+    if(!ghostVisible(g)) continue;
+    for(let i=0;i<g.pts.length-1;i++){
+      const a=P(g.pts[i][0],g.pts[i][1]), b=P(g.pts[i+1][0],g.pts[i+1][1]);
+      const t=Math.max(0,Math.min(1,((sx-a[0])*(b[0]-a[0])+(sy-a[1])*(b[1]-a[1]))/
+              (((b[0]-a[0])**2+(b[1]-a[1])**2)||1)));
+      if(Math.hypot(a[0]+t*(b[0]-a[0])-sx, a[1]+t*(b[1]-a[1])-sy)<9) return g;
+    }
+  }
+  return null;
+}
+function hit(sx,sy){
+  // перевіряємо згори вниз: останній намальований — верхній
+  for(let i=S.objs.length-1;i>=0;i--){
+    const o=S.objs[i];
+    // Схований не малюється, тож і не вибирається. Замкнений видно, але він
+    // не чіпляється курсором: інакше велика зона під усім кадром перехоплює
+    // кожен клік, і дістати обʼєкт під нею неможливо.
+    if(o.hidden||o.locked) continue;
+    if(o.kind==='route'||o.kind==='arrow'){
+      for(const p of o.pts){const s=P(p[0],p[1]);
+        if(Math.hypot(s[0]-sx,s[1]-sy)<9) return {o,vertex:o.pts.indexOf(p)};}
+      if(o.kind==='arrow'&&o===S.sel){
+        const h=bowHandle(o,0), s2=P(h[0],h[1]);
+        if(Math.hypot(s2[0]-sx,s2[1]-sy)<9) return {o,vertex:-1,bow:0};
+      }
+      if(o===S.sel) for(let i=0;i<o.pts.length-1;i++){
+        const h=bowHandle(o,i), s=P(h[0],h[1]);
+        if(Math.hypot(s[0]-sx,s[1]-sy)<9) return {o,vertex:-1,bow:i};
+      }
+      // близькість до самої лінії
+      for(let k=0;k<o.pts.length-1;k++){
+        const a=P(o.pts[k][0],o.pts[k][1]), b=P(o.pts[k+1][0],o.pts[k+1][1]);
+        const t=Math.max(0,Math.min(1,((sx-a[0])*(b[0]-a[0])+(sy-a[1])*(b[1]-a[1]))/
+                ((b[0]-a[0])**2+(b[1]-a[1])**2||1)));
+        const px=a[0]+t*(b[0]-a[0]), py=a[1]+t*(b[1]-a[1]);
+        if(Math.hypot(px-sx,py-sy)<8) return {o,vertex:-1};
+      }
+    }else if(o.kind==='zone'){
+      for(const p of o.pts){const s=P(p[0],p[1]);
+        if(Math.hypot(s[0]-sx,s[1]-sy)<9) return {o,vertex:o.pts.indexOf(p)};}
+      // точка в полігоні — промінь-тест на екранних координатах
+      let inside=false;const A=o.pts.map(p=>P(p[0],p[1]));
+      for(let i=0,j=A.length-1;i<A.length;j=i++)
+        if((A[i][1]>sy)!==(A[j][1]>sy)&&
+           sx<(A[j][0]-A[i][0])*(sy-A[i][1])/((A[j][1]-A[i][1])||1e-9)+A[i][0])
+          inside=!inside;
+      if(inside) return {o,vertex:-1};
+    }else{
+      const s=P(o.la,o.lo);
+      const pl=o.__plate;
+      if(pl&&sx>=pl.x&&sx<=pl.x+pl.w&&sy>=pl.y&&sy<=pl.y+pl.h)
+        return {o,vertex:-1,plate:true};
+      if(Math.hypot(s[0]-sx,s[1]-sy)<18) return {o,vertex:-1};
+    }
+  }
+  return null;
+}
+// Прилипання: вузол маршруту сідає рівно на ціль або місто, якщо курсор
+// близько. Інакше оператор ставить лінію «майже в аеродром», і на експорті
+// це видно як промах на 20 км.
+function snap(la,lo,sx,sy){
+  let best=null,bd=14;
+  const cand=[];
+  if(window.TARGETS) for(const t of TARGETS.items) cand.push([t.la,t.lo]);
+  if(window.BASE&&BASE.cities) for(const c of BASE.cities) cand.push([c.la,c.lo]);
+  for(const c of cand){
+    const s2=P(c[0],c[1]), d=Math.hypot(s2[0]-sx,s2[1]-sy);
+    if(d<bd){bd=d;best=c;}
+  }
+  return best?[best[0],best[1]]:[la,lo];
+}
+let drag=null, pan=null;
+cv.addEventListener('pointerdown',e=>{
+  const r=cv.getBoundingClientRect(), sx=e.clientX-r.left, sy=e.clientY-r.top;
+  // Панорама — пробіл або середня кнопка. Раніше це був Shift, і через це
+  // Shift+клік для множинного вибору не доходив до вибору взагалі: карта
+  // просто починала їхати.
+  if(e.button===1||S.spacePan){pan={sx,sy,vx:S.view.x,vy:S.view.y};return;}
+  const [bx,by]=unscr(sx,sy), [la,lo]=baseLL(bx,by);
+  // тягання рамки експорту має пріоритет над усім: вона поверх карти
+  if(S.frame){
+    const f=S.frame, c=[[f.x,f.y,'nw'],[f.x+f.w,f.y,'ne'],[f.x,f.y+f.h,'sw'],
+                        [f.x+f.w,f.y+f.h,'se']];
+    for(const [cx,cy,id] of c)
+      if(Math.hypot(cx-sx,cy-sy)<10){drag={frame:id,sx,sy,orig:{...f}};return;}
+    if(sx>f.x&&sx<f.x+f.w&&sy>f.y&&sy<f.y+f.h&&S.tool==='select'&&!hit(sx,sy)){
+      drag={frame:'move',sx,sy,orig:{...f}};return;}
+  }
+  if(S.tool==='ruler'){
+    S.ruler=(S.ruler&&S.ruler.length===1)?[S.ruler[0],[la,lo]]:[[la,lo]];
+    draw();return;
+  }
+  if(S.tool==='arrow'){
+    // Стрілка малюється одним рухом: натиснув — початок, відпустив — кінець.
+    snapshot();
+    const o={kind:'arrow',pts:[[la,lo],[la,lo]],width:2.2,head:10,bow:0,
+             col:'#e8f2fc',glow:true};
+    S.objs.push(o);S.sel=o;S.selMore=[];
+    drag={h:{o,vertex:1},sx,sy,orig:JSON.parse(JSON.stringify(o))};
+    return;
+  }
+  if(S.tool==='route'){
+    if(!S.draft){
+      // стиль береться з типу: товщина, пучок, розкид, стрілки, пунктир
+      const t=TYPE[S.type]||TYPES[0];
+      S.draft={kind:'route',type:S.type,pts:[],count:t.count||1,
+               spread:t.spread||0,width:t.width||1.6,arrows:t.arrows||0,
+               dash:!!t.dash,tension:1};
+    }
+    S.draft.pts.push(snap(la,lo,sx,sy)); draw(); return;
+  }
+  if(S.tool==='zone'){
+    if(!S.draft) S.draft={kind:'zone',zone:S.zone,pts:[],label:''};
+    S.draft.pts.push([la,lo]); draw(); return;
+  }
+  if(S.tool==='launch'||S.tool==='impact'||S.tool==='text'){
+    snapshot();
+    const o={kind:S.tool,type:S.type,la,lo};
+    if(S.tool==='text'){o.text='підпис';o.size=14;}
+    if(S.tool==='impact'){o.size=9;}
+    S.objs.push(o);S.sel=o;setTool('select');refresh();return;
+  }
+  // Alt по лінії додає вузол, Alt по вузлу прибирає. Без цього маршрут
+  // доводилось перемальовувати заново через один зайвий клік.
+  if(e.altKey){
+    const h2=hit(sx,sy);
+    if(h2&&h2.o.pts){
+      const o=h2.o;
+      if(h2.vertex>=0){
+        const min=o.kind==='zone'?3:2;
+        if(o.pts.length>min){
+          snapshot();o.pts.splice(h2.vertex,1);
+          if(o.bows) o.bows.splice(Math.max(0,h2.vertex-1),1);
+          refresh();
+        }
+        return;
+      }
+      // вставляємо у найближчу ланку
+      let best=0,bd=1e9;
+      for(let i=0;i<o.pts.length-(o.kind==='zone'?0:1);i++){
+        const a=P(o.pts[i][0],o.pts[i][1]);
+        const j=(i+1)%o.pts.length, b=P(o.pts[j][0],o.pts[j][1]);
+        const t=Math.max(0,Math.min(1,((sx-a[0])*(b[0]-a[0])+(sy-a[1])*(b[1]-a[1]))/
+                (((b[0]-a[0])**2+(b[1]-a[1])**2)||1)));
+        const d=Math.hypot(a[0]+t*(b[0]-a[0])-sx, a[1]+t*(b[1]-a[1])-sy);
+        if(d<bd){bd=d;best=i;}
+      }
+      snapshot();
+      o.pts.splice(best+1,0,[la,lo]);
+      if(o.bows) o.bows.splice(best,0,0);
+      S.sel=o;refresh();
+      return;
+    }
+  }
+  // Клік по підказці перетворює її на редагований маршрут. Без цього шар
+  // був картинкою: подивитись можна, взяти в роботу — ні.
+  if(S.tool==='select'&&!hit(sx,sy)){
+    const g=ghostAt(sx,sy);
+    if(g){
+      snapshot();
+      const t=TYPE[S.type]||TYPES[0];
+      const o={kind:'route',type:t.id,count:Math.max(t.count||1,g.claims||1),
+               spread:t.spread||12,width:t.width||1.6,arrows:t.arrows||0,
+               dash:!!t.dash,tension:1,
+               pts:g.pts.map(p=>[p[0],p[1]]),t0:g.t0,t1:g.t1};
+      S.objs.push(o);S.sel=o;S.selMore=[];
+      S.ghosts=S.ghosts.filter(x=>x!==g);
+      toast('підказку взято в роботу — далі веди сам');
+      refresh();return;
+    }
+  }
+  // вибір
+  const h=hit(sx,sy);
+  if(!h){
+    // Порожнє місце — рамка вибору. Без неї згрупувати десяток позначок
+    // збиття можна було тільки по одній.
+    S.sel=null;S.selMore=[];S.marquee={x:sx,y:sy,w:0,h:0,sx,sy};
+    refresh();return;
+  }
+  if(e.shiftKey){
+    // Shift додає або знімає обʼєкт із вибору
+    if(S.sel===h.o){S.sel=S.selMore.pop()||null;}
+    else if(S.selMore.includes(h.o)){S.selMore=S.selMore.filter(o=>o!==h.o);}
+    else if(S.sel){S.selMore.push(S.sel);S.sel=h.o;}
+    else S.sel=h.o;
+  }else if(!(S.sel===h.o||S.selMore.includes(h.o))){
+    S.sel=h.o;S.selMore=[];
+  }
+  snapshot();
+  drag={h,sx,sy,orig:JSON.parse(JSON.stringify(h.o)),
+        group:[S.sel,...S.selMore].filter(Boolean)
+          .map(o=>({o,orig:JSON.parse(JSON.stringify(o))}))};
+  refresh();
+});
+cv.addEventListener('pointermove',e=>{
+  const r=cv.getBoundingClientRect(), sx=e.clientX-r.left, sy=e.clientY-r.top;
+  const [bx,by]=unscr(sx,sy), [la,lo]=baseLL(bx,by);
+  document.getElementById('cursor').textContent=la.toFixed(2)+'° / '+lo.toFixed(2)+'°';
+  if(pan){S.view.x=pan.vx-(sx-pan.sx)/S.view.k;S.view.y=pan.vy-(sy-pan.sy)/S.view.k;draw();return;}
+  if(S.marquee){
+    const m=S.marquee;
+    m.x=Math.min(m.sx,sx);m.y=Math.min(m.sy,sy);
+    m.w=Math.abs(sx-m.sx);m.h=Math.abs(sy-m.sy);
+    draw();return;
+  }
+  if(drag&&drag.frame){
+    const f=S.frame,o=drag.orig,dx=sx-drag.sx,dy=sy-drag.sy;
+    if(drag.frame==='move'){f.x=o.x+dx;f.y=o.y+dy;}
+    else{
+      if(drag.frame.includes('w')){f.x=o.x+dx;f.w=o.w-dx;}else{f.w=o.w+dx;}
+      if(drag.frame.includes('n')){f.y=o.y+dy;f.h=o.h-dy;}else{f.h=o.h+dy;}
+      if(S.aspect){f.h=f.w/S.aspect;}
+      f.w=Math.max(120,f.w);f.h=Math.max(120,f.h);
+    }
+    draw();return;
+  }
+  if(!drag) return;
+  const o=drag.h.o;
+  if(drag.h.bow!==undefined){
+    const i=drag.h.bow, a=o.pts[i], b=o.pts[i+1];
+    const mid=[(a[0]+b[0])/2,(a[1]+b[1])/2];
+    const dla=b[0]-a[0], dlo=(b[1]-a[1])*Math.cos(mid[0]*Math.PI/180);
+    const len=Math.hypot(dla,dlo)||1e-9;
+    // проєкція зсуву курсора на нормаль ланки, помножена на 2:
+    // ручка стоїть у середині квадратичної кривої, тобто на половині прогину
+    const vla=la-mid[0], vlo=(lo-mid[1])*Math.cos(mid[0]*Math.PI/180);
+    const val=2*((-dlo/len)*vla+(dla/len)*vlo);
+    if(o.kind==='arrow') o.bow=val;
+    else {o.bows=o.bows||[];o.bows[i]=val;}
+    touch();draw();return;
+  }
+  if(drag.h.plate){
+    const pl=drag.orig.__plate||o.__plate;
+    o.lab=[ (drag.plab?drag.plab[0]:pl.x-pl.ax) + (sx-drag.sx),
+            (drag.plab?drag.plab[1]:pl.y-pl.ay) + (sy-drag.sy) ];
+    if(!drag.plab) drag.plab=[pl.x-pl.ax, pl.y-pl.ay];
+    touch();draw();return;
+  }
+  if(drag.h.vertex>=0){o.pts[drag.h.vertex]=[la,lo];}
+  else{
+    // цілий обʼєкт (або весь вибір) зсувається на ту саму дельту
+    const d0=baseLL(...unscr(drag.sx,drag.sy));
+    const dla=la-d0[0], dlo=lo-d0[1];
+    for(const g of (drag.group||[{o,orig:drag.orig}])){
+      if(g.orig.pts) g.o.pts=g.orig.pts.map(p=>[p[0]+dla,p[1]+dlo]);
+      else {g.o.la=g.orig.la+dla; g.o.lo=g.orig.lo+dlo;}
+    }
+  }
+  touch();draw();
+});
+addEventListener('pointerup',()=>{
+  if(S.marquee){
+    const m=S.marquee;S.marquee=null;
+    if(m.w>4&&m.h>4){
+      const inside=o=>{
+        const pts=o.pts?o.pts.map(p=>P(p[0],p[1])):[P(o.la,o.lo)];
+        return pts.some(s2=>s2[0]>=m.x&&s2[0]<=m.x+m.w&&s2[1]>=m.y&&s2[1]<=m.y+m.h);
+      };
+      const got=S.objs.filter(inside);
+      S.sel=got[0]||null;S.selMore=got.slice(1);
+    }
+    refresh();
+  }
+  drag=null;pan=null;touch();
+});
+cv.addEventListener('wheel',e=>{
+  e.preventDefault();
+  const r=cv.getBoundingClientRect(), sx=e.clientX-r.left, sy=e.clientY-r.top;
+  const before=unscr(sx,sy);
+  S.view.k=Math.max(.15,Math.min(6,S.view.k*(e.deltaY<0?1.12:1/1.12)));
+  const after=unscr(sx,sy);
+  S.view.x+=before[0]-after[0];S.view.y+=before[1]-after[1];
+  document.getElementById('zoom').textContent=
+    (S.view.k<0.1?(S.view.k*100).toFixed(1):Math.round(S.view.k*100))+'%';
+  draw();
+},{passive:false});
+cv.addEventListener('dblclick',e=>{
+  if(S.draft){finishRoute();return;}
+  // Подвійний клік по порожньому наближає — так поводяться всі карти.
+  const r=cv.getBoundingClientRect(), sx=e.clientX-r.left, sy=e.clientY-r.top;
+  const before=unscr(sx,sy);
+  S.view.k=Math.min(6,S.view.k*1.6);
+  const after=unscr(sx,sy);
+  S.view.x+=before[0]-after[0];S.view.y+=before[1]-after[1];
+  draw();
+});
+
+// ---- контекстне меню ------------------------------------------------------
+const menu=document.getElementById('menu');
+function hideMenu(){menu.style.display='none';}
+function showMenu(sx,sy){
+  const has=!!S.sel, n=[S.sel,...S.selMore].filter(Boolean).length;
+  const item=(label,key,fn,off)=>off?'':
+    `<button data-a="${label}">${label}<span class="k">${key||''}</span></button>`;
+  menu.innerHTML=
+    item('Дублювати','Ctrl+D')+item('Копіювати','Ctrl+C')+
+    item('Вставити','Ctrl+V')+item('Видалити','Del')+
+    '<div class="sep"></div>'+
+    item('На передній план',']')+item('На задній план','[')+
+    item(S.sel&&S.sel.hidden?'Показати':'Сховати','')+
+    item(S.sel&&S.sel.locked?'Відімкнути':'Замкнути','')+
+    '<div class="sep"></div>'+
+    item('Зняти вибір','Esc')+item('Вибрати все','Ctrl+A');
+  menu.querySelectorAll('button').forEach(b=>{
+    const a=b.dataset.a;
+    if(!has&&['Дублювати','Копіювати','Видалити','На передній план',
+              'На задній план','Сховати','Показати','Замкнути','Відімкнути',
+              'Зняти вибір'].includes(a)) b.disabled=true, b.style.opacity=.35;
+    b.onclick=()=>{
+      hideMenu();
+      if(a==='Дублювати') duplicate();
+      else if(a==='Копіювати') copySel();
+      else if(a==='Вставити') pasteClip();
+      else if(a==='Видалити') delSel();
+      else if(a==='На передній план') order(1);
+      else if(a==='На задній план') order(-1);
+      else if(a==='Сховати'||a==='Показати'){snapshot();S.sel.hidden=!S.sel.hidden;
+        S.sel=null;S.selMore=[];refresh();}
+      else if(a==='Замкнути'||a==='Відімкнути'){snapshot();S.sel.locked=!S.sel.locked;
+        S.sel=null;S.selMore=[];refresh();}
+      else if(a==='Зняти вибір'){S.sel=null;S.selMore=[];refresh();}
+      else if(a==='Вибрати все') selectAll();
+    };
+  });
+  menu.style.display='block';
+  menu.style.left=Math.min(sx, cv.clientWidth-210)+'px';
+  menu.style.top=Math.min(sy, cv.clientHeight-260)+'px';
+}
+cv.addEventListener('contextmenu',e=>{
+  e.preventDefault();
+  const r=cv.getBoundingClientRect(), sx=e.clientX-r.left, sy=e.clientY-r.top;
+  const h=hit(sx,sy);
+  if(h&&!(S.sel===h.o||S.selMore.includes(h.o))){S.sel=h.o;S.selMore=[];refresh();}
+  showMenu(sx,sy);
+});
+addEventListener('pointerdown',e=>{ if(!menu.contains(e.target)) hideMenu(); },true);
+
+// ---- перетягування файла карти на вікно ----------------------------------
+// Класика: файл кидають у вікно, а не шукають кнопку «Відкрити».
+const stage=document.getElementById('stage');
+stage.addEventListener('dragover',e=>{e.preventDefault();});
+stage.addEventListener('drop',e=>{
+  e.preventDefault();
+  const f=e.dataTransfer.files[0];
+  if(!f||!/\.json$/i.test(f.name)){toast('очікується файл карти .json');return;}
+  const rd=new FileReader();
+  rd.onload=()=>{
+    try{
+      const d=JSON.parse(rd.result);
+      snapshot();
+      S.objs=d.objs||[];S.title=d.title||'';S.sub=d.sub||'';
+      if(d.view)S.view=d.view;
+      if(d.frame!==undefined){S.frame=d.frame;S.aspect=d.aspect||0;}
+      document.getElementById('mTitle').value=S.title;
+      document.getElementById('mSub').value=S.sub;
+      toast('карту відкрито: '+f.name);refresh();
+    }catch(err){toast('не вдалося прочитати файл');}
+  };
+  rd.readAsText(f);
+});
+addEventListener('keyup',e=>{ if(e.code==='Space') S.spacePan=false; });
+addEventListener('keydown',e=>{
+  if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA') return;
+  if(e.code==='Space'){e.preventDefault();S.spacePan=true;
+    cv.style.cursor='grab';return;}
+  if(e.key==='Enter') finishRoute();
+  if(e.key==='Escape'){
+    // Esc послідовно: скасувати чернетку -> зняти вибір -> повернутись у вибір
+    if(S.draft){S.draft=null;toast('скасовано');}
+    else if(S.sel||S.selMore.length){S.sel=null;S.selMore=[];}
+    else setTool('select');
+    hideMenu();refresh();
+  }
+  if(e.key==='Delete'||e.key==='Backspace'){delSel();}
+  if(e.key==='v'||e.key==='V')setTool('select');
+  if(e.key==='r'||e.key==='R')setTool('route');
+  if(e.key==='l'||e.key==='L')setTool('launch');
+  if(e.key==='i'||e.key==='I')setTool('impact');
+  if(e.key==='t'||e.key==='T')setTool('text');
+  if(e.key==='z'&&!e.ctrlKey&&!e.metaKey)setTool('zone');
+  if(e.key==='a'&&!e.ctrlKey&&!e.metaKey)setTool('arrow');
+  if(e.key==='m'||e.key==='M')setTool('ruler');
+  if((e.ctrlKey||e.metaKey)&&e.key==='z'){e.preventDefault();e.shiftKey?redo():undo();}
+  if((e.ctrlKey||e.metaKey)&&e.key==='d'){e.preventDefault();duplicate();}
+  // Класичний набір: копіювати, вирізати, вставити, вибрати все, зберегти,
+  // відкрити. Людина пробує саме їх, а не вигадані комбінації.
+  if((e.ctrlKey||e.metaKey)&&e.key==='c'){e.preventDefault();copySel();}
+  if((e.ctrlKey||e.metaKey)&&e.key==='x'){e.preventDefault();copySel();delSel();}
+  if((e.ctrlKey||e.metaKey)&&e.key==='v'){e.preventDefault();pasteClip();}
+  if((e.ctrlKey||e.metaKey)&&e.key==='a'){e.preventDefault();selectAll();}
+  if((e.ctrlKey||e.metaKey)&&e.key==='s'){e.preventDefault();
+    document.getElementById('save').click();toast('карту збережено у файл');}
+  if((e.ctrlKey||e.metaKey)&&e.key==='o'){e.preventDefault();
+    document.getElementById('load').click();}
+  if((e.ctrlKey||e.metaKey)&&e.key==='y'){e.preventDefault();redo();}
+  if(e.key===']')order(1);
+  if(e.key==='[')order(-1);
+  // 1..8 — тип засобу: оператор перемикає його частіше за будь-що інше
+  if(/^[1-8]$/.test(e.key)){
+    const t=TYPES[+e.key-1];
+    if(t){S.type=t.id;
+      if(S.sel&&S.sel.kind!=='text'&&S.sel.kind!=='zone'){snapshot();S.sel.type=t.id;}
+      document.querySelectorAll('.type').forEach((x,i)=>
+        x.classList.toggle('on',TYPES[i].id===t.id));
+      refresh();}
+  }
+  // стрілки рухають вибране: точне доведення без миші
+  if(e.key.startsWith('Arrow')&&S.sel){
+    e.preventDefault();
+    const d=(e.shiftKey?0.25:0.05)*(e.key==='ArrowUp'||e.key==='ArrowDown'?1:1);
+    const dla=e.key==='ArrowUp'?d:e.key==='ArrowDown'?-d:0;
+    const dlo=e.key==='ArrowRight'?d:e.key==='ArrowLeft'?-d:0;
+    if(S.sel.pts) S.sel.pts=S.sel.pts.map(p=>[p[0]+dla,p[1]+dlo]);
+    else {S.sel.la+=dla;S.sel.lo+=dlo;}
+    draw();
+  }
+});
+function finishRoute(){
+  if(S.draft){
+    const need=S.draft.kind==='zone'?3:2;
+    if(S.draft.pts.length>=need){snapshot();S.objs.push(S.draft);S.sel=S.draft;}
+  }
+  S.draft=null;setTool('select');refresh();
+}
+function undo(){
+  if(!S.undo.length){toast('скасовувати нема чого');return;}
+  S.redo.push(JSON.stringify(S.objs));
+  S.objs=JSON.parse(S.undo.pop());S.sel=null;S.selMore=[];autosave();
+  toast('скасовано');refresh();
+}
+function redo(){
+  if(!S.redo.length){toast('повторювати нема чого');return;}
+  S.undo.push(JSON.stringify(S.objs));
+  S.objs=JSON.parse(S.redo.pop());S.sel=null;S.selMore=[];autosave();
+  toast('повторено');refresh();
+}
+function duplicate(){
+  const all=[S.sel,...S.selMore].filter(Boolean);
+  if(all.length>1){
+    snapshot();
+    const copies=all.map(o=>{
+      const c=JSON.parse(JSON.stringify(o));
+      if(c.pts) c.pts=c.pts.map(p=>[p[0]-0.25,p[1]+0.35]);
+      else {c.la-=0.25;c.lo+=0.35;}
+      S.objs.push(c);return c;
+    });
+    S.sel=copies[0];S.selMore=copies.slice(1);refresh();return;
+  }
+  if(!S.sel)return;snapshot();
+  const c=JSON.parse(JSON.stringify(S.sel));
+  // зсув на пів градуса, інакше копія лягає точно під оригінал і здається,
+  // що нічого не сталось
+  if(c.pts) c.pts=c.pts.map(p=>[p[0]-0.25,p[1]+0.35]);
+  else {c.la-=0.25;c.lo+=0.35;}
+  S.objs.push(c);S.sel=c;refresh();
+}
+function order(dir){
+  if(!S.sel)return;snapshot();
+  const i=S.objs.indexOf(S.sel);
+  S.objs.splice(i,1);
+  S.objs.splice(dir>0?S.objs.length:0,0,S.sel);
+  refresh();
+}
+function copySel(){
+  const all=[S.sel,...S.selMore].filter(Boolean);
+  if(!all.length) return;
+  S.clip=JSON.stringify(all);
+  toast(all.length===1?'скопійовано обʼєкт':`скопійовано обʼєктів: ${all.length}`);
+}
+function pasteClip(){
+  if(!S.clip) return;
+  snapshot();
+  const copies=JSON.parse(S.clip).map(o=>{
+    delete o.__plate;
+    if(o.pts) o.pts=o.pts.map(p=>[p[0]-0.2,p[1]+0.3]);
+    else {o.la-=0.2;o.lo+=0.3;}
+    S.objs.push(o);return o;
+  });
+  S.sel=copies[0];S.selMore=copies.slice(1);
+  toast(`вставлено: ${copies.length}`);refresh();
+}
+function selectAll(){
+  const got=S.objs.filter(o=>!o.hidden&&!o.locked);
+  S.sel=got[0]||null;S.selMore=got.slice(1);
+  toast(`вибрано: ${got.length}`);refresh();
+}
+function delSel(){
+  const all=[S.sel,...S.selMore].filter(Boolean);
+  if(!all.length)return;
+  snapshot();S.objs=S.objs.filter(o=>!all.includes(o));
+  S.sel=null;S.selMore=[];refresh();
+}
+
+// ==========================================================================
+// ПАНЕЛІ
+// ==========================================================================
+const HINTS={
+  select:'Клік — вибрати · Shift+клік — додати · рамка по порожньому — кілька · пробіл+тягнути — панорама',
+  route:'Маршрут: клік ставить вузол, Enter або подвійний клік завершує, Esc скасовує',
+  launch:'Пускова: клікни там, де ставити позначку',
+  impact:'Влучання: клікни там, де ставити спалах',
+  text:'Підпис: клікни, де почати текст (далі редагуй у панелі праворуч)',
+  arrow:'Стрілка: натисни й тягни від початку до кінця',
+  zone:'Зона: клікай по кутах, Enter замикає, Esc скасовує',
+  ruler:'Лінійка: два кліки — відстань між ними',
+};
+const CURSORS={select:'default',text:'text',ruler:'crosshair'};
+function toast(msg){
+  const t=document.getElementById('toast');
+  t.textContent=msg;t.classList.add('on');
+  clearTimeout(toast._t);toast._t=setTimeout(()=>t.classList.remove('on'),1700);
+}
+function setTool(t){
+  S.tool=t;S.spacePan=false;
+  document.querySelectorAll('.tool[data-tool]').forEach(b=>
+    b.classList.toggle('on',b.dataset.tool===t));
+  cv.style.cursor=CURSORS[t]||'crosshair';
+  const h=document.getElementById('hint2');
+  h.textContent=HINTS[t]||'';
+  h.style.opacity=1;
+  clearTimeout(setTool._t);
+  setTool._t=setTimeout(()=>{h.style.opacity=0;},4500);
+}
+document.querySelectorAll('.tool[data-tool]').forEach(b=>
+  b.onclick=()=>setTool(b.dataset.tool));
+document.getElementById('panelToggle').onclick=()=>{
+  document.getElementById('app').classList.toggle('hidepanel');
+  setTimeout(resize,50);
+};
+document.getElementById('undo').onclick=undo;
+document.getElementById('redo').onclick=redo;
+document.getElementById('dup').onclick=duplicate;
+document.getElementById('del').onclick=delSel;
+
+retype();
+
+function field(label,val,on,attrs=''){
+  return `<label>${label}</label><input data-k="${on}" value="${val??''}" ${attrs}>`;
+}
+function refresh(){
+  // властивості
+  const p=document.getElementById('props'), o=S.sel;
+  if(!o){p.innerHTML='<div class="hint">Нічого не вибрано.<br>'
+    +'Клік — вибір, Shift+клік — додати до вибору, рамкою по порожньому — '
+    +'вибрати кілька.<br>Пробіл+тягнути — панорама, коліщатко — масштаб.</div>';}
+  else if(o.kind==='route'){
+    p.innerHTML=field('Кількість ліній у пучку',o.count,'count','type=number min=1 max=40')
+      +field('Розкид пучка',o.spread,'spread','type=number min=0 max=60')
+      +field('Товщина лінії',o.width,'width','type=number step=0.2 min=0.5 max=6')
+      +field('Стрілок уздовж лінії',o.arrows||0,'arrows','type=number min=0 max=12')
+      +field('Натяг кривої (0 — ламана, 1 — плавно)',o.tension===undefined?1:o.tension,
+             'tension','type=number step=0.1 min=0 max=1.6')
+      +field('Час початку (порожньо — не показувати)',o.t0||'','t0')
+      +field('Час кінця',o.t1||'','t1')
+      +'<button data-act="time" style="margin-top:8px">'
+      +(o.showTime?'Сховати час':'Показати час')+'</button>'
+      +'<button data-act="flat" style="margin-top:6px">Випрямити прогини</button>'
+      +'<label>Колір (свій)</label><input type="color" data-k="col" value="'
+      +(o.col||(TYPE[o.type]&&(TYPE[o.type]||TYPES[0]).col)||'#ff3ea5')+'">'
+      +field('Прозорість 0..1',o.alpha===undefined?1:o.alpha,'alpha','type=number step=0.1 min=0.1 max=1')
+      +'<button data-act="lab" style="margin-top:6px">Скинути положення підпису</button>'
+      +`<div class="hint">Вузлів: ${o.pts.length}. Білі кружки — вузли,
+        порожні посередині ланок — прогин: тягни, щоб зігнути ділянку
+        без нового вузла.</div>`;
+  }else if(o.kind==='arrow'){
+    p.innerHTML=field('Підпис',o.label||'','label')
+      +field('Товщина',o.width,'width','type=number step=0.2 min=1 max=8')
+      +field('Головка',o.head,'head','type=number min=4 max=30')
+      +field('Прозорість 0..1',o.alpha===undefined?1:o.alpha,'alpha',
+             'type=number step=0.1 min=0.1 max=1')
+      +'<label>Колір</label><input type="color" data-k="col" value="'+(o.col||'#e8f2fc')+'">'
+      +'<div class="row" style="margin-top:8px">'
+      +`<button data-act="dash">${o.dash?'Суцільна':'Пунктир'}</button>`
+      +`<button data-act="both">${o.both?'Одна головка':'Дві головки'}</button>`
+      +'</div>'
+      +`<button data-act="glow" style="margin-top:6px">${o.glow?'Без сяйва':'Зі сяйвом'}</button>`
+      +'<div class="hint">Кружок посередині гне стрілку.</div>';
+  }else if(o.kind==='launch'){
+    p.innerHTML=field('Назва',o.label||'','label')+field('Другий рядок',o.sub||'','sub')
+      +'<button data-act="lab" style="margin-top:6px">Скинути положення підпису</button>';
+  }else if(o.kind==='impact'){
+    p.innerHTML=field('Підпис',o.label||'','label')
+      +field('Розмір',o.size,'size','type=number min=4 max=30')
+      +'<button data-act="lab" style="margin-top:6px">Скинути положення підпису</button>';
+  }else if(o.kind==='zone'){
+    p.innerHTML='<label>Тип зони</label><select data-k="zone">'
+      +ZONES.map(z=>`<option value="${z.id}" ${z.id===o.zone?'selected':''}>${z.name}</option>`).join('')
+      +'</select>'+field('Підпис',o.label||'','label')
+      +`<div class="hint">Кутів: ${o.pts.length}.</div>`;
+  }else if(o.kind==='target'){
+    p.innerHTML=field('Підпис',o.label||'','label')
+      +`<div class="hint">З нашого переліку, ярус ${o.tier}, влучань у сховищі: ${o.hits}.</div>`;
+  }else if(o.kind==='text'){
+    p.innerHTML='<label>Текст (Enter — новий рядок)</label>'
+      +`<textarea data-k="text" rows="3">${o.text||''}</textarea>`
+      +field('Кегль',o.size,'size','type=number min=8 max=48')
+      +field('Розрядка',o.ls||0,'ls','type=number min=0 max=12')
+      +'<label>Вирівнювання</label><select data-k="align">'
+      +['left','center','right'].map(a=>`<option value="${a}" ${a===(o.align||'left')?'selected':''}>${
+         {left:'ліворуч',center:'по центру',right:'праворуч'}[a]}</option>`).join('')
+      +'</select>'
+      +'<label>Колір</label><input type="color" data-k="col" value="'+(o.col||'#e8f2fc')+'">';
+  }
+  for(const k of ['dash','both','glow']){
+    const b=p.querySelector(`[data-act="${k}"]`);
+    if(b) b.onclick=()=>{snapshot();S.sel[k]=!S.sel[k];refresh();};
+  }
+  const reset=p.querySelector('[data-act="lab"]');
+  if(reset) reset.onclick=()=>{snapshot();delete S.sel.lab;draw();};
+  const clr=p.querySelector('[data-k="col"]');
+  if(clr) clr.oninput=()=>{S.sel.col=clr.value;touch();draw();};
+  const flat=p.querySelector('[data-act="flat"]');
+  if(flat) flat.onclick=()=>{snapshot();S.sel.bows=[];draw();};
+  const tm=p.querySelector('[data-act="time"]');
+  if(tm) tm.onclick=()=>{snapshot();S.sel.showTime=!S.sel.showTime;refresh();};
+  p.querySelectorAll('select').forEach(sel=>{
+    sel.onchange=()=>{S.sel[sel.dataset.k]=sel.value;touch();draw();};
+  });
+  p.querySelectorAll('textarea').forEach(t=>{
+    t.oninput=()=>{S.sel[t.dataset.k]=t.value;touch();draw();};
+  });
+  p.querySelectorAll('input').forEach(inp=>{
+    inp.oninput=()=>{const k=inp.dataset.k;
+      S.sel[k]=inp.type==='number'?parseFloat(inp.value)||0:inp.value;touch();draw();};
+  });
+  // Кнопки показують, чи є що скасовувати: класична поведінка панелі.
+  document.getElementById('undo').disabled=!S.undo.length;
+  document.getElementById('redo').disabled=!S.redo.length;
+  document.getElementById('dup').disabled=!S.sel;
+  document.getElementById('del').disabled=!S.sel;
+  // список
+  const l=document.getElementById('list');
+  l.innerHTML=S.objs.map((o,i)=>{
+    const name={route:'маршрут',launch:'пускова',impact:'влучання',text:'підпис',
+                zone:'зона',target:'ціль',arrow:'стрілка'}[o.kind];
+    const extra=o.kind==='route'?`${o.pts.length} вузлів${o.count>1?' · пучок '+o.count:''}`
+      :(o.label||o.text||'');
+    const on=o===S.sel||S.selMore.includes(o);
+    return `<div class="item${on?' on':''}" data-i="${i}">
+      <span>${o.hidden?'<s>':''}${name}${o.hidden?'</s>':''}</span>
+      <span style="color:#5f7386;display:flex;gap:6px;align-items:center">
+        ${extra}
+        <b data-act="hide" data-i="${i}" title="сховати">${o.hidden?'◻':'👁'}</b>
+        <b data-act="lock" data-i="${i}" title="замкнути">${o.locked?'🔒':'🔓'}</b>
+      </span></div>`;
+  }).reverse().join('');
+  l.querySelectorAll('[data-act]').forEach(b=>b.onclick=e=>{
+    e.stopPropagation();
+    const o=S.objs[+b.dataset.i];
+    snapshot();
+    if(b.dataset.act==='hide') o.hidden=!o.hidden; else o.locked=!o.locked;
+    if(o===S.sel&&(o.hidden||o.locked)){S.sel=null;S.selMore=[];}
+    refresh();
+  });
+  l.querySelectorAll('.item').forEach(it=>it.onclick=()=>{
+    S.sel=S.objs[+it.dataset.i];S.selMore=[];refresh();});
+  draw();
+}
+document.getElementById('mTitle').oninput=e=>{S.title=e.target.value;draw();};
+document.getElementById('mSub').oninput=e=>{S.sub=e.target.value;draw();};
+
+// ---- кадр, збереження, експорт -------------------------------------------
+function fit(){
+  // вписати театр, а не весь світ
+  const a=baseXY(60.5,25.0), b=baseXY(41.0,53.0);
+  const k=Math.min(Wp/(b[0]-a[0]),Hp/(b[1]-a[1]))*0.98;
+  S.view={x:a[0]-(Wp/k-(b[0]-a[0]))/2, y:a[1]-(Hp/k-(b[1]-a[1]))/2, k};
+  draw();
+}
+document.getElementById('fit').onclick=fit;
+document.getElementById('save').onclick=()=>{
+  const blob=new Blob([JSON.stringify({title:S.title,sub:S.sub,objs:S.objs,
+    view:S.view,frame:S.frame,aspect:S.aspect,
+    types:TYPES,zones:ZONES,style:S.style,legend:S.legend,brand:S.brand,
+    footer:S.footer,watermark:S.watermark},null,1)],
+    {type:'application/json'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);
+  a.download='map.json';a.click();
+};
+document.getElementById('load').onclick=()=>{
+  const inp=document.createElement('input');inp.type='file';inp.accept='.json';
+  inp.onchange=()=>{const f=inp.files[0];const rd=new FileReader();
+    rd.onload=()=>{const d=JSON.parse(rd.result);
+      S.objs=d.objs||[];S.title=d.title||'';S.sub=d.sub||'';
+      if(d.view)S.view=d.view;
+      if(d.frame!==undefined){S.frame=d.frame;S.aspect=d.aspect||0;
+        document.getElementById('aspect').value=String(S.aspect||0);}
+      if(d.types){TYPES=d.types;retype();}
+      if(d.zones){ZONES=d.zones;rezone();}
+      if(d.style)S.style=d.style;
+      if(d.legend)S.legend=d.legend;
+      if(d.brand)S.brand=d.brand;
+      if(d.footer)S.footer=d.footer;
+      if(d.watermark)S.watermark=d.watermark;
+      document.getElementById('mTitle').value=S.title;
+      document.getElementById('mSub').value=S.sub;refresh();};
+    rd.readAsText(f);};
+  inp.click();
+};
+// Експорт малює ТЕ САМЕ, але у власне полотно з подвоєною щільністю:
+// плакат має бути придатним до друку, а не скріншотом вікна.
+document.getElementById('export').onclick=async ()=>{
+  // Експорт віддає рамку, а не вікно: плакат не має залежати від того,
+  // на якому екрані оператор працював.
+  const btn=document.getElementById('export'), was=btn.textContent;
+  btn.textContent='готую тайли…';
+  const f=S.frame||{x:0,y:0,w:Wp,h:Hp};
+  // Щільність — із шаблону: скільки разів рамку треба збільшити, щоб вийшов
+  // файл заданого розміру. Без шаблону лишається ×2, як було.
+  const dens=S.tpl ? S.tpl.w/f.w : 2;
+  // Тайли беремо на стільки ж детальніші. Обмеження 3 — це межа джерела
+  // (зум 12 для супутника), далі підвантажувати нема чого; сам файл при
+  // цьому все одно вийде заданого розміру, лише мʼякший, і підказка в
+  // панелі про це попереджає.
+  S.bias=Math.max(0,Math.min(3,Math.round(Math.log2(dens))));
+  await tilesReady(S.bias);
+  btn.textContent='малюю…';
+  // Розмір файла — із шаблону; без шаблону лишається ×2 від рамки.
+  // (Раніше тут стояла змінна `scale`, якої в цій функції вже не було:
+  // полотно виходило NaN, і експорт тихо не працював.)
+  const outW=S.tpl?S.tpl.w:Math.round(f.w*2);
+  const outH=S.tpl?S.tpl.h:Math.round(f.h*2);
+  // СУПЕРСЕМПЛІНГ: малюємо в півтора раза більше й зменшуємо якісним
+  // фільтром. Це прибирає «сходи» на краях ліній, вістрях і дрібному шрифті
+  // одразу для всього, і коштує лише пам'яті на час експорту.
+  const SS=1.5;
+  const c2=document.createElement('canvas');
+  c2.width=Math.round(outW*SS); c2.height=Math.round(outH*SS);
+  const g=c2.getContext('2d');
+  g.imageSmoothingEnabled=true; g.imageSmoothingQuality='high';
+  // масштаб по кожній осі окремо: округлення розміру шаблону інакше лишає
+  // смужку фону праворуч або знизу
+  const sx=c2.width/f.w, sy=c2.height/f.h;
+  RSCALE=sx;                     // тіні масштабуються разом із полотном
+  g.setTransform(sx,0,0,sy,-f.x*sx,-f.y*sy);
+  g.fillStyle='#04070c';g.fillRect(f.x,f.y,f.w,f.h);
+  seedChrome();                  // місце під плашки — щоб підпис під них не ліз
+  drawBase(g);
+  // сховані обʼєкти (око у списку шарів) не малюються ні на екрані, ні у
+  // SVG — тут їх забули відсіяти, і на PNG вони поверталися
+  for(const o of S.objs){ if(!o.hidden) drawObj(o,g,false); }
+  // легенда, шапка й лінійка кладуться відносно РАМКИ
+  g.save();g.translate(f.x,f.y);
+  drawWatermark(g,f.w,f.h);
+  if(S.layers.legend) drawLegend(g,f.w,f.h);
+  if(S.layers.header) drawHeader(g,f.w);
+  if(S.layers.scale) drawScale(g,f.w,f.h);
+  drawFooter(g,f.w,f.h);
+  drawCredit(g,f.w,f.h);           // атрибуція лишається в кожному експорті
+  g.restore();
+  RSCALE=1;
+  let out=c2;
+  if(SS!==1){
+    out=document.createElement('canvas');
+    out.width=outW; out.height=outH;
+    const og=out.getContext('2d');
+    og.imageSmoothingEnabled=true; og.imageSmoothingQuality='high';
+    og.drawImage(c2,0,0,outW,outH);
+  }
+  let url;
+  try{ url=out.toDataURL('image/png'); }
+  catch(e){
+    S.bias=0;btn.textContent=was;
+    alert('Експорт недоступний: сторінку відкрито з файла.\n'+
+          'Запусти ./run.sh і відкрий http://localhost:8765/editor.html');
+    return;
+  }
+  const a=document.createElement('a');
+  a.href=url;a.download=(S.tpl?S.tpl.id:'map')+'.png';a.click();
+  S.bias=0;btn.textContent=was;draw();
+};
+// Експорт у SVG. Той самий код малювання, інший приймач команд: лінії,
+// вістря й підписи лишаються векторними на будь-якому розмірі. Растрові шари
+// (супутник, нічні вогні) вкладаються одним зображенням — фотографія
+// векторною не стане; якщо вимкнути ці шари, файл виходить чисто векторним.
+document.getElementById('exportSvg').onclick=async ()=>{
+  const btn=document.getElementById('exportSvg'), was=btn.textContent;
+  const f=S.frame||{x:0,y:0,w:Wp,h:Hp};
+  const dens=S.tpl?S.tpl.w/f.w:2;
+  btn.textContent='готую тайли…';
+  S.bias=Math.max(0,Math.min(3,Math.round(Math.log2(dens))));
+  await tilesReady(S.bias);
+  btn.textContent='малюю…';
+
+  // 1. растрова підкладка окремо, у власне полотно
+  let baseImg=null;
+  if(S.layers.sat||S.layers.night){
+    // з півторакратним запасом і зменшенням, як у PNG: інакше підкладка
+    // у SVG виходила помітно зубчастішою за ту саму підкладку в PNG
+    const RSS=1.5;
+    const rc=document.createElement('canvas');
+    rc.width=Math.round(f.w*dens*RSS); rc.height=Math.round(f.h*dens*RSS);
+    const rg=rc.getContext('2d');
+    rg.imageSmoothingEnabled=true; rg.imageSmoothingQuality='high';
+    rg.setTransform(rc.width/f.w,0,0,rc.height/f.h,-f.x*rc.width/f.w,-f.y*rc.height/f.h);
+    rg.fillStyle='#04070c';rg.fillRect(f.x,f.y,f.w,f.h);
+    const ST=S.style;
+    drawTiles(rg,'sat',S.layers.sat?1:0,
+      `saturate(${ST.base.sat}%) contrast(1.06) brightness(${ST.base.bright})`,null,S.bias);
+    if(S.layers.sat){
+      rg.save();rg.globalCompositeOperation='multiply';
+      rg.fillStyle='rgba(150,170,205,1)';rg.fillRect(f.x,f.y,f.w,f.h);rg.restore();
+    }
+    if(S.layers.night) drawTiles(rg,'night',ST.base.nightGlow,
+      'saturate(130%) brightness(0.7)','screen',S.bias);
+    const rc2=document.createElement('canvas');
+    rc2.width=Math.round(f.w*dens); rc2.height=Math.round(f.h*dens);
+    const rg2=rc2.getContext('2d');
+    rg2.imageSmoothingEnabled=true; rg2.imageSmoothingQuality='high';
+    rg2.drawImage(rc,0,0,rc2.width,rc2.height);
+    try{ baseImg=rc2.toDataURL('image/png'); }
+    catch(e){
+      btn.textContent=was;S.bias=0;
+      alert('Експорт недоступний: сторінку відкрито з файла.\n'+
+            'Запусти ./run.sh і відкрий http://localhost:8765/editor.html');
+      return;
+    }
+  }
+
+  // 2. вектор: те саме малювання, але приймач — SVG
+  const out=S.tpl?{w:S.tpl.w,h:S.tpl.h}:{w:Math.round(f.w*2),h:Math.round(f.h*2)};
+  const k=out.w/f.w;
+  const g=SvgCtx(out.w,out.h);
+  g.setTransform(k,0,0,out.h/f.h,-f.x*k,-f.y*out.h/f.h);
+  const svgSat=S.layers.sat, svgNight=S.layers.night;
+  S.layers.sat=false; S.layers.night=false;   // растр уже намальовано окремо
+  const rprev=RSCALE; RSCALE=1;               // у векторі тінь масштабується сама
+  NOBG=!!baseImg;                             // тло вже є у растрі
+  if(!NOBG){ g.fillStyle='#04070c'; g.fillRect(f.x,f.y,f.w,f.h); }
+  seedChrome();
+  drawBase(g);
+  for(const o of S.objs){ if(!o.hidden) drawObj(o,g,false); }
+  g.save();g.translate(f.x,f.y);
+  drawWatermark(g,f.w,f.h);
+  if(S.layers.legend) drawLegend(g,f.w,f.h);
+  if(S.layers.header) drawHeader(g,f.w);
+  if(S.layers.scale) drawScale(g,f.w,f.h);
+  drawFooter(g,f.w,f.h);
+  drawCredit(g,f.w,f.h);
+  g.restore();
+  S.layers.sat=svgSat; S.layers.night=svgNight; RSCALE=rprev; S.bias=0; NOBG=false;
+
+  let fontCss='';
+  try{
+    fontCss=await (await fetch('font.css')).text();
+  }catch(e){ /* без шрифту файл теж відкриється, лише підписи будуть системні */ }
+  let svg=g.__svg(fontCss);
+  if(baseImg){
+    // растрова підкладка йде найпершою, під усім вектором
+    svg=svg.replace(/(<defs>.*?<\/defs>)/s,
+      // Посилання одне й старого зразка: base64 підкладки важить мегабайти,
+      // дублювати його заради двох варіантів атрибута — це +4 МБ на файл.
+      // xlink:href розуміють і всі браузери, і старі Inkscape з Illustrator.
+      `$1<image xlink:href="${baseImg}" x="0" y="0" `+
+      `width="${out.w}" height="${out.h}" preserveAspectRatio="none"/>`);
+  }
+  const blob=new Blob([svg],{type:'image/svg+xml'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=(S.tpl?S.tpl.id:'map')+'.svg';a.click();
+  btn.textContent=was;
+  toast(`SVG готовий: ${out.w}×${out.h}, ${Math.round(svg.length/1024)} КБ`);
+  draw();
+};
+
+// ---- цілі: пошук і постановка ----
+const CATNAME={airfield:'аеродром',military_base:'військова база',range:'полігон',
+  ammo_depot:'склад БК',naval:'флот',refinery:'НПЗ',fuel_depot:'нафтобаза',
+  chemical:'хімія',defense_plant:'завод ОПК'};
+function renderTargets(q){
+  const box=document.getElementById('tList');
+  if(!window.TARGETS){box.innerHTML='<div class="hint">targets.js не завантажено</div>';return;}
+  q=(q||'').trim().toLowerCase();
+  const list=TARGETS.items.filter(t=>!q||t.n.toLowerCase().includes(q)||
+      (CATNAME[t.c]||'').includes(q)).slice(0,60);
+  box.innerHTML=list.map((t,i)=>`<div class="item" data-i="${TARGETS.items.indexOf(t)}">
+      <span>${t.n}</span><span style="color:#5f7386">${CATNAME[t.c]||t.c} · ${t.h}</span></div>`).join('')
+    ||'<div class="hint">нічого не знайшлось</div>';
+  box.querySelectorAll('.item').forEach(it=>it.onclick=()=>{
+    const t=TARGETS.items[+it.dataset.i];
+    snapshot();
+    const o={kind:'target',la:t.la,lo:t.lo,label:t.n,cat:t.c,tier:t.t,hits:t.h};
+    S.objs.push(o);S.sel=o;
+    // центруємо кадр на цілі, інакше оператор шукає її очима по всій країні
+    const b=baseXY(t.la,t.lo);
+    S.view.x=b[0]-Wp/S.view.k/2;S.view.y=b[1]-Hp/S.view.k/2;
+    refresh();
+  });
+}
+document.getElementById('tSearch').oninput=e=>renderTargets(e.target.value);
+{
+  const LAYER_NAMES=[
+    ['sat','супутник'],['night','нічні вогні'],['water','річки й озера'],
+    ['borders','межі областей'],['cities','підписи міст'],
+    ['regions','назви областей'],['places','розсип НП'],
+    ['targets','наші цілі'],['legend','легенда'],['header','шапка'],
+    ['scale','масштаб'],
+  ];
+  const box=document.getElementById('layers');
+  const render=()=>{
+    box.innerHTML=LAYER_NAMES.map(([k,n])=>
+      `<div class="type${S.layers[k]?' on':''}" data-l="${k}">
+         <span class="sw" style="background:${S.layers[k]?'#4ade80':'#33414f'}"></span>${n}</div>`
+    ).join('');
+    box.querySelectorAll('[data-l]').forEach(el=>el.onclick=()=>{
+      S.layers[el.dataset.l]=!S.layers[el.dataset.l];render();touch();draw();
+    });
+  };
+  render();
+}
+// Усе оформлення карти в одному вікні: оператор міняє написи, стовпчики,
+// водяний знак — і бачить результат одразу.
+document.getElementById('chromeEdit').onclick=()=>{
+  const p=document.getElementById('props');
+  const L=S.legend, B=S.brand, F=S.footer, W=S.watermark;
+  p.innerHTML='<h2 style="margin-top:0">Оформлення</h2>'
+    +'<label>Легенда маршрутів</label>'
+    +`<input id="lrT" value="${L.routes.title}">`
+    +'<div class="row" style="margin-top:6px">'
+    +`<input id="lrC" type="number" min="1" max="4" value="${L.routes.cols}" title="стовпчиків">`
+    +`<button id="lrOn">${L.routes.on?'сховати':'показати'}</button>`
+    +`<button id="lrAll">${L.routes.allTypes?'лише вжиті':'усі типи'}</button></div>`
+    +'<label style="margin-top:10px">Легенда зон і позначень</label>'
+    +`<input id="lzT" value="${L.marks.title}">`
+    +`<input id="lzL" value="${L.marks.launchName}" style="margin-top:4px">`
+    +`<input id="lzI" value="${L.marks.impactName}" style="margin-top:4px">`
+    +'<div class="row" style="margin-top:6px">'
+    +`<input id="lzC" type="number" min="1" max="3" value="${L.marks.cols}">`
+    +`<button id="lzOn">${L.marks.on?'сховати':'показати'}</button></div>`
+    +'<label style="margin-top:10px">Назва видання</label>'
+    +`<input id="bN" value="${B.name||''}">`
+    +'<label>Другий рядок (канал, посилання)</label>'
+    +`<input id="bH" value="${B.handle||''}">`
+    +`<button id="bL" style="margin-top:6px">${B.logo?'без знака':'зі знаком'}</button>`
+    +'<label style="margin-top:10px">Підвал ліворуч</label>'
+    +`<input id="fL" value="${F.left||''}">`
+    +'<label>Підвал праворуч</label>'
+    +`<input id="fR" value="${F.right||''}">`
+    +'<label style="margin-top:10px">Водяний знак</label>'
+    +`<input id="wT" value="${W.text||''}" placeholder="текст">`
+    +'<div class="row" style="margin-top:6px">'
+    +`<input id="wO" type="number" step="0.01" min="0.01" max="0.3" value="${W.opacity}">`
+    +`<input id="wS" type="number" min="150" max="900" step="20" value="${W.step}">`
+    +`<button id="wOn">${W.on?'вимкнути':'увімкнути'}</button></div>`
+    +'<div class="hint">Рядок джерел підкладки не вимикається: підкладка під '
+    +'CC BY 4.0, атрибуція має бути на зображенні.</div>';
+  const bind=(id,fn)=>{const el=document.getElementById(id);
+    el.oninput=()=>{fn(el.value);touch();draw();};};
+  bind('lrT',v=>L.routes.title=v); bind('lrC',v=>L.routes.cols=Math.max(1,+v||1));
+  bind('lzT',v=>L.marks.title=v);  bind('lzC',v=>L.marks.cols=Math.max(1,+v||1));
+  bind('lzL',v=>L.marks.launchName=v); bind('lzI',v=>L.marks.impactName=v);
+  bind('bN',v=>B.name=v); bind('bH',v=>B.handle=v);
+  bind('fL',v=>F.left=v); bind('fR',v=>F.right=v);
+  bind('wT',v=>W.text=v); bind('wO',v=>W.opacity=+v||0.06);
+  bind('wS',v=>W.step=+v||420);
+  const tog=(id,fn)=>{document.getElementById(id).onclick=()=>{
+    fn();touch();draw();document.getElementById('chromeEdit').click();};};
+  tog('lrOn',()=>L.routes.on=!L.routes.on);
+  tog('lrAll',()=>L.routes.allTypes=!L.routes.allTypes);
+  tog('lzOn',()=>L.marks.on=!L.marks.on);
+  tog('bL',()=>B.logo=!B.logo);
+  tog('wOn',()=>W.on=!W.on);
+};
+// Стиль карти: усе, що раніше стояло числами в коді. Кожне поле — те, що
+// оператор реально хоче крутити під конкретну карту: темнішу підкладку,
+// слабші вогні, більший спалах, тонші підказки.
+document.getElementById('styleEdit').onclick=()=>{
+  const p=document.getElementById('props'), ST=S.style;
+  const n=(lbl,grp,key,attrs)=>`<label>${lbl}</label>`
+    +`<input data-g="${grp}" data-k="${key}" value="${ST[grp][key]}" ${attrs}>`;
+  const col=(lbl,grp,key)=>`<label>${lbl}</label>`
+    +`<input type="color" data-g="${grp}" data-k="${key}" value="${ST[grp][key]}">`;
+  p.innerHTML='<h2 style="margin-top:0">Стиль карти</h2>'
+    +'<label style="color:#8fa3b8">Підкладка</label>'
+    +n('Яскравість супутника','base','bright','type=number step=0.05 min=0.1 max=1.5')
+    +n('Насиченість, %','base','sat','type=number step=5 min=0 max=100')
+    +n('Сила нічних вогнів','base','nightGlow','type=number step=0.05 min=0 max=1')
+    +n('Річки','base','water','type=number step=0.05 min=0 max=1')
+    +n('Межі областей','base','borders','type=number step=0.05 min=0 max=1')
+    +n('Розсип НП','base','places','type=number step=0.05 min=0 max=1')
+    +'<label style="color:#8fa3b8;margin-top:10px">Маршрути</label>'
+    +n('Сила ореолу','route','halo','type=number step=0.02 min=0 max=0.6')
+    +'<label style="color:#8fa3b8;margin-top:10px">Влучання</label>'
+    +col('Колір спалаху','impact','col')
+    +n('Променів','impact','rays','type=number min=3 max=16')
+    +n('Розмір за замовчуванням','impact','size','type=number min=4 max=30')
+    +n('Сила сяйва','impact','glow','type=number step=0.1 min=0.2 max=2')
+    +'<label style="color:#8fa3b8;margin-top:10px">Пускові локації</label>'
+    +col('Колір плашки','launch','col')+col('Колір шпильки','launch','pin')
+    +'<label style="color:#8fa3b8;margin-top:10px">Підказки з даних</label>'
+    +col('Колір','ghost','col')+col('Колір слабких','ghost','weakCol')
+    +n('Помітність','ghost','alpha','type=number step=0.1 min=0.1 max=1.5')
+    +'<label style="color:#8fa3b8;margin-top:10px">Плашки підписів</label>'
+    +n('Непрозорість тла','plate','bg','type=number step=0.05 min=0.2 max=1')
+    +n('Рамка','plate','border','type=number step=0.05 min=0 max=1')
+    +col('Колір другого рядка','plate','text')
+    +'<div class="row" style="margin-top:10px">'
+    +'<button id="stReset">Скинути стиль</button>'
+    +'<button id="stZones">Зони…</button></div>';
+  p.querySelectorAll('[data-g]').forEach(el=>{
+    const f=()=>{const v=el.type==='number'?(parseFloat(el.value)||0):el.value;
+      S.style[el.dataset.g][el.dataset.k]=v;touch();draw();};
+    el.oninput=f; el.onchange=f;});
+  document.getElementById('stReset').onclick=()=>{
+    S.style=JSON.parse(JSON.stringify(STYLE_DEFAULT));
+    touch();draw();document.getElementById('styleEdit').click();};
+  document.getElementById('stZones').onclick=editZones;
+};
+// Зони — такий самий словник, як типи: назва, колір, штрих, додати, видалити.
+function editZones(){
+  const p=document.getElementById('props');
+  p.innerHTML='<h2 style="margin-top:0">Зони</h2>'
+    +ZONES.map((z,i)=>
+      `<div class="row" style="margin-bottom:6px;align-items:center">
+         <input data-i="${i}" data-k="name" value="${z.name}">
+         <input data-i="${i}" data-k="col" type="color" value="${z.col}" style="max-width:56px">
+         <button data-i="${i}" data-a="hatch">${z.hatch?'штрих':'заливка'}</button>
+         <button data-i="${i}" data-a="del" style="max-width:44px">✕</button>
+       </div>`).join('')
+    +'<div class="row" style="margin-top:8px">'
+    +'<button data-a="add">+ нова зона</button>'
+    +'<button id="zDone" class="primary">Готово</button></div>'
+    +'<div class="hint">Зона, якою вже щось намальовано, не видаляється.</div>';
+  p.querySelectorAll('[data-k]').forEach(el=>{
+    el.oninput=()=>{ZONES[+el.dataset.i][el.dataset.k]=el.value;
+      rezone();touch();draw();};});
+  p.querySelectorAll('[data-a]').forEach(b=>b.onclick=()=>{
+    const a=b.dataset.a, i=+b.dataset.i;
+    if(a==='add') ZONES.push({id:'z'+Date.now().toString(36),name:'Нова зона',
+                              col:'#ffb01f',hatch:false});
+    else if(a==='hatch') ZONES[i].hatch=!ZONES[i].hatch;
+    else if(a==='del'){
+      if(S.objs.some(o=>o.zone===ZONES[i].id)){toast('зона зайнята');return;}
+      ZONES.splice(i,1);
+    }
+    rezone();touch();draw();editZones();});
+  document.getElementById('zDone').onclick=()=>refresh();
+}
+document.getElementById('ghostMin').onchange=e=>{
+  S.ghostMin=+e.target.value;draw();};
+document.getElementById('tGhost').onclick=()=>{S.targetsOn=!S.targetsOn;
+  document.getElementById('tGhost').textContent=S.targetsOn?'Сховати цілі':'Показати на карті';
+  draw();};
+
+// ---- рамка експорту ----
+function makeFrame(){
+  const a=S.aspect;
+  const w=a?Math.min(Wp*.86,(Hp*.86)*a):Wp, h=a?w/a:Hp;
+  S.frame=a?{x:(Wp-w)/2,y:(Hp-h)/2,w,h}:null;
+  draw();
+}
+{
+  const sel=document.getElementById('aspect');
+  for(const t of TPL){
+    const o=document.createElement('option');
+    o.value=t.id;o.textContent=`${t.name} · ${t.w}×${t.h}`;sel.appendChild(o);
+  }
+  sel.onchange=e=>{
+    S.tpl=TPL.find(t=>t.id===e.target.value)||null;
+    S.aspect=S.tpl?S.tpl.w/S.tpl.h:0;
+    makeFrame();tplHint();
+  };
+}
+function tplHint(){
+  const el=document.getElementById('tplHint');
+  if(!S.tpl){el.textContent='Рамка тягнеться за кути. Експорт віддає рівно її '
+    +'вміст у подвійній щільності.';return;}
+  const f=S.frame||{w:Wp,h:Hp};
+  const k=(S.tpl.w/f.w);
+  el.textContent=`Файл на виході: ${S.tpl.w}×${S.tpl.h}. Рамка ${Math.round(f.w)}×`
+    +`${Math.round(f.h)}, тобто щільність ×${k.toFixed(1)}.`
+    +(k>4?' Забагато — зроби рамку більшою або візьми менший шаблон.':'');
+}
+document.getElementById('frameFit').onclick=()=>{makeFrame();tplHint();};
+
+// Збиття й ППО тієї ночі — не «влучання», і підпис це каже прямо: канали
+// моніторять підліт, наслідків у даних нема. Кладемо як звичайні обʼєкти,
+// які оператор може посунути, перейменувати або видалити.
+function putStrikes(){
+  const N=window.NIGHT||{}, list=N.strikes||[];
+  if(!list.length){alert('У цій ночі точкових збиттів/ППО нема.');return;}
+  snapshot();
+  // Повторний клік ЗАМІНЮЄ раніше покладений шар тієї самої ночі, а не
+  // додає другий: інакше «Воронеж · збиття ×2» лежало на карті тричі, і
+  // прибирати це доводилось вручну по одному.
+  const tag='night:'+(N.date||'');
+  const had=S.objs.length;
+  S.objs=S.objs.filter(o=>o.origin!==tag);
+  const replaced=had-S.objs.length;
+  for(const s2 of list){
+    S.objs.push({kind:'impact',type:'unknown',origin:tag,la:s2.la,lo:s2.lo,
+      size:7+Math.min(6,s2.n*1.5),
+      label:(s2.place?s2.place+' · ':'')+s2.kind+(s2.n>1?' ×'+s2.n:'')});
+  }
+  // Підзаголовок сам стає датою ночі, якщо оператор його ще не міняв:
+  // інакше на карті лишається чужа дата з попередньої карти, і це помітно
+  // лише після експорту.
+  const D=N.date&&new Date(N.date+'T00:00:00');
+  if(D&&(!S.sub||/^\d/.test(S.sub))){
+    const M=['січня','лютого','березня','квітня','травня','червня','липня',
+             'серпня','вересня','жовтня','листопада','грудня'];
+    S.sub=`ніч на ${D.getDate()+1} ${M[D.getMonth()]} ${D.getFullYear()}`;
+    document.getElementById('mSub').value=S.sub;
+  }
+  refresh();
+  console.log(replaced?`шар ночі оновлено: ${replaced} -> ${list.length}`
+                     :`покладено ${list.length} позначок`);
+}
+function loadNight(cb){
+  if(window.NIGHT) return cb(true);
+  const sc=document.createElement('script');
+  sc.src='night.js?'+Date.now();
+  sc.onload=()=>cb(!!window.NIGHT);
+  sc.onerror=()=>cb(false);
+  document.head.appendChild(sc);
+}
+document.getElementById('strikes').onclick=()=>{
+  if(!window.NIGHT){loadNight(ok=>ok?putStrikes():alert(
+    'Підказок нема. Зроби їх так:\npython3 raid.py <дата>\n'+
+    'python3 mapper/mknight.py raid_<дата>.json'));return;}
+  putStrikes();
+};
+document.getElementById('ghost').onclick=()=>{
+  if(!window.NIGHT){
+    loadNight(ok=>{
+      if(!ok) alert('Підказок нема. Зроби їх так:\n'+
+        'python3 raid.py <дата>\n'+
+        'python3 mapper/mknight.py raid_<дата>.json');
+      else document.getElementById('ghost').click();
+    });
+    return;
+  }
+  S.ghosts=window.NIGHT.routes.map(r=>({pts:r.pts.map(p=>[p.la,p.lo]),
+    t0:r.t0,t1:r.t1,k:r.k,conf:r.conf||'ok',claims:r.claims||1,
+    legs:r.legs||null,
+    // ланка i зʼєднує pts[i] -> pts[i+1]; добудовані вузли стоять СПЕРЕДУ,
+    // тому ознаку беремо з лівого кінця ланки, а не з правого
+    back:(r.pts||[]).slice(0,-1).map(p=>!!p.back)}));
+  const c={strong:0,ok:0,weak:0};
+  for(const g of S.ghosts) c[g.conf]=(c[g.conf]||0)+1;
+  toast(`підказок: ${S.ghosts.length} (впевнених ${c.strong}, слабких ${c.weak})`);
+  draw();
+};
+
+// ---- старт ---------------------------------------------------------------
+S.title=document.getElementById('mTitle').value;
+S.sub=document.getElementById('mSub').value;
+// Маніфест кешу читається ДО першого кадру: інакше або марні 404, або
+// марні запити в мережу там, де тайли лежать поруч.
+fetch('tiles/index.json').then(r=>r.ok?r.json():{}).catch(()=>({}))
+  .then(idx=>{TILE.local=idx||{};start();});
+function start(){
+STYLE_DEFAULT=JSON.parse(JSON.stringify(S.style));
+resize();fit();S.ready=true;
+if(restore()) console.log('відновлено з автозбереження');
+refresh();
+setTool('select');
+renderTargets('');
+}
+</script></body></html>

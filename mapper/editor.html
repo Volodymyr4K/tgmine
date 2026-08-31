@@ -539,7 +539,7 @@ const S={
           // одразу, область — лише як фон
           countries:0.72, countryW:1.35, labelDens:1, labelMax:40,
           // тло й колір написів: підкладка може бути не лише нічною
-          bg:'#04070c', ink:'#eef4fb', inkDim:'#c6d8ea',
+          bg:'#04070c', ink:'#eef4fb', inkDim:'#c6d8ea', satSrc:'sat',
           // жирний кордон між РФ і Україною — окремо від решти
           uaruW:2.8, uaruCol:'#ffffff'},
     route:{halo:0.12, nodes:true},
@@ -624,15 +624,34 @@ function ghostVisible(g){
   return lvl>=S.ghostMin;
 }
 const TILE={cache:new Map(), noLocal:new Set(), local:{}, redraw:null};
+// Растрових підкладок кілька. Джерела ті самі, що вже в проєкті (EOX і
+// NASA GIBS) — це не нові постачальники, а інші їхні шари. Кожен несе свою
+// атрибуцію, і вона підставляється в підпис під картою автоматично.
 const SRC={
   sat:{local:z=>`tiles/sat/${z}/`, remote:(z,x,y)=>
     `https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/g/${z}/${y}/${x}.jpg`,
-    maxz:12},
+    maxz:12, credit:'Sentinel-2 cloudless © EOX IT Services, CC BY 4.0'},
+  terrainLight:{local:()=>null, remote:(z,x,y)=>
+    `https://tiles.maps.eox.at/wmts/1.0.0/terrain-light_3857/default/g/${z}/${y}/${x}.jpg`,
+    maxz:12, credit:'Terrain Light © EOX IT Services, OpenStreetMap, NaturalEarth, CC BY 4.0'},
+  terrain:{local:()=>null, remote:(z,x,y)=>
+    `https://tiles.maps.eox.at/wmts/1.0.0/terrain_3857/default/g/${z}/${y}/${x}.jpg`,
+    maxz:12, credit:'Terrain © EOX IT Services, OpenStreetMap, NaturalEarth, CC BY 4.0'},
+  blue:{local:()=>null, remote:(z,x,y)=>
+    `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/BlueMarble_ShadedRelief_Bathymetry/`+
+    `default/default/GoogleMapsCompatible_Level8/${z}/${y}/${x}.jpeg`,
+    maxz:8, credit:'Blue Marble © NASA GIBS'},
   night:{local:z=>`tiles/night/${z}/`, remote:(z,x,y)=>
     `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_Black_Marble/`+
     `default/2016-01-01/GoogleMapsCompatible_Level8/${z}/${y}/${x}.png`,
-    maxz:8},
+    maxz:8, credit:'нічні вогні: NASA VIIRS Black Marble'},
 };
+// Який растр стоїть у ролі «супутника». Решта коду говорить про шар 'sat',
+// а сюди підставляється обране джерело: знімок, рельєф чи Blue Marble.
+function satKind(){
+  const id=S.style.base.satSrc||'sat';
+  return SRC[id]?id:'sat';
+}
 function tile(kind,z,x,y){
   const key=kind+'/'+z+'/'+x+'/'+y;
   if(TILE.cache.has(key)) return TILE.cache.get(key);
@@ -650,7 +669,8 @@ function tile(kind,z,x,y){
     im.src=src.remote(z,x,y);
   };
   im.onload=()=>{ clearTimeout(TILE.redraw); TILE.redraw=setTimeout(draw,60); };
-  const haveLocal=(TILE.local[kind]||[]).includes(z) && !TILE.noLocal.has(zk);
+  const haveLocal=!!src.local(z) && (TILE.local[kind]||[]).includes(z)
+                  && !TILE.noLocal.has(zk);
   if(haveLocal) im.src=src.local(z)+x+'_'+y+'.img';
   else { im.__remote=true; im.src=src.remote(z,x,y); }
   TILE.cache.set(key,im);
@@ -674,7 +694,7 @@ function tileZoom(kind,bias){
 // знімає полотно негайно.
 function tilesReady(bias,ms=8000){
   const need=[];
-  for(const kind of ['sat','night']){
+  for(const kind of [satKind(),'night']){
     const z=tileZoom(kind,bias), n=2**z, sc=256*2**(Z0-z);
     const a=unscr(0,0), b=unscr(Wp,Hp);
     for(let x=Math.max(0,Math.floor(a[0]/sc));x<=Math.min(n-1,Math.ceil(b[0]/sc));x++)
@@ -775,7 +795,7 @@ function drawBase(c){
   if(!NOBG){ c.fillStyle=ST.base.bg||'#04070c';c.fillRect(0,0,Wp,Hp); }
   // 1. супутник, притемнений і знебарвлений просто на льоту: те саме, що
   //    робив python для статичного растра, лише фільтром полотна
-  if(L.sat) drawTiles(c,'sat',1,
+  if(L.sat) drawTiles(c,satKind(),1,
     `saturate(${ST.base.sat}%) contrast(1.06) brightness(${ST.base.bright})`,
     null,S.bias);
   // 2. холодний зсув: підкладка стає нічною, а не сірою. Тільки під
@@ -1731,8 +1751,12 @@ function drawCredit(c,w,h){
   c.textAlign='right';
   c.fillStyle=hexa(S.style.base.inkDim||'#c6d8ea',.75);
   shadow(c,isLight()?'rgba(255,255,255,.9)':'rgba(0,0,0,.9)',5);
-  c.fillText('підкладка: Sentinel-2 cloudless © EOX IT Services, CC BY 4.0 · '+
-             'нічні вогні: NASA VIIRS Black Marble',w-16,h-14);
+  // Підпис збирається з того, що справді намальовано: ліцензія CC BY
+  // вимагає називати саме використане джерело, а не те, яке колись стояло.
+  const parts=[];
+  if(S.layers.sat) parts.push('підкладка: '+(SRC[satKind()].credit||''));
+  if(S.layers.night) parts.push(SRC.night.credit);
+  c.fillText(parts.join(' · ')||'вектор: NaturalEarth, GeoNames',w-16,h-14);
   c.restore();
 }
 // Знак видання картинкою. Тримаємо один завантажений Image на адресу: у
@@ -3342,7 +3366,7 @@ document.getElementById('exportSvg').onclick=async ()=>{
     rg.setTransform(rc.width/f.w,0,0,rc.height/f.h,-f.x*rc.width/f.w,-f.y*rc.height/f.h);
     rg.fillStyle=S.style.base.bg||'#04070c';rg.fillRect(f.x,f.y,f.w,f.h);
     const ST=S.style;
-    drawTiles(rg,'sat',S.layers.sat?1:0,
+    drawTiles(rg,satKind(),S.layers.sat?1:0,
       `saturate(${ST.base.sat}%) contrast(1.06) brightness(${ST.base.bright})`,null,S.bias);
     if(S.layers.sat){
       rg.save();rg.globalCompositeOperation='multiply';
@@ -3592,6 +3616,11 @@ function renderStyle(){
     +n('Насиченість, %','base','sat','type=number step=5 min=0 max=100')
     +n('Сила нічних вогнів','base','nightGlow','type=number step=0.05 min=0 max=1')
     +n('Річки','base','water','type=number step=0.05 min=0 max=1')
+    +'<label>Растрова підкладка</label><select data-g="base" data-k="satSrc">'
+    +[['sat','Sentinel-2 (знімок)'],['terrainLight','Terrain Light (світлий рельєф)'],
+      ['terrain','Terrain (рельєф)'],['blue','Blue Marble (NASA)']].map(
+       ([v,t])=>`<option value="${v}" ${(ST.base.satSrc||'sat')===v?'selected':''}>${t}</option>`).join('')
+    +'</select>'
     +n('Кордони країн','base','countries','type=number step=0.05 min=0 max=1')
     +n('Кордони країн: товщина','base','countryW','type=number step=0.05 min=0.4 max=3')
     +n('Межі областей РФ','base','borders','type=number step=0.05 min=0 max=1')
@@ -4153,20 +4182,40 @@ function pickImage(la,lo){
 const BASEMAPS=[
   {id:'sat', name:'Супутник', hint:'нічний знімок і вогні міст — як було',
    layers:{sat:true,night:true,water:true,places:true},
-   style:{bg:'#04070c',ink:'#eef4fb',inkDim:'#c6d8ea',bright:0.55,nightGlow:0.34,
+   style:{satSrc:'sat',bg:'#04070c',ink:'#eef4fb',inkDim:'#c6d8ea',bright:0.55,nightGlow:0.34,
           water:0.30,countries:0.72,borders:0.26,places:0.45}},
   {id:'night', name:'Тільки вогні', hint:'без знімка: чорне тло й міські вогні',
    layers:{sat:false,night:true,water:true,places:false},
-   style:{bg:'#03060a',ink:'#eef4fb',inkDim:'#c6d8ea',nightGlow:0.62,
+   style:{satSrc:'sat',bg:'#03060a',ink:'#eef4fb',inkDim:'#c6d8ea',nightGlow:0.62,
           water:0.22,countries:0.6,borders:0.2,places:0.3}},
   {id:'mini', name:'Мінімальна', hint:'жодного растру: тло, кордони, підписи',
    layers:{sat:false,night:false,water:true,places:false},
-   style:{bg:'#0a0f16',ink:'#e8eef6',inkDim:'#9fb4c8',water:0.35,
+   style:{satSrc:'sat',bg:'#0a0f16',ink:'#e8eef6',inkDim:'#9fb4c8',water:0.35,
           countries:0.85,countryW:1.5,borders:0.18,places:0.3}},
   {id:'paper', name:'Паперова', hint:'світла: темні лінії по світлому тлу',
    layers:{sat:false,night:false,water:true,places:true},
-   style:{bg:'#eceae4',ink:'#1b2530',inkDim:'#4a5a6b',water:0.55,
+   style:{satSrc:'sat',bg:'#eceae4',ink:'#1b2530',inkDim:'#4a5a6b',water:0.55,
           countries:0.75,countryW:1.4,borders:0.3,places:0.5}},
+  {id:'day', name:'Знімок удень', hint:'той самий Sentinel-2, але не притемнений',
+   layers:{sat:true,night:false,water:true,places:false},
+   style:{satSrc:'sat',bg:'#0a0f16',ink:'#f2f7ff',inkDim:'#cddbe9',
+          bright:1.0,sat:75,nightGlow:0,water:0.5,
+          countries:0.8,countryW:1.4,borders:0.25,places:0.4}},
+  {id:'relief', name:'Рельєф', hint:'світла карта рельєфу EOX Terrain Light',
+   layers:{sat:true,night:false,water:false,places:true},
+   style:{satSrc:'terrainLight',bg:'#eceae4',ink:'#1b2530',inkDim:'#4a5a6b',
+          bright:1.0,sat:80,nightGlow:0,water:0.3,
+          countries:0.7,countryW:1.3,borders:0.28,places:0.45}},
+  {id:'reliefDark', name:'Рельєф темний', hint:'той самий рельєф, притемнений під нічну карту',
+   layers:{sat:true,night:true,water:true,places:false},
+   style:{satSrc:'terrain',bg:'#05080d',ink:'#eef4fb',inkDim:'#c6d8ea',
+          bright:0.5,sat:35,nightGlow:0.3,water:0.28,
+          countries:0.75,countryW:1.35,borders:0.24,places:0.4}},
+  {id:'marble', name:'Blue Marble', hint:'знімок Землі NASA — грубий, але цілісний на широкому кадрі',
+   layers:{sat:true,night:true,water:false,places:false},
+   style:{satSrc:'blue',bg:'#03060a',ink:'#eef4fb',inkDim:'#c6d8ea',
+          bright:0.7,sat:60,nightGlow:0.4,water:0.25,
+          countries:0.7,countryW:1.3,borders:0.2,places:0.35}},
 ];
 function applyBasemap(id){
   const b=BASEMAPS.find(x=>x.id===id);
@@ -4180,9 +4229,11 @@ function applyBasemap(id){
 function renderBasemaps(){
   const box=document.getElementById('basemaps');
   if(!box) return;
-  const cur=(S.style.base.bg||'').toLowerCase();
+  const bg=(S.style.base.bg||'').toLowerCase(), src=S.style.base.satSrc||'sat';
+  const on=b=>bg===b.style.bg.toLowerCase()&&src===(b.style.satSrc||'sat')
+              &&!!S.layers.sat===!!b.layers.sat&&!!S.layers.night===!!b.layers.night;
   box.innerHTML=BASEMAPS.map(b=>
-    `<div class="type${cur===b.style.bg.toLowerCase()?' on':''}" data-bm="${b.id}"
+    `<div class="type${on(b)?' on':''}" data-bm="${b.id}"
        title="${b.hint}">${b.name}</div>`).join('');
   box.querySelectorAll('[data-bm]').forEach(el=>el.onclick=()=>{
     applyBasemap(el.dataset.bm);renderBasemaps();});

@@ -50,6 +50,89 @@ CITY_UA = {
     "Sumy": "Суми", "Chernihiv": "Чернігів", "Kremenchuk": "Кременчук",
     "Mariupol": "Маріуполь", "Melitopol": "Мелітополь", "Kerch": "Керч",
     "Novorossiysk": "Новоросійськ", "Ryazan": "Рязань", "Oryol": "Орел",
+
+    # Друга черга словника. Правила будуються від латиниці GeoNames, а вона
+    # для частини міст не транслітерація, а англійський екзонім: «Saint
+    # Petersburg» давало «Саінт Петерсбург» просто на найбільшому підписі
+    # карти. Решта — випадки, де механічне правило дає близьке, але не те:
+    # «Ривне» замість «Рівне», «Тернопіл» замість «Тернопіль».
+    "Saint Petersburg": "Санкт-Петербург",
+    "Naberezhnyye Chelny": "Набережні Челни",
+    "Rivne": "Рівне", "Ternopil": "Тернопіль", "Lutsk": "Луцьк",
+    "Nalchik": "Нальчик", "Nazran": "Назрань",
+    "Nizhnekamsk": "Нижньокамськ", "Kamyanske": "Камʼянське",
+    "Velikiy Novgorod": "Великий Новгород", "Velikiye Luki": "Великі Луки",
+    "Engels": "Енгельс", "Syzran": "Сизрань", "Podolsk": "Подольськ",
+    "Mytishchi": "Митищі", "Zheleznodorozhnyy": "Желєзнодорожний",
+    "Korolev": "Корольов", "Pyatigorsk": "Пʼятигорськ",
+    "Kislovodsk": "Кисловодськ", "Dimitrovgrad": "Димитровград",
+    "Cherkessk": "Черкеськ", "Shchyolkovo": "Щолково",
+    "Bataysk": "Батайськ", "Yevpatoriya": "Євпаторія",
+    "Nikopol": "Нікополь", "Slovyansk": "Словʼянськ",
+    "Zelenodolsk": "Зеленодольськ", "Siverskodonetsk": "Сєвєродонецьк",
+    "Kamyanets-Podilskyi": "Камʼянець-Подільський",
+    "Zhukovsky": "Жуковський", "Ramenskoye": "Раменське",
+    "Nevinnomyssk": "Невинномиськ", "Elektrostal’": "Електросталь",
+    "Kolpino": "Колпіно", "Odintsovo": "Одинцово", "Lyubertsy": "Люберці",
+    "Balashikha": "Балашиха", "Khimki": "Хімки", "Zelenograd": "Зеленоград",
+    "Domodedovo": "Домодєдово", "Krasnogorsk": "Красногорськ",
+    "Shchelkovo": "Щолково", "Serpukhov": "Серпухов", "Noginsk": "Ногінськ",
+    "Orekhovo-Zuyevo": "Орєхово-Зуєво", "Voskresensk": "Воскресенськ",
+    "Pushkino": "Пушкіно", "Klin": "Клин", "Dubna": "Дубна",
+    "Vidnoye": "Видне", "Reutov": "Реутов", "Lobnya": "Лобня",
+    "Zhukovskiy": "Жуковський", "Ivanteyevka": "Івантіївка",
+    "Dolgoprudnyy": "Долгопрудний", "Dmitrov": "Дмитров",
+    "Chekhov": "Чехов", "Stupino": "Ступіно", "Yegoryevsk": "Єгорʼєвськ",
+    "Naro-Fominsk": "Наро-Фомінськ", "Bronnitsy": "Бронниці",
+    "Aleksin": "Алексин", "Uzlovaya": "Узловая", "Novomoskovsk": "Новомосковськ",
+    "Yefremov": "Єфремов", "Shchekino": "Щокіно", "Donskoy": "Донськой",
+    "Rossosh’": "Россош", "Borisoglebsk": "Борисоглібськ",
+    "Gukovo": "Гуково", "Salsk": "Сальськ", "Azov": "Азов",
+    "Millerovo": "Міллерово", "Kamensk-Shakhtinskiy": "Каменськ-Шахтинський",
+    "Slavyansk-na-Kubani": "Славʼянськ-на-Кубані",
+    "Gelendzhik": "Геленджик", "Anapa": "Анапа", "Tuapse": "Туапсе",
+    "Yeysk": "Єйськ", "Tikhoretsk": "Тихорецьк", "Kropotkin": "Кропоткін",
+    "Labinsk": "Лабінськ", "Belorechensk": "Білоріченськ",
+    "Temryuk": "Темрюк", "Primorsko-Akhtarsk": "Приморсько-Ахтарськ",
+    "Akhtubinsk": "Ахтубінськ", "Kotelnikovo": "Котельниково",
+    "Mikhaylovka": "Михайлівка", "Uryupinsk": "Урюпинськ",
+    "Frolovo": "Фролово", "Kalach-na-Donu": "Калач-на-Дону",
+    "Svetlyy Yar": "Світлий Яр", "Zhirnovsk": "Жирновськ",
+    # мʼякий знак у кінці, який із латиниці не видно
+    "Uman": "Умань", "Korosten": "Коростень", "Boryspil": "Бориспіль",
+    "Zvyahel": "Звягель", "Zviahel": "Звягель", "Chystopol": "Чистопіль",
+    "Chistopol": "Чистополь", "Mariupol’": "Маріуполь",
+    "Izmayil": "Ізмаїл", "Kolomyia": "Коломия", "Kolomyya": "Коломия",
+    "Mineralnye Vody": "Мінеральні Води",
+    "Mineral’nyye Vody": "Мінеральні Води",
+    "Khrustalnyi": "Хрустальний", "Khrustalnyy": "Хрустальний",
+    "Shchyokino": "Щокіно", "Shchekino": "Щокіно",
+    "Kirishi": "Кириші", "Borovichi": "Боровичі", "Klimovsk": "Климовськ",
+    "Mikhaylovsk": "Михайловськ", "Liski": "Лиски",
+    "Krasnaya Glinka": "Красная Глинка", "Novaya Balakhna": "Нова Балахна",
+    "Shuya": "Шуя", "Feodosiya": "Феодосія", "Oleksandriya": "Олександрія",
+    "Berdychiv": "Бердичів", "Bakhmut": "Бахмут", "Yenakiyeve": "Єнакієве",
+    "Kadiyivka": "Кадіївка", "Khrustalnyy": "Хрустальний",
+    "Solnechnogorsk": "Солнечногорськ", "Vyksa": "Викса",
+    "Solnetchnogorsk": "Солнечногорськ",
+    "Shchëkino": "Щокіно", "Kirovo-Chepetsk": "Кирово-Чепецьк",
+    "Bugulma": "Бугульма", "Budyonnovsk": "Будьонновськ",
+    "Zarechnyy": "Зарічний", "Uzlovaya": "Узлова",
+    "Giaginskaya": "Гіагінська", "Pereiaslav": "Переяслав",
+    "Dobropillia": "Добропілля", "Bilopillia": "Білопілля",
+    "Dzerzhinsky": "Дзержинський", "Kamensk-Shakhtinsky": "Каменськ-Шахтинський",
+    "Terebovlia": "Теребовля", "Terebovlya": "Теребовля",
+}
+
+# Не міста, а райони всередині Москви, Одеси й Житомира: у газетирі вони
+# позначені як населені пункти й лізуть у список нарівні з обласними
+# центрами. На карті театру це просто сміття поверх самої Москви.
+DROP = {
+    "Cherëmushki", "Cheremushky", "Novo-Peredelkino", "Vostochnoe Degunino",
+    "Bohuniya", "Zapadnoye Degunino", "Yuzhnoye Butovo", "Severnoye Butovo",
+    "Bibirevo", "Otradnoye", "Mar’ino", "Golyanovo", "Perovo", "Kuz’minki",
+    "Tekstil’shchiki", "Chertanovo", "Yasenevo", "Solntsevo", "Ochakovo",
+    "Ramenki", "Kotlovka", "Zyuzino", "Nagornyy", "Donskoy Rayon",
 }
 
 
@@ -72,8 +155,16 @@ PAIRS = [
 # закінчення обробляються ДО побуквеної заміни, інакше «-ск» дає «-ск»
 # Закінчення знімаються ПОСЛІДОВНО: у «Khmelnytskyi» спершу «yi» -> «ий»,
 # і лише потім видно «tsk» -> «цьк». За один прохід виходило «Хмелницкий».
-TAILS = [("yy", "ий"), ("iy", "ій"), ("yi", "ий"), ("ij", "ій"),
-         ("tsk", "цьк"), ("sk", "ськ"), ("ets", "ець"),
+TAILS = [("skiy", "ський"), ("skyy", "ський"), ("sky", "ський"),
+         ("skaya", "ська"), ("skoye", "ське"), ("skoe", "ське"),
+         # прикметникові назви на -ая/-ое українською втрачають це
+         # закінчення: Отрадная -> Отрадна, Удельная -> Удельна
+         ("naya", "на"), ("vaya", "ва"), ("laya", "ла"), ("raya", "ра"),
+         ("noye", "не"), ("voye", "ве"),
+         ("lnyy", "льний"),
+         ("iya", "ія"), ("yia", "ия"), ("ayi", "аї"),
+         ("yy", "ий"), ("iy", "ій"), ("yi", "ий"), ("ij", "ій"),
+         ("tsk", "цьк"), ("sk", "ськ"), ("ets", "ець"), ("iv", "ів"),
          # Кінцеві -ы/-и російських назв українською це «и»: Шахти, Валуйки.
          # Виняток — на -ці: Клинці, Чернівці.
          ("tsy", "ці"), ("tsi", "ці"), ("y", "и"), ("i", "и")]
@@ -97,9 +188,21 @@ EXC = {
 }
 
 
+# У газетирі трапляється «Gorod Solnechnogorsk» — «город» тут не частина
+# назви, а тип поселення.
+PREFIX_DROP = ("Gorod ", "gorod ", "Poselok ", "poselok ", "Selo ", "selo ",
+               "Stanitsa ", "stanitsa ", "Derevnya ", "derevnya ")
+
+
 def uk(name: str) -> str:
     if name in EXC:
         return EXC[name]
+    for pre in PREFIX_DROP:
+        if name.startswith(pre):
+            name = name[len(pre):]
+            break
+        if name in EXC:
+            return EXC[name]
     out = []
     for word in re.split(r"([ \-])", name):
         if word in (" ", "-") or not word:
@@ -116,12 +219,20 @@ def uk(name: str) -> str:
                 break
         res = ""
         i = 0
+        VOW = "aeiouy"
         while i < len(w):
             for a, b in PAIRS:
-                if w.startswith(a, i):
-                    res += b
-                    i += len(a)
-                    break
+                if not w.startswith(a, i):
+                    continue
+                # «ay/oy/ey/uy» це дифтонг лише перед приголосною або в кінці:
+                # у «Krasnaya» це не «айа», а «ая». Без цієї умови виходили
+                # «Краснайа Глінка», «Новайа Балахна», «Шуйа».
+                if a in ("ay", "oy", "ey", "uy") and i + len(a) < len(w) \
+                        and w[i + len(a)] in VOW:
+                    continue
+                res += b
+                i += len(a)
+                break
             else:
                 i += 1
         # Правило дев'ятки застосовується лише до ОСНОВИ. На закінченні воно
@@ -153,6 +264,8 @@ def main(min_pop="15000", out=None):
                 continue
             la, lo = float(f[4]), float(f[5])
             if not (BOX[0] <= la <= BOX[1] and BOX[2] <= lo <= BOX[3]):
+                continue
+            if f[1] in DROP:          # район міста, а не місто
                 continue
             name = CITY_UA.get(f[1]) or uk(f[1])
             if name in seen:

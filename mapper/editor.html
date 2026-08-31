@@ -493,7 +493,7 @@ const S={
           // державного кордону цих двох
           // кордони країн окремо від меж областей: країна має читатись
           // одразу, область — лише як фон
-          countries:0.72, countryW:1.35,
+          countries:0.72, countryW:1.35, labelDens:1,
           // жирний кордон між РФ і Україною — окремо від решти
           uaruW:2.8, uaruCol:'#ffffff'},
     route:{halo:0.12, nodes:true},
@@ -851,14 +851,20 @@ function drawRegionLabels(c,taken){
 // на кадрі однієї області — райцентри. Один сталий поріг дає або порожньо,
 // або кашу, тому поріг залежить від масштабу.
 function drawLabels(c){
-  const B=window.BASE, taken=TAKEN;
+  const B=window.BASE, taken=TAKEN, ST=S.style;
   // Підписи областей ідуть ПЕРШИМИ: вони найбільші й мають право на місце,
   // а місто підпис переставить сам. У зворотному порядку область раз у раз
   // не влізала й зникала — саме вона й потрібна для орієнтування.
   if(S.layers.regions) drawRegionLabels(c,taken);
   const fits=r=>!taken.some(t=>!(r.x+r.w<t.x||t.x+t.w<r.x||r.y+r.h<t.y||t.y+t.h<r.y));
   if(!S.layers.cities) return;
-  const minPop=S.view.k>2.2?15000:S.view.k>1.1?40000:S.view.k>0.55?90000:250000;
+  // Скільки підписів показувати. Пороги залежать від масштабу (на карті
+  // всього театру сотня назв злипається в кашу), але оператор мусить мати
+  // ручку: «не всі міста нанесені» — це саме про них. Більша щільність
+  // ділить поріг, тобто пускає дрібніші міста.
+  const dens=Math.max(0.3,Math.min(4,ST.base.labelDens===undefined?1:ST.base.labelDens));
+  const base=S.view.k>2.2?12000:S.view.k>1.1?30000:S.view.k>0.55?70000:180000;
+  const minPop=base/dens;
   const list=(window.LABELS||B.cities||[]).filter(p=>p.p>=minPop);
   for(const ct of list){
     const s2=P(ct.la,ct.lo);
@@ -3387,6 +3393,7 @@ function renderStyle(){
     +n('Кордони країн: товщина','base','countryW','type=number step=0.05 min=0.4 max=3')
     +n('Межі областей РФ','base','borders','type=number step=0.05 min=0 max=1')
     +n('Розсип НП','base','places','type=number step=0.05 min=0 max=1')
+    +n('Щільність підписів міст','base','labelDens','type=number step=0.1 min=0.3 max=4')
     +n('Кордон РФ–Україна: товщина','base','uaruW','type=number step=0.2 min=0 max=8')
     +col('Кордон РФ–Україна: колір','base','uaruCol')
     +'<label style="color:#8fa3b8;margin-top:10px">Маршрути</label>'

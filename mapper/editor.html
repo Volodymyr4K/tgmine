@@ -552,9 +552,20 @@ function resize(){
   Wp=r.width;Hp=r.height;
   cv.width=Wp*DPR;cv.height=Hp*DPR;cv.style.width=Wp+'px';cv.style.height=Hp+'px';
   ctx.setTransform(DPR,0,0,DPR,0,0);
-  if(S.ready) draw();          // до вписування кадру малювати нема чого
+  // Полотно могло отримати розмір уже після завантаження (вкладка відновлена
+  // у фоні, панель ще без розкладки). Тоді вписування на старті не відбулось
+  // і вигляд лишився нечинним — вписуємо тут, інакше сторінка мовчки чорна.
+  if(!S.ready) return;
+  if(viewBroken()) fit(); else draw();
 }
 addEventListener('resize',resize);
+// Розмір сцени змінює не лише вікно: панель, що зʼявилась, або зміна
+// розкладки події resize не дають. ResizeObserver ловить і їх.
+new ResizeObserver(resize).observe(document.getElementById('stage'));
+// У прихованій вкладці браузер не оновлює картинку, тому ResizeObserver
+// мовчить: сторінка, відкрита у фоні, лишалась би з нечинним виглядом.
+// Перевіряємо ще раз тієї миті, коли вкладку показали.
+addEventListener('visibilitychange',()=>{ if(!document.hidden) resize(); });
 
 // ==========================================================================
 // МАЛЮВАННЯ
@@ -2366,8 +2377,16 @@ document.getElementById('mTitle').oninput=e=>{S.title=e.target.value;draw();};
 document.getElementById('mSub').oninput=e=>{S.sub=e.target.value;draw();};
 
 // ---- кадр, збереження, експорт -------------------------------------------
+// Вигляд нечинний: масштаб нуль, NaN або координати не числа. Таке
+// виходило, коли fit() рахував кадр на полотні нульового розміру:
+// k=min(0/dx,0/dy)=0, далі Wp/k=NaN — і карта не малювалась зовсім.
+function viewBroken(){
+  const v=S.view;
+  return !v || !(v.k>0) || !Number.isFinite(v.x) || !Number.isFinite(v.y);
+}
 function fit(){
   // вписати театр, а не весь світ
+  if(!(Wp>0)||!(Hp>0)) return;   // полотно ще без розміру — рахувати нема на чому
   const a=baseXY(60.5,25.0), b=baseXY(41.0,53.0);
   const k=Math.min(Wp/(b[0]-a[0]),Hp/(b[1]-a[1]))*0.98;
   S.view={x:a[0]-(Wp/k-(b[0]-a[0]))/2, y:a[1]-(Hp/k-(b[1]-a[1]))/2, k};
@@ -2859,6 +2878,7 @@ function start(){
 STYLE_DEFAULT=JSON.parse(JSON.stringify(S.style));
 resize();fit();S.ready=true;
 if(restore()) console.log('відновлено з автозбереження');
+if(viewBroken()) fit();   // автозбереження могло зберегти нечинний вигляд
 refresh();
 setTool('select');
 renderTargets('');

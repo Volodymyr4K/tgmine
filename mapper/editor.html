@@ -183,7 +183,10 @@ button.primary{background:rgba(255,62,165,.16);border-color:rgba(255,62,165,.45)
       <div class="body">
         <div id="props"><div class="hint">Нічого не вибрано.</div></div>
         <h2 style="font-size:10px;margin:12px 0 4px">Обʼєкти на карті</h2>
+        <input id="listSearch" placeholder="фільтр: назва, тип, підпис…">
         <div id="list"></div>
+        <div class="hint">Рядок можна перетягнути — це порядок малювання:
+          верхній рядок лежить на карті найвище. Наведення підсвічує обʼєкт.</div>
       </div>
     </section>
 
@@ -267,6 +270,13 @@ button.primary{background:rgba(255,62,165,.16);border-color:rgba(255,62,165,.45)
           <button id="load">Відкрити</button>
         </div>
         <button id="clear" style="margin-top:6px">Нова карта (стерти все)</button>
+        <label style="margin-top:10px">Мої карти в браузері</label>
+        <select id="slotSel"></select>
+        <div class="row" style="margin-top:6px">
+          <button id="slotSave">Зберегти як…</button>
+          <button id="slotOpen">Відкрити</button>
+          <button id="slotDel" style="max-width:44px" title="видалити">✕</button>
+        </div>
         <div class="hint" id="tplHint">Рамка тягнеться за кути. Експорт віддає
           рівно її вміст у подвійній щільності.</div>
       </div>
@@ -512,6 +522,7 @@ const S={
           ruregions:true,
           legend:true,header:true,scale:true},
   objs:[], sel:null, selMore:[], draft:null, ghosts:[], redo:[], marquee:null, clip:null,
+  hover:null,                   // обʼєкт під курсором у списку — підсвічуємо на карті
   // k:0 означає «кадр ще не вписано». Це не косметика: якщо fit() на старті
   // не спрацював (полотно ще без розміру — фонова вкладка, панель без
   // розкладки), то з виглядом {0,0,1} карта показувала світ у точці (0,0),
@@ -1791,6 +1802,20 @@ function draw(){
     if(!objVisible(o)) continue;
     drawObj(o,ctx,o===S.sel||S.selMore.includes(o));
   }
+  // Підсвітка обʼєкта, на рядок якого навели в списку. Тільки на екрані:
+  // в експорт вона не потрапляє, бо там свій цикл малювання.
+  if(S.hover&&S.objs.includes(S.hover)&&objVisible(S.hover)){
+    const o=S.hover;
+    ctx.save();
+    ctx.strokeStyle='rgba(255,62,165,.95)';ctx.lineWidth=2;ctx.setLineDash([5,4]);
+    if(o.pts&&o.pts.length>1){
+      ctx.stroke(spline(o.pts,ctx,null,o.tension===undefined?1:o.tension));
+    }else{
+      const p=selAnchor(o);
+      if(p){ctx.beginPath();ctx.arc(p[0],p[1],(o.size||10)*2.4,0,7);ctx.stroke();}
+    }
+    ctx.restore();
+  }
   if(S.marquee){
     const m=S.marquee;
     ctx.save();ctx.setLineDash([5,4]);ctx.strokeStyle='rgba(255,62,165,.9)';
@@ -2070,12 +2095,8 @@ function touch(){dirty=true;}
 setInterval(()=>{if(dirty){dirty=false;autosave();}},1500);
 function autosave(){
   SAVED_AT=Date.now(); savedTick();
-  try{ localStorage.setItem('tgmine-map',
-    JSON.stringify({title:S.title,sub:S.sub,objs:S.objs,view:S.view,
-                    frame:S.frame,aspect:S.aspect,types:TYPES,zones:ZONES,
-                    style:S.style,legend:S.legend,brand:S.brand,
-                    footer:S.footer,watermark:S.watermark}));
-  }catch(e){}
+  try{ localStorage.setItem('tgmine-map',JSON.stringify(mapPayload())); }
+  catch(e){}
 }
 function restore(){
   try{
@@ -2483,14 +2504,8 @@ stage.addEventListener('drop',e=>{
     try{
       const d=JSON.parse(rd.result);
       snapshot();
-      const mig=migrateMarks(d.objs), dd=dedupeMarks(d.objs);
-      S.objs=d.objs||[];S.title=d.title||'';S.sub=d.sub||'';
-      if(mig||dd) console.log('переведено:',mig,'здубльованих прибрано:',dd);
-      if(d.view)S.view=d.view;
-      if(d.frame!==undefined){S.frame=d.frame;S.aspect=d.aspect||0;}
-      document.getElementById('mTitle').value=S.title;
-      document.getElementById('mSub').value=S.sub;
-      toast('карту відкрито: '+f.name);refresh();
+      applyMap(d);                 // той самий шлях, що й «Відкрити»
+      toast('карту відкрито: '+f.name);
     }catch(err){toast('не вдалося прочитати файл');}
   };
   rd.readAsText(f);
@@ -2807,6 +2822,8 @@ function refresh(){
   document.getElementById('del').disabled=!S.sel;
   // список
   const l=document.getElementById('list');
+  const q=(document.getElementById('listSearch')||{}).value||'';
+  const qq=q.trim().toLowerCase();
   l.innerHTML=S.objs.map((o,i)=>{
     // У списку теж має бути видно категорію: сімнадцять рядків «влучання»
     // там, де насправді одинадцять разів працювала ППО, — та сама каша.
@@ -2816,7 +2833,10 @@ function refresh(){
     const extra=o.kind==='route'?`${o.pts.length} вузлів${o.count>1?' · пучок '+o.count:''}`
       :(o.label||o.text||'');
     const on=o===S.sel||S.selMore.includes(o);
-    return `<div class="item${on?' on':''}" data-i="${i}">
+    // Фільтр шукає і по типу, і по підпису: у нальоті на сорок обʼєктів
+    // прокрутка перестає бути способом щось знайти.
+    if(qq&&!((name||'')+' '+(extra||'')).toLowerCase().includes(qq)) return '';
+    return `<div class="item${on?' on':''}" draggable="true" data-i="${i}">
       <span>${o.hidden?'<s>':''}${name}${o.hidden?'</s>':''}</span>
       <span style="color:#5f7386;display:flex;gap:6px;align-items:center">
         ${extra}
@@ -2832,8 +2852,32 @@ function refresh(){
     if(o===S.sel&&(o.hidden||o.locked)){S.sel=null;S.selMore=[];}
     refresh();
   });
-  l.querySelectorAll('.item').forEach(it=>it.onclick=()=>{
-    S.sel=S.objs[+it.dataset.i];S.selMore=[];refresh();});
+  l.querySelectorAll('.item').forEach(it=>{
+    it.onclick=()=>{S.sel=S.objs[+it.dataset.i];S.selMore=[];refresh();};
+    // Наведення підсвічує обʼєкт на карті: у списку «збиття» їх десяток, і
+    // зрозуміти, який саме рядок про який кружок, інакше неможливо.
+    it.onmouseenter=()=>{S.hover=S.objs[+it.dataset.i];draw();};
+    it.onmouseleave=()=>{if(S.hover===S.objs[+it.dataset.i]){S.hover=null;draw();}};
+    // Перетягування рядка міняє порядок малювання. Список показано згори
+    // вниз від верхнього обʼєкта, тому індекси беремо з даних, а не з
+    // позиції в DOM.
+    it.ondragstart=e=>{e.dataTransfer.setData('text/plain',it.dataset.i);
+      e.dataTransfer.effectAllowed='move';};
+    it.ondragover=e=>{e.preventDefault();e.dataTransfer.dropEffect='move';
+      it.style.borderTop='2px solid rgba(255,62,165,.7)';};
+    it.ondragleave=()=>{it.style.borderTop='';};
+    it.ondrop=e=>{
+      e.preventDefault();it.style.borderTop='';
+      const from=+e.dataTransfer.getData('text/plain'), to=+it.dataset.i;
+      if(Number.isNaN(from)||from===to) return;
+      snapshot();
+      const [obj]=S.objs.splice(from,1);
+      S.objs.splice(from<to?to-1:to,0,obj);
+      refresh();
+    };
+  });
+  const ls=document.getElementById('listSearch');
+  if(ls&&!ls.dataset.wired){ls.dataset.wired='1';ls.oninput=()=>refresh();}
   draw();
 }
 document.getElementById('mTitle').oninput=e=>{S.title=e.target.value;draw();};
@@ -2856,11 +2900,84 @@ function fit(){
   draw();
 }
 document.getElementById('fit').onclick=fit;
+// Один знімок карти на всі способи збереження: файл, слот у браузері,
+// автозбереження. Раніше цей обʼєкт складався в трьох місцях, і поле,
+// додане в одному, тихо не потрапляло в решту.
+function mapPayload(){
+  return {title:S.title,sub:S.sub,objs:S.objs,view:S.view,
+          frame:S.frame,aspect:S.aspect,types:TYPES,zones:ZONES,
+          style:S.style,legend:S.legend,brand:S.brand,
+          footer:S.footer,watermark:S.watermark};
+}
+// Карти в браузері. Автозбереження одне й безіменне — воно про «не втратити
+// поточну роботу». Слоти — про «повернутись до позавчорашньої ночі».
+const SLOTS='tgmine-slots';
+function slots(){
+  try{ return JSON.parse(localStorage.getItem(SLOTS)||'{}')||{}; }catch(e){ return {}; }
+}
+function slotsWrite(o){
+  try{ localStorage.setItem(SLOTS,JSON.stringify(o)); return true; }
+  catch(e){ toast('у браузері нема місця: збережи у файл'); return false; }
+}
+function renderSlots(){
+  const sel=document.getElementById('slotSel');
+  if(!sel) return;
+  const all=slots(), names=Object.keys(all).sort();
+  sel.innerHTML=names.length
+    ? names.map(n=>`<option value="${n.replace(/"/g,'&quot;')}">${n} — ${
+        (all[n].at||'').slice(0,16).replace('T',' ')}</option>`).join('')
+    : '<option value="">(порожньо)</option>';
+}
+function wireSlots(){
+  const sel=document.getElementById('slotSel');
+  if(!sel) return;
+  renderSlots();
+  document.getElementById('slotSave').onclick=()=>{
+    const def=(S.title||'карта')+(S.sub?' · '+S.sub:'');
+    const name=prompt('Назва карти в браузері',def);
+    if(!name) return;
+    const all=slots();
+    all[name]={at:new Date().toISOString(),map:mapPayload()};
+    if(slotsWrite(all)){renderSlots();sel.value=name;toast('збережено: '+name);}
+  };
+  document.getElementById('slotOpen').onclick=()=>{
+    const all=slots(), d=all[sel.value];
+    if(!d){toast('нема чого відкривати');return;}
+    snapshot();
+    applyMap(d.map);
+    toast('відкрито: '+sel.value);
+  };
+  document.getElementById('slotDel').onclick=()=>{
+    const all=slots();
+    if(!all[sel.value]) return;
+    if(!confirm(`Видалити «${sel.value}» з браузера?`)) return;
+    delete all[sel.value];
+    slotsWrite(all);renderSlots();
+  };
+}
+// Один шлях застосування карти: із файла, зі слота, з перетягування.
+function applyMap(d){
+  if(!d) return;
+  migrateMarks(d.objs); dedupeMarks(d.objs);
+  S.objs=d.objs||[];S.title=d.title||'';S.sub=d.sub||'';
+  if(d.view)S.view=d.view;
+  if(d.frame!==undefined){S.frame=d.frame;S.aspect=d.aspect||0;
+    const a=document.getElementById('aspect'); if(a) a.value=String(S.aspect||0);}
+  if(d.types){TYPES=d.types;retype();}
+  if(d.zones){ZONES=d.zones;rezone();}
+  if(d.style)S.style=fillDefaults(d.style,STYLE_DEFAULT);
+  if(d.legend)S.legend=d.legend;
+  if(d.brand)S.brand=d.brand;
+  if(d.footer)S.footer=d.footer;
+  if(d.watermark)S.watermark=d.watermark;
+  document.getElementById('mTitle').value=S.title;
+  document.getElementById('mSub').value=S.sub;
+  S.sel=null;S.selMore=[];
+  if(viewBroken()) fit();
+  renderChrome();renderStyle();refresh();
+}
 document.getElementById('save').onclick=()=>{
-  const blob=new Blob([JSON.stringify({title:S.title,sub:S.sub,objs:S.objs,
-    view:S.view,frame:S.frame,aspect:S.aspect,
-    types:TYPES,zones:ZONES,style:S.style,legend:S.legend,brand:S.brand,
-    footer:S.footer,watermark:S.watermark},null,1)],
+  const blob=new Blob([JSON.stringify(mapPayload(),null,1)],
     {type:'application/json'});
   const a=document.createElement('a');a.href=URL.createObjectURL(blob);
   a.download='map.json';a.click();
@@ -2868,22 +2985,10 @@ document.getElementById('save').onclick=()=>{
 document.getElementById('load').onclick=()=>{
   const inp=document.createElement('input');inp.type='file';inp.accept='.json';
   inp.onchange=()=>{const f=inp.files[0];const rd=new FileReader();
-    rd.onload=()=>{const d=JSON.parse(rd.result);
-      const mig=migrateMarks(d.objs), dd=dedupeMarks(d.objs);
-      S.objs=d.objs||[];S.title=d.title||'';S.sub=d.sub||'';
-      if(mig||dd) toast(`позначок переведено: ${mig}, здубльованих прибрано: ${dd}`);
-      if(d.view)S.view=d.view;
-      if(d.frame!==undefined){S.frame=d.frame;S.aspect=d.aspect||0;
-        document.getElementById('aspect').value=String(S.aspect||0);}
-      if(d.types){TYPES=d.types;retype();}
-      if(d.zones){ZONES=d.zones;rezone();}
-      if(d.style)S.style=fillDefaults(d.style,STYLE_DEFAULT);
-      if(d.legend)S.legend=d.legend;
-      if(d.brand)S.brand=d.brand;
-      if(d.footer)S.footer=d.footer;
-      if(d.watermark)S.watermark=d.watermark;
-      document.getElementById('mTitle').value=S.title;
-      document.getElementById('mSub').value=S.sub;refresh();};
+    rd.onload=()=>{
+      let d; try{ d=JSON.parse(rd.result); }
+      catch(e){ toast('це не файл карти'); return; }
+      snapshot(); applyMap(d); toast('карту відкрито: '+f.name);};
     rd.readAsText(f);};
   inp.click();
 };
@@ -3657,6 +3762,7 @@ if(viewBroken()) fit();   // автозбереження могло збере�
 initSections();
 wireHud();
 wireClear();
+wireSlots();
 renderChrome();
 renderStyle();
 refresh();

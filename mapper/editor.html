@@ -3802,12 +3802,76 @@ function mergeZones(list){
   for(const z of ZONES_DEFAULT) if(!have.has(z.id)) out.unshift(JSON.parse(JSON.stringify(z)));
   return out;
 }
-function ringToZone(ring, step){
-  // Прорідження: контур країни має сотні вершин, а зону оператор тягає
-  // руками. Кожна N-та точка лишає форму впізнаваною й редагованою.
+// Прорідження контуру. Брати кожну N-ту точку не можна: на прямій ділянці
+// вершини зайві, а на закруті — саме там, де їх викидаєш. Через це зона
+// зрізала кути й відходила від кордону на десятки кілометрів.
+// Дуглас-Пекер лишає точки за формою: рівне спрощується сильно, звивисте
+// майже не чіпається.
+function rdp(pts, eps){
+  if(pts.length<3) return pts.slice();
+  // Замкнений контур: перша й остання точки збігаються, тому базовий
+  // відрізок нульової довжини й ВСІ відстані виходять нулем — алгоритм
+  // повертав два вузли, а зона ставала трикутником. Ріжемо кільце на дві
+  // дуги в найдальшій від початку точці й спрощуємо кожну окремо.
+  const f=pts[0], l=pts[pts.length-1];
+  if(f[0]===l[0]&&f[1]===l[1]){
+    const kx0=Math.cos(f[0]*Math.PI/180)||1;
+    let m=1, md=-1;
+    for(let i=1;i<pts.length-1;i++){
+      const d=Math.hypot((pts[i][1]-f[1])*kx0, pts[i][0]-f[0]);
+      if(d>md){md=d;m=i;}
+    }
+    const a=rdp(pts.slice(0,m+1),eps), b=rdp(pts.slice(m),eps);
+    return a.concat(b.slice(1));
+  }
+  const kx=Math.cos(pts[0][0]*Math.PI/180) || 1;   // довгота стискається з широтою
+  const keep=new Uint8Array(pts.length);
+  keep[0]=keep[pts.length-1]=1;
+  const stack=[[0,pts.length-1]];
+  while(stack.length){
+    const [a,b]=stack.pop();
+    if(b-a<2) continue;
+    const ax=pts[a][1]*kx, ay=pts[a][0], bx=pts[b][1]*kx, by=pts[b][0];
+    const dx=bx-ax, dy=by-ay, len=Math.hypot(dx,dy)||1e-12;
+    let best=-1, bestD=eps;
+    for(let i=a+1;i<b;i++){
+      const px=pts[i][1]*kx, py=pts[i][0];
+      const d=Math.abs((px-ax)*dy-(py-ay)*dx)/len;
+      if(d>bestD){bestD=d;best=i;}
+    }
+    if(best>0){keep[best]=1;stack.push([a,best],[best,b]);}
+  }
   const out=[];
-  for(let i=0;i<ring.length;i+=step) out.push([ring[i][0],ring[i][1]]);
-  if(out.length>2 && (out[0][0]!==out[out.length-1][0])) out.push([ring[0][0],ring[0][1]]);
+  for(let i=0;i<pts.length;i++) if(keep[i]) out.push([pts[i][0],pts[i][1]]);
+  return out;
+}
+// Похибка спрощення в кілометрах: найбільший відступ вихідної вершини від
+// спрощеного контуру. Це число має бути видно, а не «здається, схоже».
+function ringDev(orig, simp){
+  const kx=Math.cos(orig[0][0]*Math.PI/180)||1, KM=111.32;
+  let worst=0;
+  for(const p of orig){
+    let best=Infinity;
+    for(let i=0;i<simp.length-1;i++){
+      const ax=simp[i][1]*kx, ay=simp[i][0], bx=simp[i+1][1]*kx, by=simp[i+1][0];
+      const dx=bx-ax, dy=by-ay, l2=dx*dx+dy*dy||1e-12;
+      let t=((p[1]*kx-ax)*dx+(p[0]-ay)*dy)/l2;
+      t=Math.max(0,Math.min(1,t));
+      const d=Math.hypot(p[1]*kx-(ax+t*dx), p[0]-(ay+t*dy));
+      if(d<best) best=d;
+    }
+    if(best>worst) worst=best;
+  }
+  return worst*KM;
+}
+function ringToZone(ring, maxPts){
+  // Ціль — контур, який лягає на кордон і при цьому редагується руками.
+  // Починаємо з майже точного (200 м) і послаблюємо, поки вузлів не стане
+  // менше за стелю.
+  let eps=0.002, out=rdp(ring,eps);
+  while(out.length>maxPts && eps<0.2){ eps*=1.5; out=rdp(ring,eps); }
+  if(out.length>2 && (out[0][0]!==out[out.length-1][0]||out[0][1]!==out[out.length-1][1]))
+    out.push([ring[0][0],ring[0][1]]);
   return out;
 }
 function biggestRing(rings){
@@ -3820,10 +3884,12 @@ function addZoneUA(){
   const r=biggestRing(C.UKR);
   if(!r){toast('контуру України нема в підкладці');return;}
   snapshot();
-  const o={kind:'zone',zone:'ukraine',label:'Україна',
-           pts:ringToZone(r, Math.max(1,Math.round(r.length/160)))};
+  const pts=ringToZone(r, 600);
+  const o={kind:'zone',zone:'ukraine',label:'Україна',pts};
   S.objs.push(o);S.sel=o;S.selMore=[];
-  refresh();toast(`Україна: ${o.pts.length} вузлів — тягай, міняй колір`);
+  refresh();
+  toast(`Україна: ${pts.length} вузлів, відхід від кордону до ${
+    ringDev(r,pts).toFixed(1)} км`);
 }
 function addZoneTOT(){
   const R=(window.BASE||{}).regions||{};
@@ -3835,7 +3901,7 @@ function addZoneTOT(){
     const r=biggestRing(R[k]);
     if(!r) continue;
     last={kind:'zone',zone:'occupied',label:k.replace('ТОТ_',''),
-          pts:ringToZone(r, Math.max(1,Math.round(r.length/90)))};
+          pts:ringToZone(r, 400)};
     S.objs.push(last);n++;
   }
   S.sel=last;S.selMore=[];

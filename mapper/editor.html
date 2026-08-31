@@ -727,6 +727,15 @@ addEventListener('visibilitychange',()=>{ if(!document.hidden) resize(); });
 // ==========================================================================
 function ring(g,to){to.beginPath();for(let i=0;i<g.length;i++){
   const p=P(g[i][0],g[i][1]); i?to.lineTo(p[0],p[1]):to.moveTo(p[0],p[1]);}to.closePath();}
+// Те саме, що ring(), але БЕЗ beginPath: кілька кілець в одному шляху —
+// саме так робиться дірка правилом evenodd.
+function ringPath(g,to){
+  for(let i=0;i<g.length;i++){
+    const p=P(g[i][0],g[i][1]);
+    i?to.lineTo(p[0],p[1]):to.moveTo(p[0],p[1]);
+  }
+  to.closePath();
+}
 function path(g,to){to.beginPath();for(let i=0;i<g.length;i++){
   const p=P(g[i][0],g[i][1]); i?to.lineTo(p[0],p[1]):to.moveTo(p[0],p[1]);}}
 
@@ -1428,7 +1437,18 @@ function drawZone(o,c,sel){
   const xs=o.pts.map(p=>P(p[0],p[1])[0]), ys=o.pts.map(p=>P(p[0],p[1])[1]);
   const bx=Math.min(...xs)-4, by=Math.min(...ys)-4;
   const bw=Math.max(...xs)-bx+8, bh=Math.max(...ys)-by+8;
-  c.save();ring(o.pts,c);c.clip();
+  // Зона, що лежить ВИЩЕ, вигризає дірку в нижчій: зелена Україна під
+  // червоною ТОТ давала подвійну заливку й подвійний штрих, і читалось це
+  // як бруд. Порядок задає список обʼєктів — його ж і видно, і його ж можна
+  // перетягнути. Прапорець «підрізати» вимикає це для конкретної зони.
+  const me=S.objs.indexOf(o);
+  const cutters=(o.cut===false||me<0)?[]:S.objs.filter((x,i)=>
+    i>me && x.kind==='zone' && x.pts && x.pts.length>2 && objVisible(x));
+  c.save();
+  c.beginPath();
+  ringPath(o.pts,c);
+  for(const x of cutters) ringPath(x.pts,c);
+  c.clip('evenodd');
   c.fillStyle=z.col+'14';c.fillRect(bx,by,bw,bh);
   if(z.hatch){
     // Штрих, а не суцільна заливка: зона має читатись як позначка на карті,
@@ -2016,11 +2036,14 @@ function SvgCtx(w,h){
       emit(`<image href="${href}" x="${x}" y="${y}" width="${w2}" height="${h2}" `+
            `preserveAspectRatio="none" ${common()}/>`);
     },
-    clip(){
+    clip(rule){
       const d=path.join(''); if(!d) return;
       const cid=uid();
+      // clip-rule="evenodd" потрібне для зон, які підрізають одна одну:
+      // без нього дірка у SVG не зʼявляється, і експорт розходиться з екраном.
       defs.push(`<clipPath id="${cid}" clipPathUnits="userSpaceOnUse">`+
-                `<path d="${d}" transform="${mstr(cur.m)}"/></clipPath>`);
+                `<path d="${d}" clip-rule="${rule||'nonzero'}" `+
+                `transform="${mstr(cur.m)}"/></clipPath>`);
       cur.clip=cid;
     },
     createRadialGradient(x0,y0,r0,x1,y1,r1){
@@ -2808,7 +2831,14 @@ function refresh(){
     p.innerHTML='<label>Тип зони</label><select data-k="zone">'
       +ZONES.map(z=>`<option value="${z.id}" ${z.id===o.zone?'selected':''}>${z.name}</option>`).join('')
       +'</select>'+field('Підпис',o.label||'','label')
-      +`<div class="hint">Кутів: ${o.pts.length}.</div>`;
+      +'<label>Колір (свій, замість типу)</label>'
+      +`<input type="color" data-k="col" value="${o.col||(ZONE[o.zone]||ZONE.area).col}">`
+      +`<button data-act="cut" style="margin-top:6px">${
+         o.cut===false?'Не підрізати верхніми зонами':'Підрізається верхніми зонами'}</button>`
+      +`<div class="hint">Кутів: ${o.pts.length}. Зона, що лежить вище в
+         списку обʼєктів, вигризає в цій дірку — тож червона ТОТ не
+         накладається на зелену Україну, а займає її місце. Порядок
+         міняється перетягуванням рядка у списку.</div>`;
   }else if(o.kind==='target'){
     p.innerHTML=field('Підпис',o.label||'','label')
       +`<div class="hint">З нашого переліку, ярус ${o.tier}, влучань у сховищі: ${o.hits}.</div>`;
@@ -2825,6 +2855,9 @@ function refresh(){
   }
   const pin=p.querySelector('[data-act="pin"]');
   if(pin) pin.onclick=()=>{snapshot();S.sel.pinLabel=!S.sel.pinLabel;refresh();};
+  const cut=p.querySelector('[data-act="cut"]');
+  if(cut) cut.onclick=()=>{snapshot();
+    S.sel.cut=(S.sel.cut===false)?true:false;refresh();};
   for(const k of ['dash','both','glow']){
     const b=p.querySelector(`[data-act="${k}"]`);
     if(b) b.onclick=()=>{snapshot();S.sel[k]=!S.sel[k];refresh();};

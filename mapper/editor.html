@@ -391,7 +391,10 @@ const S={
   // з обʼєктами.
   style:{
     base:{bright:0.55, sat:20, nightGlow:0.34, water:0.30, borders:0.26,
-          places:0.45, labelScale:1.0},
+          places:0.45, labelScale:1.0,
+          // фокус: наскільки гасити все поза Україною й РФ і яка яскравість
+          // державного кордону цих двох
+          focusDim:0.72, focusEdge:0.62},
     route:{halo:0.12, nodes:true},
     impact:{col:'#ffd66e', rays:8, size:9, glow:1.0},
     // Робота ППО і збиття — НЕ влучання. Доти всі три малювались одним
@@ -417,6 +420,7 @@ const S={
   layers:{sat:true,night:true,water:true,borders:true,cities:true,
           regions:true,places:true,targets:false,
           impacts:true,ppo:true,downed:true,ghosts:true,marklabels:false,
+          focus:true,
           legend:true,header:true,scale:true},
   objs:[], sel:null, selMore:[], draft:null, ghosts:[], redo:[], marquee:null, clip:null,
   view:{x:0,y:0,k:1},           // зсув і масштаб у пікселях підкладки
@@ -643,7 +647,51 @@ function drawBase(c){
     c.fill();
   }
   drawLabels(c);
+  // Фокус. Карта про удари по РФ: усе, що не Україна й не РФ, гаситься
+  // темною заливкою з дірками по цих двох країнах, а їхній державний кордон
+  // обводиться помітно яскравіше за межі областей. Малюється ПІСЛЯ підписів,
+  // тому притлумлює й чужі назви — інакше Румунія й Туреччина лишались
+  // такими самими яскравими, як театр.
+  if(L.focus&&B.admin) drawFocus(c,ST);
   c.restore();
+}
+const FOCUS=['UKR','RUS'];
+// Дірки в заливці робить правило evenodd: зовнішній прямокутник плюс усі
+// кільця двох країн в одному шляху. Кільця додаються без beginPath, бо
+// ring() починає шлях заново й лишав би від маски одну останню фігуру.
+function addRing(g,to){
+  for(let i=0;i<g.length;i++){
+    const p=P(g[i][0],g[i][1]);
+    i?to.lineTo(p[0],p[1]):to.moveTo(p[0],p[1]);
+  }
+  to.closePath();
+}
+function drawFocus(c,ST){
+  const B=window.BASE;
+  const dim=ST.base.focusDim===undefined?0.72:ST.base.focusDim;
+  if(dim>0){
+    c.save();
+    c.beginPath();
+    c.rect(0,0,Wp,Hp);
+    for(const a3 of FOCUS) for(const g of (B.admin[a3]||[])) addRing(g,c);
+    c.fillStyle=`rgba(2,4,8,${Math.min(1,dim)})`;
+    c.fill('evenodd');
+    c.restore();
+  }
+  const e=ST.base.focusEdge===undefined?0.62:ST.base.focusEdge;
+  if(e>0){
+    c.save();
+    c.lineJoin='round';c.lineCap='round';
+    // спершу темна підкладка, щоб лінія читалась і над водою, і над містом
+    for(const pass of [0,1]){
+      c.strokeStyle=pass?`rgba(214,232,250,${Math.min(1,e)})`:'rgba(2,4,8,.75)';
+      c.lineWidth=pass?1.5:3.2;
+      for(const a3 of FOCUS) for(const g of (B.admin[a3]||[])){
+        c.beginPath();addRing(g,c);c.stroke();
+      }
+    }
+    c.restore();
+  }
 }
 
 // Назва області — розріджений капітел, як на оглядових картах. Показуємо
@@ -1028,6 +1076,18 @@ function markLabel(o,c,s,col,r,sel){
 // не перевести, на одній карті співіснують дві генерації позначок: старі
 // помаранчеві спалахи з написом «ППО» і нові блакитні знаки ППО поруч.
 // Переводимо при кожному вході карти в редактор.
+// Стиль зберігається разом із картою, тому карта, збережена раніше, не має
+// ключів, які зʼявились потім: focusDim і focusEdge приходили undefined, і
+// фокус мовчки не малювався зовсім. Доповнюємо збережений стиль дефолтами.
+function fillDefaults(dst,def){
+  for(const k in def){
+    if(def[k]&&typeof def[k]==='object'&&!Array.isArray(def[k])){
+      if(!dst[k]||typeof dst[k]!=='object') dst[k]={};
+      fillDefaults(dst[k],def[k]);
+    }else if(dst[k]===undefined) dst[k]=def[k];
+  }
+  return dst;
+}
 function migrateMarks(list){
   const W={'ППО':'ppo','ППО ':'ppo','збиття':'downed','влучання':'impact'};
   let n=0;
@@ -1726,6 +1786,9 @@ function SvgCtx(w,h){
     },
     // --- малювання ---
     fill(p2,rule){
+      // canvas дозволяє fill('evenodd') одним аргументом; без цієї гілки
+      // правило губилось, і маска фокуса у SVG заливала всю карту
+      if(typeof p2==='string'){rule=p2;p2=null;}
       const d=(p2&&p2.__d)||path.join('');
       if(!d) return;
       emit(`<path d="${d}" fill="${paint(cur.fill)}" fill-rule="${rule||'nonzero'}" ${common()}/>`);
@@ -1891,7 +1954,7 @@ function restore(){
       if(d.frame){S.frame=d.frame;S.aspect=d.aspect||0;}
       if(d.types){TYPES=d.types;retype();}
       if(d.zones){ZONES=d.zones;rezone();}
-      if(d.style)S.style=d.style;
+      if(d.style)S.style=fillDefaults(d.style,STYLE_DEFAULT);
       if(d.legend)S.legend=d.legend;
       if(d.brand)S.brand=d.brand;
       if(d.footer)S.footer=d.footer;
@@ -2650,7 +2713,7 @@ document.getElementById('load').onclick=()=>{
         document.getElementById('aspect').value=String(S.aspect||0);}
       if(d.types){TYPES=d.types;retype();}
       if(d.zones){ZONES=d.zones;rezone();}
-      if(d.style)S.style=d.style;
+      if(d.style)S.style=fillDefaults(d.style,STYLE_DEFAULT);
       if(d.legend)S.legend=d.legend;
       if(d.brand)S.brand=d.brand;
       if(d.footer)S.footer=d.footer;
@@ -2859,6 +2922,7 @@ document.getElementById('tSearch').oninput=e=>renderTargets(e.target.value);
     ['targets','наші цілі'],
     ['impacts','влучання'],['ppo','робота ППО'],['downed','збиття'],
     ['ghosts','підказки'],['marklabels','підписи позначок'],
+    ['focus','фокус: Україна й РФ'],
     ['legend','легенда'],['header','шапка'],
     ['scale','масштаб'],
   ];
@@ -2944,6 +3008,8 @@ document.getElementById('styleEdit').onclick=()=>{
     +n('Річки','base','water','type=number step=0.05 min=0 max=1')
     +n('Межі областей','base','borders','type=number step=0.05 min=0 max=1')
     +n('Розсип НП','base','places','type=number step=0.05 min=0 max=1')
+    +n('Затемнення інших країн (0..1)','base','focusDim','type=number step=0.05 min=0 max=1')
+    +n('Кордон України й РФ','base','focusEdge','type=number step=0.05 min=0 max=1')
     +'<label style="color:#8fa3b8;margin-top:10px">Маршрути</label>'
     +n('Сила ореолу','route','halo','type=number step=0.02 min=0 max=0.6')
     +'<label style="color:#8fa3b8;margin-top:10px">Влучання</label>'

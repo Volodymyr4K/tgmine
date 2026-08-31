@@ -2758,8 +2758,14 @@ document.getElementById('export').onclick=async ()=>{
   // Експорт віддає рамку, а не вікно: плакат не має залежати від того,
   // на якому екрані оператор працював.
   const btn=document.getElementById('export'), was=btn.textContent;
-  btn.textContent='готую тайли…';
   const f=S.frame||{x:0,y:0,w:Wp,h:Hp};
+  // Порожній кадр (полотно ще без розміру — сторінка у фоновій вкладці)
+  // давав полотно 0×0, а далі drawImage кидав InvalidStateError. Помилка
+  // йшла лише в консоль, кнопка назавжди лишалась у стані «малюю…», і
+  // зовні це виглядало як «експорт не працює».
+  if(!(f.w>0)||!(f.h>0)){toast('кадр порожній — вписати кадр і повторити');return;}
+  btn.textContent='готую тайли…';
+  try{
   // Щільність — із шаблону: скільки разів рамку треба збільшити, щоб вийшов
   // файл заданого розміру. Без шаблону лишається ×2, як було.
   const dens=S.tpl ? S.tpl.w/f.w : 2;
@@ -2812,17 +2818,33 @@ document.getElementById('export').onclick=async ()=>{
     og.imageSmoothingEnabled=true; og.imageSmoothingQuality='high';
     og.drawImage(c2,0,0,outW,outH);
   }
-  let url;
-  try{ url=out.toDataURL('image/png'); }
-  catch(e){
-    S.bias=0;btn.textContent=was;
-    alert('Експорт недоступний: сторінку відкрито з файла.\n'+
-          'Запусти ./run.sh і відкрий http://localhost:8765/editor.html');
-    return;
-  }
+  // Файл віддається як blob, а не data:URL. Причина не в красі: картинка
+  // 1800×1200 у base64 — це рядок на 5 МБ, і не кожен браузер погоджується
+  // такий «файл» завантажити (Safari просто відкриває його вкладкою). Blob
+  // качається скрізь однаково, і памʼять звільняється одразу після кліку.
+  const blob=await new Promise((res,rej)=>{
+    try{ out.toBlob(b=>b?res(b):rej(new Error('порожній файл')),'image/png'); }
+    catch(e){ rej(e); }
+  }).catch(e=>{
+    if(String(e&&e.name)==='SecurityError'){
+      alert('Експорт недоступний: сторінку відкрито з файла.\n'+
+            'Запусти ./run.sh і відкрий http://localhost:8765/editor.html');
+      return null;
+    }
+    throw e;
+  });
+  if(!blob) return;
+  const url=URL.createObjectURL(blob);
   const a=document.createElement('a');
   a.href=url;a.download=(S.tpl?S.tpl.id:'map')+'.png';a.click();
-  S.bias=0;btn.textContent=was;draw();
+  setTimeout(()=>URL.revokeObjectURL(url),10000);
+  toast(`PNG готовий: ${outW}×${outH}, ${Math.round(blob.size/1024)} КБ`);
+  }catch(e){
+    console.error('експорт PNG:',e);
+    toast('експорт не вдався: '+((e&&e.message)||e));
+  }finally{
+    S.bias=0;btn.textContent=was;RSCALE=1;draw();
+  }
 };
 // Експорт у SVG. Той самий код малювання, інший приймач команд: лінії,
 // вістря й підписи лишаються векторними на будь-якому розмірі. Растрові шари
@@ -2831,8 +2853,13 @@ document.getElementById('export').onclick=async ()=>{
 document.getElementById('exportSvg').onclick=async ()=>{
   const btn=document.getElementById('exportSvg'), was=btn.textContent;
   const f=S.frame||{x:0,y:0,w:Wp,h:Hp};
+  if(!(f.w>0)||!(f.h>0)){toast('кадр порожній — вписати кадр і повторити');return;}
   const dens=S.tpl?S.tpl.w/f.w:2;
+  // Прапорці шарів оголошені ДО try: у finally їх треба повернути, а
+  // блокові const із середини try там не видно взагалі.
+  let svgSat=S.layers.sat, svgNight=S.layers.night;
   btn.textContent='готую тайли…';
+  try{
   S.bias=Math.max(0,Math.min(3,Math.round(Math.log2(dens))));
   await tilesReady(S.bias);
   btn.textContent='малюю…';
@@ -2877,7 +2904,7 @@ document.getElementById('exportSvg').onclick=async ()=>{
   const k=out.w/f.w;
   const g=SvgCtx(out.w,out.h);
   g.setTransform(k,0,0,out.h/f.h,-f.x*k,-f.y*out.h/f.h);
-  const svgSat=S.layers.sat, svgNight=S.layers.night;
+  svgSat=S.layers.sat; svgNight=S.layers.night;
   S.layers.sat=false; S.layers.night=false;   // растр уже намальовано окремо
   const rprev=RSCALE; RSCALE=1;               // у векторі тінь масштабується сама
   NOBG=!!baseImg;                             // тло вже є у растрі
@@ -2913,9 +2940,16 @@ document.getElementById('exportSvg').onclick=async ()=>{
   const a=document.createElement('a');
   a.href=URL.createObjectURL(blob);
   a.download=(S.tpl?S.tpl.id:'map')+'.svg';a.click();
-  btn.textContent=was;
   toast(`SVG готовий: ${out.w}×${out.h}, ${Math.round(svg.length/1024)} КБ`);
-  draw();
+  }catch(e){
+    console.error('експорт SVG:',e);
+    toast('експорт не вдався: '+((e&&e.message)||e));
+  }finally{
+    // Стан малювання спільний із екраном: якщо вийти з експорту через
+    // помилку й не повернути його, карта далі малюється чужими шарами.
+    S.layers.sat=svgSat; S.layers.night=svgNight;
+    S.bias=0;RSCALE=1;NOBG=false;btn.textContent=was;draw();
+  }
 };
 
 // ---- цілі: пошук і постановка ----

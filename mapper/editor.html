@@ -1037,6 +1037,45 @@ function drawDowned(o,c,sel){
   if(sel){c.beginPath();c.arc(s[0],s[1],r*2.6,0,7);c.strokeStyle='#fff';
     c.setLineDash([3,3]);c.lineWidth=1;c.stroke();c.setLineDash([]);}
 }
+// Карти, намальовані до поділу на категорії, тримають усе як «влучання», а
+// категорія в них лишилась словом у підписі («Саратов · ППО ×17»). Якщо їх
+// не перевести, на одній карті співіснують дві генерації позначок: старі
+// помаранчеві спалахи з написом «ППО» і нові блакитні знаки ППО поруч.
+// Переводимо при кожному вході карти в редактор.
+function migrateMarks(list){
+  const W={'ППО':'ppo','ППО ':'ppo','збиття':'downed','влучання':'impact'};
+  let n=0;
+  for(const o of list||[]){
+    if(o.kind!=='impact'||o.cat) continue;
+    const m=/^(.*?)\s*·\s*(ППО|збиття|влучання)(\s*×\s*\d+)?\s*$/.exec(o.label||'');
+    if(!m) continue;
+    o.cat=W[m[2]]||'impact';
+    o.label=(m[1]||CAT_NAME[o.cat])+(m[3]?' '+m[3].trim():'');
+    n++;
+  }
+  return n;
+}
+// Дві генерації однієї й тієї самої ночі: старий шар лежав під новим, і в
+// Саратові стояло дві позначки — стара «Саратов · ППО ×17» і свіжа
+// «Саратов ×17». Схлопуємо тільки очевидні пари: та сама категорія, та сама
+// назва місця (без «×N») і не далі як 15 км. Дві навмисні позначки поруч із
+// різними підписами при цьому лишаються обидві.
+function dedupeMarks(list){
+  const place=o=>String(o.label||'').replace(/\s*×\s*\d+\s*$/,'').trim().toLowerCase();
+  const out=[]; let dropped=0;
+  for(const o of list||[]){
+    if(o.kind!=='impact'||o.la===undefined){out.push(o);continue;}
+    const twin=out.find(x=>x.kind==='impact'&&x.la!==undefined&&
+      catOf(x)===catOf(o)&&place(x)&&place(x)===place(o)&&
+      Math.hypot((x.la-o.la)*111,(x.lo-o.lo)*111*Math.cos(o.la*Math.PI/180))<15);
+    if(!twin){out.push(o);continue;}
+    dropped++;
+    // лишаємо ту, що прийшла з ночі: у неї правильні розмір і привʼязка
+    if(!twin.origin&&o.origin) out[out.indexOf(twin)]=o;
+  }
+  list.length=0; list.push(...out);
+  return dropped;
+}
 function drawImpact(o,c,sel){
   const k=catOf(o);
   if(k==='ppo') return drawPPO(o,c,sel);
@@ -1812,6 +1851,9 @@ function restore(){
   try{
     const d=JSON.parse(localStorage.getItem('tgmine-map')||'null');
     if(d&&d.objs&&d.objs.length){
+      migrateMarks(d.objs);
+      const dd=dedupeMarks(d.objs);
+      if(dd) console.log('здубльованих позначок прибрано:',dd);
       S.objs=d.objs;S.title=d.title||S.title;S.sub=d.sub||S.sub;
       if(d.view)S.view=d.view;
       if(d.frame){S.frame=d.frame;S.aspect=d.aspect||0;}
@@ -2211,7 +2253,9 @@ stage.addEventListener('drop',e=>{
     try{
       const d=JSON.parse(rd.result);
       snapshot();
+      const mig=migrateMarks(d.objs), dd=dedupeMarks(d.objs);
       S.objs=d.objs||[];S.title=d.title||'';S.sub=d.sub||'';
+      if(mig||dd) console.log('переведено:',mig,'здубльованих прибрано:',dd);
       if(d.view)S.view=d.view;
       if(d.frame!==undefined){S.frame=d.frame;S.aspect=d.aspect||0;}
       document.getElementById('mTitle').value=S.title;
@@ -2562,7 +2606,9 @@ document.getElementById('load').onclick=()=>{
   const inp=document.createElement('input');inp.type='file';inp.accept='.json';
   inp.onchange=()=>{const f=inp.files[0];const rd=new FileReader();
     rd.onload=()=>{const d=JSON.parse(rd.result);
+      const mig=migrateMarks(d.objs), dd=dedupeMarks(d.objs);
       S.objs=d.objs||[];S.title=d.title||'';S.sub=d.sub||'';
+      if(mig||dd) toast(`позначок переведено: ${mig}, здубльованих прибрано: ${dd}`);
       if(d.view)S.view=d.view;
       if(d.frame!==undefined){S.frame=d.frame;S.aspect=d.aspect||0;
         document.getElementById('aspect').value=String(S.aspect||0);}
@@ -2969,7 +3015,20 @@ function putStrikes(){
   // прибирати це доводилось вручну по одному.
   const tag='night:'+(N.date||'');
   const had=S.objs.length;
-  S.objs=S.objs.filter(o=>o.origin!==tag);
+  migrateMarks(S.objs);          // старі позначки спершу в категорії
+  // Прибираємо не лише свій тег, а будь-яку позначку з ночі та будь-яку
+  // ручну позначку ближче за 5 км до нової. Інакше карта, намальована
+  // раніше, лишалась під новим шаром: той самий Саратов стояв двічі —
+  // помаранчевим спалахом зі старим підписом і блакитним знаком ППО.
+  const near=(o,s2)=>{
+    if(o.kind!=='impact'||o.la===undefined) return false;
+    const dla=(o.la-s2.la)*111, dlo=(o.lo-s2.lo)*111*Math.cos(s2.la*Math.PI/180);
+    return Math.hypot(dla,dlo)<5;
+  };
+  S.objs=S.objs.filter(o=>{
+    if(String(o.origin||'').startsWith('night:')) return false;
+    return !list.some(s2=>near(o,s2));
+  });
   const replaced=had-S.objs.length;
   // Категорія — з даних, а не з підпису: «ППО» і «збиття» це різні події,
   // і на карті вони мають різні знаки та окремі шари. Слово з підпису

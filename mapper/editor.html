@@ -89,6 +89,20 @@ button.primary{background:rgba(255,62,165,.16);border-color:rgba(255,62,165,.45)
 #menu button:hover{background:#16202c}
 #menu .sep{height:1px;background:var(--line);margin:4px 2px}
 #menu .k{float:right;color:#5f7386;font-size:11px}
+/* Швидкий редактор просто над вибраним обʼєктом: сховати, показати підпис,
+   змінити категорію, видалити — не бігаючи щоразу в бічну панель. */
+#quick{position:absolute;z-index:70;display:none;gap:4px;align-items:center;
+  transform:translate(-50%,-100%);background:rgba(8,13,20,.94);
+  border:1px solid rgba(120,150,180,.35);border-radius:9px;padding:4px 5px;
+  box-shadow:0 10px 26px rgba(0,0,0,.5);white-space:nowrap}
+#quick button{width:auto;background:transparent;border:1px solid transparent;
+  border-radius:6px;padding:3px 7px;font-size:12px;line-height:1.1;color:var(--ink)}
+#quick button:hover{background:#16202c;border-color:var(--line)}
+#quick button.on{border-color:rgba(255,62,165,.55);background:rgba(255,62,165,.14)}
+#quick .dot{width:14px;height:14px;border-radius:50%;border:2px solid #0b1119;
+  padding:0;display:inline-block}
+#quick .dot.on{outline:2px solid #fff;outline-offset:1px}
+#quick .sep{width:1px;height:16px;background:var(--line);margin:0 2px}
 </style></head><body>
 <div id="app">
   <div id="tools">
@@ -114,6 +128,7 @@ button.primary{background:rgba(255,62,165,.16);border-color:rgba(255,62,165,.45)
     <div id="hint2"></div>
     <div id="toast"></div>
     <div id="menu"></div>
+    <div id="quick"></div>
   </div>
 
   <div id="side">
@@ -1047,6 +1062,63 @@ function dedupeMarks(list){
   list.length=0; list.push(...out);
   return dropped;
 }
+// Куди чіпляти віконце: точкова позначка — своя точка, лінія чи зона —
+// найвищий вузол, щоб віконце не лягало на саму лінію.
+function selAnchor(o){
+  if(!o) return null;
+  if(o.la!==undefined) return P(o.la,o.lo);
+  if(o.pts&&o.pts.length){
+    let best=null;
+    for(const p of o.pts){const q=P(p[0],p[1]); if(!best||q[1]<best[1]) best=q;}
+    return best;
+  }
+  return null;
+}
+// Швидкий редактор над вибраним обʼєктом. Те, що роблять найчастіше —
+// сховати, показати підпис, перемкнути категорію, видалити — має бути під
+// рукою, а не за подорожжю в бічну панель.
+function renderQuick(){
+  const q=document.getElementById('quick'), o=S.sel;
+  if(!o||drag||pan||S.marquee||S.draft){q.style.display='none';return;}
+  const a=selAnchor(o);
+  // Обʼєкт може бути за краєм кадру: віконце тоді нема на чому тримати —
+  // без цієї перевірки воно їхало за полотно (top доходив до 4370 px).
+  if(!a||a[0]<0||a[0]>Wp||a[1]<0||a[1]>Hp){q.style.display='none';return;}
+  const dot=(k,col)=>`<button class="dot${catOf(o)===k?' on':''}" data-q="cat:${k}"`+
+    ` title="${CAT_NAME[k]}" style="background:${col}"></button>`;
+  let html='';
+  if(o.kind==='impact'){
+    html+=dot('ppo',(S.style.ppo||{}).col||'#6fe3ff')
+        + dot('downed',(S.style.downed||{}).col||'#ff8a5c')
+        + dot('impact',S.style.impact.col||'#ffd66e')
+        + '<span class="sep"></span>'
+        + `<button data-q="pin" class="${o.pinLabel?'on':''}" title="Підпис завжди"`+
+          `>підпис</button>`;
+  }
+  if(o.label!==undefined||o.kind==='impact')
+    html+=`<button data-q="rename" title="Змінити підпис">✎</button>`;
+  html+='<span class="sep"></span>'
+      + `<button data-q="hide" title="Сховати (око у списку повертає)">око</button>`
+      + `<button data-q="del" title="Видалити">×</button>`;
+  q.innerHTML=html;
+  q.style.display='flex';
+  const off=(o.size|| (S.style.impact.size||9))*2.2+16;
+  q.style.left=Math.max(70,Math.min(Wp-70,a[0]))+'px';
+  q.style.top=Math.max(34,Math.min(Hp-8,a[1]-off))+'px';
+  q.querySelectorAll('[data-q]').forEach(b=>b.onclick=e=>{
+    e.stopPropagation();
+    const act=b.dataset.q;
+    if(act.startsWith('cat:')){snapshot();S.sel.cat=act.slice(4);refresh();return;}
+    if(act==='pin'){snapshot();S.sel.pinLabel=!S.sel.pinLabel;refresh();return;}
+    if(act==='rename'){
+      const v=prompt('Підпис позначки',S.sel.label||'');
+      if(v!==null){snapshot();S.sel.label=v;refresh();}
+      return;
+    }
+    if(act==='hide'){snapshot();S.sel.hidden=true;S.sel=null;S.selMore=[];refresh();return;}
+    if(act==='del'){delSel();return;}
+  });
+}
 function drawImpact(o,c,sel){
   const k=catOf(o);
   if(k==='ppo') return drawMark(o,c,sel,S.style.ppo||{col:'#6fe3ff'});
@@ -1562,6 +1634,7 @@ function draw(){
     ctx.restore();
   }
   drawFrame(ctx,Wp,Hp);
+  renderQuick();          // віконце їде за обʼєктом при панорамі й масштабі
 }
 
 

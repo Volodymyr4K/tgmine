@@ -62,7 +62,29 @@ button.primary{background:rgba(255,62,165,.16);border-color:rgba(255,62,165,.45)
 .item.on{background:rgba(255,62,165,.12);color:#fff}
 .hint{font-size:11px;color:#5f7386;line-height:1.5;margin-top:8px}
 #hud{position:absolute;right:12px;top:12px;background:rgba(6,10,16,.85);
-  border:1px solid var(--line);border-radius:8px;padding:7px 11px;font-size:11.5px;color:var(--dim)}
+  border:1px solid var(--line);border-radius:8px;padding:5px 8px;font-size:11.5px;
+  color:var(--dim);display:flex;align-items:center;gap:6px}
+#hud .sep{width:1px;height:14px;background:var(--line)}
+#hud #zoom{min-width:44px;text-align:center}
+.hudb{width:auto;background:transparent;border:1px solid transparent;border-radius:6px;
+  padding:2px 7px;font-size:12px;color:var(--ink);line-height:1.1}
+.hudb:hover{background:#16202c;border-color:var(--line)}
+/* Довідка: усе, що інакше треба вгадувати. Відкривається «?» і кнопкою. */
+#help{position:absolute;inset:0;z-index:120;display:none;
+  background:rgba(3,6,10,.72);backdrop-filter:blur(2px)}
+#help.on{display:block}
+#help .box{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+  width:min(720px,86%);max-height:82%;overflow:auto;background:#0b1119;
+  border:1px solid var(--line);border-radius:12px;padding:18px 20px;
+  box-shadow:0 24px 60px rgba(0,0,0,.6)}
+#help h3{margin:14px 0 6px;font-size:11px;letter-spacing:1.2px;text-transform:uppercase;
+  color:var(--dim)}
+#help h3:first-of-type{margin-top:0}
+#help table{width:100%;border-collapse:collapse;font-size:12.5px}
+#help td{padding:3px 6px;vertical-align:top}
+#help td.k{white-space:nowrap;color:#eef4fb;width:38%}
+#help kbd{background:#131c26;border:1px solid var(--line);border-radius:4px;
+  padding:1px 5px;font:inherit;font-size:11.5px}
 /* Рядок підказки показує, що робити ЗАРАЗ. Раніше він зʼявлявся лише для
    маршруту, тому решта інструментів мовчали: людина натискала кнопку й не
    розуміла, чи щось сталось. */
@@ -139,11 +161,20 @@ button.primary{background:rgba(255,62,165,.16);border-color:rgba(255,62,165,.45)
 
   <div id="stage">
     <canvas id="cv"></canvas>
-    <div id="hud">масштаб <span id="zoom">100%</span> · <span id="cursor">—</span></div>
+    <div id="hud">
+      <button class="hudb" id="zOut" title="Дрібніше (−)">−</button>
+      <span id="zoom">100%</span>
+      <button class="hudb" id="zIn" title="Крупніше (+)">+</button>
+      <button class="hudb" id="zAll" title="Показати все намальоване (F)">усе</button>
+      <span class="sep"></span><span id="cursor">—</span>
+      <span class="sep"></span><span id="saved" title="Робота зберігається в цьому браузері">—</span>
+      <button class="hudb" id="helpBtn" title="Клавіші та підказки (?)">?</button>
+    </div>
     <div id="hint2"></div>
     <div id="toast"></div>
     <div id="menu"></div>
     <div id="quick"></div>
+    <div id="help"><div class="box"></div></div>
   </div>
 
   <div id="side">
@@ -235,6 +266,7 @@ button.primary{background:rgba(255,62,165,.16);border-color:rgba(255,62,165,.45)
           <button id="save">Зберегти</button>
           <button id="load">Відкрити</button>
         </div>
+        <button id="clear" style="margin-top:6px">Нова карта (стерти все)</button>
         <div class="hint" id="tplHint">Рамка тягнеться за кути. Експорт віддає
           рівно її вміст у подвійній щільності.</div>
       </div>
@@ -2037,6 +2069,7 @@ let dirty=false;
 function touch(){dirty=true;}
 setInterval(()=>{if(dirty){dirty=false;autosave();}},1500);
 function autosave(){
+  SAVED_AT=Date.now(); savedTick();
   try{ localStorage.setItem('tgmine-map',
     JSON.stringify({title:S.title,sub:S.sub,objs:S.objs,view:S.view,
                     frame:S.frame,aspect:S.aspect,types:TYPES,zones:ZONES,
@@ -2467,6 +2500,15 @@ addEventListener('keydown',e=>{
   if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA') return;
   if(e.code==='Space'){e.preventDefault();S.spacePan=true;
     cv.style.cursor='grab';return;}
+  if(e.key==='?'||(e.key==='/'&&e.shiftKey)){e.preventDefault();toggleHelp();return;}
+  if(e.key==='Escape'&&document.getElementById('help').classList.contains('on')){
+    toggleHelp(false);return;}
+  if(e.key==='f'||e.key==='F'||e.key==='а'||e.key==='А'){
+    // F — показати вибране, а якщо нічого не вибрано, то всю роботу
+    const sel=[S.sel,...S.selMore].filter(Boolean);
+    zoomTo(sel.length?sel:S.objs.filter(objVisible)); return;}
+  if(e.key==='+'||e.key==='='){zoomBy(1.35);return;}
+  if(e.key==='-'||e.key==='_'){zoomBy(1/1.35);return;}
   if(e.key==='Enter') finishRoute();
   if(e.key==='Escape'){
     // Esc послідовно: скасувати чернетку -> зняти вибір -> повернутись у вибір
@@ -2644,7 +2686,16 @@ function field(label,val,on,attrs=''){
 function refresh(){
   // властивості
   const p=document.getElementById('props'), o=S.sel;
-  if(!o){p.innerHTML='<div class="hint">Нічого не вибрано.<br>'
+  if(!o&&!S.objs.length){
+    // Порожня карта — не місце для переліку модифікаторів: спершу треба
+    // сказати, з чого взагалі почати.
+    p.innerHTML='<div class="hint"><b style="color:#dbe8f6">З чого почати</b><br>'
+      +'1. «Дані ночі» — вибери дату й натисни «Показати маршрути ночі».<br>'
+      +'2. Клік по підказці перетворює її на свій маршрут; далі ведеш сам.<br>'
+      +'3. «Покласти збиття / ППО» кладе позначки тієї ночі.<br>'
+      +'4. «Кадр і експорт» — рамка, PNG або SVG.<br><br>'
+      +'Клавіші й підказки — кнопка <kbd>?</kbd> угорі праворуч.</div>';
+  }else if(!o){p.innerHTML='<div class="hint">Нічого не вибрано.<br>'
     +'Клік — вибір, Shift+клік — додати до вибору.<br>'
     +'Тягнути по порожньому — панорама (також пробіл і середня кнопка), '
     +'Shift+тягнути — рамка вибору, коліщатко — масштаб.<br>'
@@ -3452,6 +3503,103 @@ S.sub=document.getElementById('mSub').value;
 // марні запити в мережу там, де тайли лежать поруч.
 fetch('tiles/index.json').then(r=>r.ok?r.json():{}).catch(()=>({}))
   .then(idx=>{TILE.local=idx||{};start();});
+// Показати все намальоване. Раніше єдиним способом знайти свою роботу після
+// панорами було вписати театр і шукати очима.
+function zoomTo(list){
+  const pts=[];
+  for(const o of (list||[])){
+    if(o.pts) for(const p of o.pts) pts.push(p);
+    else if(o.la!==undefined) pts.push([o.la,o.lo]);
+  }
+  if(!pts.length){ toast('нема чого показувати'); return; }
+  let la0=90,la1=-90,lo0=360,lo1=-360;
+  for(const p of pts){
+    la0=Math.min(la0,p[0]); la1=Math.max(la1,p[0]);
+    lo0=Math.min(lo0,p[1]); lo1=Math.max(lo1,p[1]);
+  }
+  const a=baseXY(la1,lo0), b=baseXY(la0,lo1);
+  const w=Math.max(1,b[0]-a[0]), h=Math.max(1,b[1]-a[1]);
+  const k=Math.min(Wp/w, Hp/h)*0.82;          // 18% полів навколо
+  S.view={x:a[0]-(Wp/k-w)/2, y:a[1]-(Hp/k-h)/2, k:Math.min(k,8)};
+  draw();
+}
+function zoomBy(f){
+  if(!(S.view.k>0)) return;
+  const cx=Wp/2, cy=Hp/2, before=unscr(cx,cy);
+  S.view.k=Math.max(0.02,Math.min(12,S.view.k*f));
+  const after=unscr(cx,cy);
+  S.view.x+=before[0]-after[0]; S.view.y+=before[1]-after[1];
+  draw();
+}
+// Скільки минуло від останнього збереження. Без цього рядка незрозуміло,
+// чи робота взагалі десь є: вона лежить у localStorage цього браузера.
+let SAVED_AT=0;
+function savedTick(){
+  const el=document.getElementById('saved');
+  if(!el) return;
+  if(!SAVED_AT){ el.textContent='не збережено'; return; }
+  const s2=Math.round((Date.now()-SAVED_AT)/1000);
+  el.textContent = s2<5?'збережено щойно'
+    : s2<60?`збережено ${s2} с тому`
+    : `збережено ${Math.round(s2/60)} хв тому`;
+}
+setInterval(savedTick,5000);
+const HELP=[
+  ['Інструменти',[
+    ['V','вибір, переміщення, тягання вузлів'],
+    ['R','маршрут: клік-клік ставить вузли, або натиснув і повів'],
+    ['L / I / T','пускова локація / позначка / підпис'],
+    ['A','стрілка: тягни від початку до кінця'],
+    ['Z','зона: клік по кутах, Enter замкнути'],
+    ['M','лінійка: два кліки — відстань по ортодромії'],
+    ['1…8','вибрати тип засобу'],
+  ]],
+  ['Миша',[
+    ['тягнути по порожньому','панорама'],
+    ['Shift+тягнути','рамка вибору'],
+    ['пробіл+тягнути, середня кнопка','панорама (запасні)'],
+    ['коліщатко','масштаб'],
+    ['Shift+клік','додати обʼєкт до вибору'],
+    ['Alt+клік по лінії','вставити вузол; Alt по вузлу — прибрати'],
+    ['права кнопка','контекстне меню обʼєкта'],
+    ['подвійний клік по порожньому','наблизити'],
+  ]],
+  ['Клавіші',[
+    ['Ctrl+Z / Ctrl+Shift+Z','скасувати / повторити'],
+    ['Ctrl+C / Ctrl+X / Ctrl+V','копіювати / вирізати / вставити'],
+    ['Ctrl+D','дублювати'],
+    ['Ctrl+A','вибрати все'],
+    ['Ctrl+S / Ctrl+O','зберегти у файл / відкрити файл'],
+    ['F','показати все намальоване'],
+    ['+ / −','масштаб'],
+    ['Enter','завершити маршрут або зону'],
+    ['Esc','скасувати чернетку → зняти вибір → «вибір»'],
+    ['Del','видалити вибране'],
+    ['стрілки','точне доведення (з Shift — крупніший крок)'],
+    ['?','ця довідка'],
+  ]],
+  ['Що варто знати',[
+    ['робота зберігається сама','у цьому браузері; «Зберегти» дає файл .json'],
+    ['перетягни .json у вікно','відкрити карту'],
+    ['підказки з даних','це НЕ готовий маршрут: оператор веде лінію сам'],
+    ['влучань у даних нема','канали моніторять підліт; є ППО і збиття'],
+  ]],
+];
+function toggleHelp(on){
+  const h=document.getElementById('help');
+  if(!h) return;
+  if(on===undefined) on=!h.classList.contains('on');
+  if(on&&!h.dataset.filled){
+    h.querySelector('.box').innerHTML=
+      '<h3 style="margin-top:0">Редактор карт нальоту</h3>'
+      +HELP.map(([t,rows])=>`<h3>${t}</h3><table>`+
+        rows.map(([k,v])=>`<tr><td class="k"><kbd>${k}</kbd></td><td>${v}</td></tr>`).join('')
+        +'</table>').join('')
+      +'<div class="hint" style="margin-top:14px">Esc або клік поза вікном — закрити.</div>';
+    h.dataset.filled='1';
+  }
+  h.classList.toggle('on',on);
+}
 // Згортки панелі. Стан памʼятається між сеансами: оператор, який щоночі
 // працює з даними ночі й шапкою, не має щоразу їх розкривати.
 const SEC_KEY='tgmine-panel';
@@ -3477,12 +3625,38 @@ function openSection(id){
   const sec=document.querySelector(`#side .sec[data-sec="${id}"]`);
   if(sec&&!sec.classList.contains('open')) sec.querySelector('h2').click();
 }
+// «Нова карта». Досі почати з чистого можна було лише Ctrl+A і Del, і то
+// лише тим, хто це знав. Дію можна скасувати: перед стиранням робиться знімок.
+function wireClear(){
+  const b=document.getElementById('clear');
+  if(!b) return;
+  b.onclick=()=>{
+    if(!S.objs.length&&!S.ghosts.length){toast('карта й так порожня');return;}
+    if(!confirm(`Стерти все намальоване? Обʼєктів: ${S.objs.length}.\n`+
+                'Скасувати можна через Ctrl+Z.')) return;
+    snapshot();
+    S.objs=[];S.sel=null;S.selMore=[];S.ghosts=[];S.draft=null;
+    refresh();toast('карта порожня');
+  };
+}
+function wireHud(){
+  const on=(id,fn)=>{const el=document.getElementById(id); if(el) el.onclick=fn;};
+  on('zIn',()=>zoomBy(1.35));
+  on('zOut',()=>zoomBy(1/1.35));
+  on('zAll',()=>zoomTo(S.objs.filter(objVisible)));
+  on('helpBtn',()=>toggleHelp(true));
+  const h=document.getElementById('help');
+  if(h) h.onclick=e=>{ if(e.target===h) toggleHelp(false); };
+  savedTick();
+}
 function start(){
 STYLE_DEFAULT=JSON.parse(JSON.stringify(S.style));
 resize();fit();S.ready=true;
 if(restore()) console.log('відновлено з автозбереження');
 if(viewBroken()) fit();   // автозбереження могло зберегти нечинний вигляд
 initSections();
+wireHud();
+wireClear();
 renderChrome();
 renderStyle();
 refresh();

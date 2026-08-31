@@ -394,7 +394,9 @@ const S={
           places:0.45, labelScale:1.0,
           // фокус: наскільки гасити все поза Україною й РФ і яка яскравість
           // державного кордону цих двох
-          focusDim:0.72, focusEdge:0.62},
+          focusDim:0.72, focusEdge:0.62,
+          focusMode:'both',        // both | tint | edge
+          focusTintUA:0.10, focusTintRU:0.05},
     route:{halo:0.12, nodes:true},
     impact:{col:'#ffd66e', rays:8, size:9, glow:1.0},
     // Робота ППО і збиття — НЕ влучання. Доти всі три малювались одним
@@ -669,6 +671,8 @@ function addRing(g,to){
 function drawFocus(c,ST){
   const B=window.BASE;
   const dim=ST.base.focusDim===undefined?0.72:ST.base.focusDim;
+  const mode=ST.base.focusMode||'both';
+  // 1. гасимо все, що не Україна й не РФ
   if(dim>0){
     c.save();
     c.beginPath();
@@ -678,18 +682,34 @@ function drawFocus(c,ST){
     c.fill('evenodd');
     c.restore();
   }
+  // 2. розділення двох країн. Не товста обводка навколо всього: Україна
+  //    отримує ледь помітний холодний тон і тонку світлу лінію, РФ —
+  //    теплий тон і лінію тьмянішу. Око розрізняє їх за площею, а не за
+  //    рамкою — так менше сміття на карті.
+  const tintUA=ST.base.focusTintUA===undefined?0.10:ST.base.focusTintUA;
+  const tintRU=ST.base.focusTintRU===undefined?0.05:ST.base.focusTintRU;
+  const fill=(a3,col,a)=>{
+    if(a<=0) return;
+    c.save();c.beginPath();
+    for(const g of (B.admin[a3]||[])) addRing(g,c);
+    c.fillStyle=col.replace('$a',a.toFixed(3));
+    c.fill('evenodd');c.restore();
+  };
+  if(mode!=='edge'){
+    fill('UKR','rgba(120,190,255,$a)',tintUA);
+    fill('RUS','rgba(255,170,120,$a)',tintRU);
+  }
   const e=ST.base.focusEdge===undefined?0.62:ST.base.focusEdge;
-  if(e>0){
-    c.save();
-    c.lineJoin='round';c.lineCap='round';
-    // спершу темна підкладка, щоб лінія читалась і над водою, і над містом
-    for(const pass of [0,1]){
-      c.strokeStyle=pass?`rgba(214,232,250,${Math.min(1,e)})`:'rgba(2,4,8,.75)';
-      c.lineWidth=pass?1.5:3.2;
-      for(const a3 of FOCUS) for(const g of (B.admin[a3]||[])){
-        c.beginPath();addRing(g,c);c.stroke();
-      }
-    }
+  if(e>0&&mode!=='tint'){
+    c.save();c.lineJoin='round';c.lineCap='round';
+    const line=(a3,col,w,alpha)=>{
+      c.strokeStyle='rgba(2,4,8,.6)';c.lineWidth=w+1.4;
+      for(const g of (B.admin[a3]||[])){c.beginPath();addRing(g,c);c.stroke();}
+      c.strokeStyle=col.replace('$a',(alpha*e).toFixed(3));c.lineWidth=w;
+      for(const g of (B.admin[a3]||[])){c.beginPath();addRing(g,c);c.stroke();}
+    };
+    line('RUS','rgba(214,232,250,$a)',1.0,0.55);
+    line('UKR','rgba(226,242,255,$a)',1.4,1.0);
     c.restore();
   }
 }
@@ -3010,6 +3030,12 @@ document.getElementById('styleEdit').onclick=()=>{
     +n('Розсип НП','base','places','type=number step=0.05 min=0 max=1')
     +n('Затемнення інших країн (0..1)','base','focusDim','type=number step=0.05 min=0 max=1')
     +n('Кордон України й РФ','base','focusEdge','type=number step=0.05 min=0 max=1')
+    +'<label>Як розділяти</label><select data-g="base" data-k="focusMode">'
+    +[['both','тон і лінія'],['tint','лише тон'],['edge','лише лінія']].map(
+       ([v,t])=>`<option value="${v}" ${ST.base.focusMode===v?'selected':''}>${t}</option>`).join('')
+    +'</select>'
+    +n('Тон України','base','focusTintUA','type=number step=0.02 min=0 max=0.4')
+    +n('Тон РФ','base','focusTintRU','type=number step=0.02 min=0 max=0.4')
     +'<label style="color:#8fa3b8;margin-top:10px">Маршрути</label>'
     +n('Сила ореолу','route','halo','type=number step=0.02 min=0 max=0.6')
     +'<label style="color:#8fa3b8;margin-top:10px">Влучання</label>'

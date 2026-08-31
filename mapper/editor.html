@@ -324,8 +324,14 @@ button.primary{background:rgba(255,62,165,.16);border-color:rgba(255,62,165,.45)
     </section>
 
     <section class="sec" data-sec="style">
-      <h2>Стиль карти</h2>
-      <div class="body" id="secStyle"></div>
+      <h2>Підкладка і стиль</h2>
+      <div class="body">
+        <label>Готова підкладка</label>
+        <div class="types" id="basemaps"></div>
+        <div class="hint">Набір ставить шари, тло й колір написів одним
+          кліком. Далі кожне поле крутиться окремо.</div>
+        <div id="secStyle"></div>
+      </div>
     </section>
   </div>
 </div>
@@ -532,6 +538,8 @@ const S={
           // кордони країн окремо від меж областей: країна має читатись
           // одразу, область — лише як фон
           countries:0.72, countryW:1.35, labelDens:1, labelMax:40,
+          // тло й колір написів: підкладка може бути не лише нічною
+          bg:'#04070c', ink:'#eef4fb', inkDim:'#c6d8ea',
           // жирний кордон між РФ і Україною — окремо від решти
           uaruW:2.8, uaruCol:'#ffffff'},
     route:{halo:0.12, nodes:true},
@@ -764,7 +772,7 @@ let NOBG=false;
 function drawBase(c){
   const L=S.layers, ST=S.style;
   c.save();
-  if(!NOBG){ c.fillStyle='#04070c';c.fillRect(0,0,Wp,Hp); }
+  if(!NOBG){ c.fillStyle=ST.base.bg||'#04070c';c.fillRect(0,0,Wp,Hp); }
   // 1. супутник, притемнений і знебарвлений просто на льоту: те саме, що
   //    робив python для статичного растра, лише фільтром полотна
   if(L.sat) drawTiles(c,'sat',1,
@@ -819,8 +827,8 @@ function drawBase(c){
   if(L.places&&B.places) for(const q of B.places){
     const s2=P(q[0],q[1]);
     c.beginPath();c.arc(s2[0],s2[1],q[2]===2?1.15:.75,0,7);
-    c.fillStyle=q[2]===2?`rgba(206,222,238,${ST.base.places})`
-                        :`rgba(186,204,222,${ST.base.places*0.58})`;
+    c.fillStyle=q[2]===2?hexa(ST.base.inkDim||'#c6d8ea',ST.base.places)
+                        :hexa(ST.base.inkDim||'#c6d8ea',ST.base.places*0.58);
     c.fill();
   }
   drawLabels(c);
@@ -898,6 +906,14 @@ function drawRegionLabels(c,taken){
 // Підписи за рівнями. На оглядовій карті країни підписані обласні центри, а
 // на кадрі однієї області — райцентри. Один сталий поріг дає або порожньо,
 // або кашу, тому поріг залежить від масштабу.
+// Світла підкладка чи темна — визначаємо за яскравістю тла. Від цього
+// залежать ореоли під написами: інакше на папері під кожним підписом
+// зʼявляється чорна пляма.
+function isLight(){
+  const b=(S.style.base.bg||'#04070c').replace('#','');
+  const r=parseInt(b.slice(0,2),16), g=parseInt(b.slice(2,4),16), bl=parseInt(b.slice(4,6),16);
+  return (r*0.299+g*0.587+bl*0.114)>140;
+}
 function drawLabels(c){
   const B=window.BASE, taken=TAKEN, ST=S.style;
   // Підписи областей ідуть ПЕРШИМИ: вони найбільші й мають право на місце,
@@ -936,9 +952,14 @@ function drawLabels(c){
     if(!put) continue;
     placed++;
     c.beginPath();c.arc(s2[0],s2[1],big?2.8:mid?2.1:1.5,0,7);
-    c.fillStyle='rgba(255,255,255,.9)';c.fill();
-    c.save();c.textAlign='left';shadow(c,'rgba(0,0,0,.95)',7);
-    c.fillStyle=big?'rgba(242,248,255,.96)':mid?'rgba(220,234,248,.86)':'rgba(198,216,234,.72)';
+    c.fillStyle=hexa(ST.base.ink||'#eef4fb',.9);c.fill();
+    c.save();c.textAlign='left';
+    // Ореол під написом залежить від тла: на світлій підкладці чорна тінь
+    // виглядає як бруд, на темній без неї напис зникає над містом.
+    shadow(c, isLight()?'rgba(255,255,255,.9)':'rgba(0,0,0,.95)', 7);
+    c.fillStyle=big?hexa(ST.base.ink||'#eef4fb',.96)
+      :mid?hexa(ST.base.ink||'#eef4fb',.86)
+          :hexa(ST.base.inkDim||'#c6d8ea',.72);
     c.fillText(ct.n,put[0],put[1]);c.restore();
   }
 }
@@ -1608,7 +1629,8 @@ function legendBox(c,L,rows,x,y,w,cols){
   c.beginPath();c.roundRect(x,y,w,hd,[8,8,0,0]);
   c.fillStyle='rgba(122,152,182,.13)';c.fill();
   c.save();c.font='600 11px "MapSans",ui-sans-serif,-apple-system,Arial';
-  c.fillStyle='rgba(198,216,234,.9)';c.letterSpacing='1.4px';c.textAlign='left';
+  c.fillStyle=hexa(S.style.base.inkDim||'#c6d8ea',.9);
+  c.letterSpacing='1.4px';c.textAlign='left';
   c.fillText((L.title||'').toUpperCase(),x+14,y+19);c.restore();
   const cw=(w-20)/cols;
   rows.forEach((r,i)=>{
@@ -1706,8 +1728,9 @@ function drawLegend(c,w,h){
 // десь у README, звідки його ніхто не перенесе на картинку.
 function drawCredit(c,w,h){
   c.save();c.font='400 10.5px "MapSans",ui-sans-serif,-apple-system,Arial';
-  c.textAlign='right';c.fillStyle='rgba(150,172,194,.65)';
-  shadow(c,'rgba(0,0,0,.9)',5);
+  c.textAlign='right';
+  c.fillStyle=hexa(S.style.base.inkDim||'#c6d8ea',.75);
+  shadow(c,isLight()?'rgba(255,255,255,.9)':'rgba(0,0,0,.9)',5);
   c.fillText('підкладка: Sentinel-2 cloudless © EOX IT Services, CC BY 4.0 · '+
              'нічні вогні: NASA VIIRS Black Marble',w-16,h-14);
   c.restore();
@@ -1821,14 +1844,18 @@ function drawScale(c,w,h){
     Math.abs(v-km200)<Math.abs(p-km200)?v:p);
   const px=200*nice/km200;
   const x=w-40-px, y=h-48;   // вище рядка джерел: підпис широти йде під смугою
-  c.save();c.strokeStyle='rgba(226,238,250,.8)';c.lineWidth=1.4;
+  // Лінійка й підпис джерел теж мають читатись на світлій підкладці:
+  // біле по світлому — це просто відсутній елемент на готовій картинці.
+  const inkS=hexa(S.style.base.ink||'#eef4fb',.85);
+  const haloS=isLight()?'rgba(255,255,255,.9)':'rgba(0,0,0,.9)';
+  c.save();c.strokeStyle=inkS;c.lineWidth=1.4;
   c.beginPath();c.moveTo(x,y);c.lineTo(x+px,y);
   c.moveTo(x,y-5);c.lineTo(x,y+5);c.moveTo(x+px,y-5);c.lineTo(x+px,y+5);c.stroke();
   c.font='600 11.5px "MapSans",ui-sans-serif,-apple-system,Arial';c.textAlign='center';
-  c.fillStyle='rgba(226,238,250,.9)';shadow(c,'rgba(0,0,0,.9)',6);
+  c.fillStyle=inkS;shadow(c,haloS,6);
   c.fillText(nice+' км',x+px/2,y-10);
   c.font='400 9.5px "MapSans",ui-sans-serif,-apple-system,Arial';
-  c.fillStyle='rgba(180,200,220,.6)';
+  c.fillStyle=hexa(S.style.base.inkDim||'#c6d8ea',.7);
   c.fillText(`на широті ${mid[0].toFixed(0)}°`,x+px/2,y+14);
   c.restore();
 }
@@ -1876,7 +1903,7 @@ function draw(){
   document.getElementById('zoom').textContent=
     (S.view.k<0.1?(S.view.k*100).toFixed(1):Math.round(S.view.k*100))+'%';
   ctx.clearRect(0,0,Wp,Hp);
-  ctx.fillStyle='#04070c';ctx.fillRect(0,0,Wp,Hp);
+  ctx.fillStyle=S.style.base.bg||'#04070c';ctx.fillRect(0,0,Wp,Hp);
   drawBase(ctx);
   // Шар-привид: підказки з наших даних. Малюються ПО-РІЗНОМУ за впевненістю,
   // бо вони різні за силою: ланцюг із кількох заявлених ланок — це рух,
@@ -3232,7 +3259,7 @@ document.getElementById('export').onclick=async ()=>{
   const sx=c2.width/f.w, sy=c2.height/f.h;
   RSCALE=sx;                     // тіні масштабуються разом із полотном
   g.setTransform(sx,0,0,sy,-f.x*sx,-f.y*sy);
-  g.fillStyle='#04070c';g.fillRect(f.x,f.y,f.w,f.h);
+  g.fillStyle=S.style.base.bg||'#04070c';g.fillRect(f.x,f.y,f.w,f.h);
   seedChrome();                  // місце під плашки — щоб підпис під них не ліз
   drawBase(g);
   // сховані обʼєкти (око у списку шарів) не малюються ні на екрані, ні у
@@ -3313,7 +3340,7 @@ document.getElementById('exportSvg').onclick=async ()=>{
     const rg=rc.getContext('2d');
     rg.imageSmoothingEnabled=true; rg.imageSmoothingQuality='high';
     rg.setTransform(rc.width/f.w,0,0,rc.height/f.h,-f.x*rc.width/f.w,-f.y*rc.height/f.h);
-    rg.fillStyle='#04070c';rg.fillRect(f.x,f.y,f.w,f.h);
+    rg.fillStyle=S.style.base.bg||'#04070c';rg.fillRect(f.x,f.y,f.w,f.h);
     const ST=S.style;
     drawTiles(rg,'sat',S.layers.sat?1:0,
       `saturate(${ST.base.sat}%) contrast(1.06) brightness(${ST.base.bright})`,null,S.bias);
@@ -3346,7 +3373,7 @@ document.getElementById('exportSvg').onclick=async ()=>{
   S.layers.sat=false; S.layers.night=false;   // растр уже намальовано окремо
   const rprev=RSCALE; RSCALE=1;               // у векторі тінь масштабується сама
   NOBG=!!baseImg;                             // тло вже є у растрі
-  if(!NOBG){ g.fillStyle='#04070c'; g.fillRect(f.x,f.y,f.w,f.h); }
+  if(!NOBG){ g.fillStyle=S.style.base.bg||'#04070c'; g.fillRect(f.x,f.y,f.w,f.h); }
   seedChrome();
   drawBase(g);
   for(const o of S.objs){ if(objVisible(o)) drawObj(o,g,false); }
@@ -4119,6 +4146,47 @@ function pickImage(la,lo){
   };
   inp.click();
 }
+// Готові підкладки. Це не нові джерела даних, а набори того, що вже є:
+// які шари ввімкнені, яке тло, яке «чорнило», яка сила ліній. Оператор
+// однаково може крутити кожне поле окремо — пресет лише ставить точку
+// відліку під конкретну карту.
+const BASEMAPS=[
+  {id:'sat', name:'Супутник', hint:'нічний знімок і вогні міст — як було',
+   layers:{sat:true,night:true,water:true,places:true},
+   style:{bg:'#04070c',ink:'#eef4fb',inkDim:'#c6d8ea',bright:0.55,nightGlow:0.34,
+          water:0.30,countries:0.72,borders:0.26,places:0.45}},
+  {id:'night', name:'Тільки вогні', hint:'без знімка: чорне тло й міські вогні',
+   layers:{sat:false,night:true,water:true,places:false},
+   style:{bg:'#03060a',ink:'#eef4fb',inkDim:'#c6d8ea',nightGlow:0.62,
+          water:0.22,countries:0.6,borders:0.2,places:0.3}},
+  {id:'mini', name:'Мінімальна', hint:'жодного растру: тло, кордони, підписи',
+   layers:{sat:false,night:false,water:true,places:false},
+   style:{bg:'#0a0f16',ink:'#e8eef6',inkDim:'#9fb4c8',water:0.35,
+          countries:0.85,countryW:1.5,borders:0.18,places:0.3}},
+  {id:'paper', name:'Паперова', hint:'світла: темні лінії по світлому тлу',
+   layers:{sat:false,night:false,water:true,places:true},
+   style:{bg:'#eceae4',ink:'#1b2530',inkDim:'#4a5a6b',water:0.55,
+          countries:0.75,countryW:1.4,borders:0.3,places:0.5}},
+];
+function applyBasemap(id){
+  const b=BASEMAPS.find(x=>x.id===id);
+  if(!b) return;
+  snapshot();
+  Object.assign(S.layers,b.layers);
+  Object.assign(S.style.base,b.style);
+  touch();renderStyle();refresh();
+  toast('підкладка: '+b.name.toLowerCase());
+}
+function renderBasemaps(){
+  const box=document.getElementById('basemaps');
+  if(!box) return;
+  const cur=(S.style.base.bg||'').toLowerCase();
+  box.innerHTML=BASEMAPS.map(b=>
+    `<div class="type${cur===b.style.bg.toLowerCase()?' on':''}" data-bm="${b.id}"
+       title="${b.hint}">${b.name}</div>`).join('');
+  box.querySelectorAll('[data-bm]').forEach(el=>el.onclick=()=>{
+    applyBasemap(el.dataset.bm);renderBasemaps();});
+}
 function wireImages(){
   const b=document.getElementById('addImg');
   if(!b) return;
@@ -4190,6 +4258,7 @@ resize();fit();S.ready=true;
 if(restore()) console.log('відновлено з автозбереження');
 if(viewBroken()) fit();   // автозбереження могло зберегти нечинний вигляд
 initSections();
+renderBasemaps();
 wireHud();
 wireClear();
 wireSlots();

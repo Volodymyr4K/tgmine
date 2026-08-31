@@ -401,7 +401,7 @@ const S={
   // зайві, на оглядовій — навпаки, а нічні вогні іноді забивають маршрут.
   layers:{sat:true,night:true,water:true,borders:true,cities:true,
           regions:true,places:true,targets:false,
-          impacts:true,ppo:true,downed:true,ghosts:true,
+          impacts:true,ppo:true,downed:true,ghosts:true,marklabels:false,
           legend:true,header:true,scale:true},
   objs:[], sel:null, selMore:[], draft:null, ghosts:[], redo:[], marquee:null, clip:null,
   view:{x:0,y:0,k:1},           // зсув і масштаб у пікселях підкладки
@@ -972,70 +972,49 @@ function objVisible(o){
   const k=catOf(o);
   return !(k && S.layers[CAT_LAYER[k]]===false);
 }
-// Робота ППО: холодні траси вгору від точки й порожнє кільце внизу.
-// Нічого «палаючого» — у даних наслідків нема, і знак не має їх вигадувати.
-function drawPPO(o,c,sel){
-  const ST=S.style.ppo||{}, col=ST.col||'#6fe3ff', glow=ST.glow===undefined?1:ST.glow;
+// Робота ППО і збиття — один і той самий знак, різниця тільки в кольорі:
+// кільце з чотирма променями. Оператор просив саме так — дві різні форми
+// поруч читались як два різні сорти події, хоча різниця між ними одна.
+// Влучання лишається спалахом: його ставить людина, і воно справді інше.
+function drawMark(o,c,sel,ST){
+  const col=ST.col, glow=ST.glow===undefined?1:ST.glow;
   const s=P(o.la,o.lo), r=o.size||ST.size||9;
   const g=c.createRadialGradient(s[0],s[1],0,s[0],s[1],r*1.9);
-  g.addColorStop(0,hexa(col,.5*glow));
+  g.addColorStop(0,hexa(col,.55*glow));
   g.addColorStop(1,hexa(col,0));
   c.beginPath();c.arc(s[0],s[1],r*1.9,0,7);c.fillStyle=g;c.fill();
   c.save();
   c.lineCap='round';
-  // Кожен штрих малюється двічі: спершу темна підкладка, потім колір.
-  // На світлій ділянці супутника тонка холодна лінія інакше зникає —
-  // заміряно: без підкладки в рамці 52×52 px світилось 14.5% пікселів.
+  // Кожен штрих двічі: спершу темна підкладка, потім колір. На світлій
+  // ділянці супутника тонке кільце інакше зникає.
   for(const pass of [0,1]){
     c.strokeStyle=pass?col:'rgba(4,7,12,.75)';
     const add=pass?0:2;
-    for(const a of [-125,-90,-55]){
+    c.globalAlpha=pass?1:.55;
+    c.lineWidth=2.2+add;
+    c.beginPath();c.arc(s[0],s[1],r*.62,0,7);c.stroke();
+    c.lineWidth=1.9+add;
+    for(const a of [-135,-45,45,135]){
       const rad=a*Math.PI/180;
-      const L=r*(a===-90?2.6:2.1);
-      const ex=s[0]+Math.cos(rad)*L, ey=s[1]+Math.sin(rad)*L;
-      const bow=(a===-90?0:(a<-90?-1:1))*r*0.5;
-      c.setLineDash(pass?[3,3]:[]);c.lineWidth=1.9+add;c.globalAlpha=pass?.95:.55;
-      c.beginPath();c.moveTo(s[0]+Math.cos(rad)*r*.5,s[1]+Math.sin(rad)*r*.5);
-      c.quadraticCurveTo((s[0]+ex)/2+bow,(s[1]+ey)/2,ex,ey);c.stroke();
+      c.beginPath();
+      c.moveTo(s[0]+Math.cos(rad)*r*.95,s[1]+Math.sin(rad)*r*.95);
+      c.lineTo(s[0]+Math.cos(rad)*r*1.75,s[1]+Math.sin(rad)*r*1.75);
+      c.stroke();
     }
-    c.setLineDash([]);c.globalAlpha=pass?1:.55;c.lineWidth=2+add;
-    c.beginPath();c.arc(s[0],s[1],r*.55,0,7);c.stroke();
   }
   c.restore();
-  if(o.label) plate(c,s[0]+8,s[1],[o.label],col,o);
+  markLabel(o,c,s,col,r,sel);
   if(sel){c.beginPath();c.arc(s[0],s[1],r*2.6,0,7);c.strokeStyle='#fff';
     c.setLineDash([3,3]);c.lineWidth=1;c.stroke();c.setLineDash([]);}
 }
-// Збиття: коса траса згори вниз у точку й перекреслене кільце. Знак читається
-// як «апарат зупинено тут», а не як удар по цілі.
-function drawDowned(o,c,sel){
-  const ST=S.style.downed||{}, col=ST.col||'#ff8a5c', glow=ST.glow===undefined?1:ST.glow;
-  const s=P(o.la,o.lo), r=o.size||ST.size||9;
-  const g=c.createRadialGradient(s[0],s[1],0,s[0],s[1],r*1.7);
-  g.addColorStop(0,hexa(col,.6*glow));
-  g.addColorStop(1,hexa(col,0));
-  c.beginPath();c.arc(s[0],s[1],r*1.9,0,7);c.fillStyle=g;c.fill();
-  c.save();
-  c.lineCap='round';
-  const ax=s[0]-r*2.6, ay=s[1]-r*2.6, d=r*.5;
-  // Той самий прийом, що й для ППО: темна підкладка, потім колір. До неї
-  // знак збиття світив 6.9% пікселів рамки проти 23% у влучання — на карті
-  // це означало «нема».
-  for(const pass of [0,1]){
-    c.strokeStyle=pass?col:'rgba(4,7,12,.75)';
-    const add=pass?0:2;
-    c.setLineDash(pass?[2,4]:[]);c.lineWidth=1.7+add;c.globalAlpha=pass?.95:.55;
-    c.beginPath();c.moveTo(ax,ay);
-    c.quadraticCurveTo(s[0]-r*2.0,s[1]-r*0.6,s[0]-r*.7,s[1]-r*.7);c.stroke();
-    c.setLineDash([]);c.globalAlpha=pass?1:.55;c.lineWidth=2.5+add;
-    c.beginPath();c.arc(s[0],s[1],r*.7,0,7);c.stroke();
-    c.beginPath();c.moveTo(s[0]-d,s[1]-d);c.lineTo(s[0]+d,s[1]+d);
-    c.moveTo(s[0]+d,s[1]-d);c.lineTo(s[0]-d,s[1]+d);c.stroke();
-  }
-  c.restore();
-  if(o.label) plate(c,s[0]+8,s[1],[o.label],col,o);
-  if(sel){c.beginPath();c.arc(s[0],s[1],r*2.6,0,7);c.strokeStyle='#fff';
-    c.setLineDash([3,3]);c.lineWidth=1;c.stroke();c.setLineDash([]);}
+// Підпис міста при позначці показується лише тоді, коли позначку вибрано.
+// Сімнадцять плашок одночасно перекривали одна одну й саму карту; тепер
+// назва зʼявляється під кліком. Окремим прапорцем підпис можна прикріпити
+// назавжди (для експорту), а шар «підписи позначок» вмикає їх усі разом.
+function markLabel(o,c,s,col,r,sel){
+  if(!o.label) return;
+  if(!(sel||o.pinLabel||S.layers.marklabels)) return;
+  plate(c,s[0]+r*0.9,s[1],[o.label],col,o);
 }
 // Карти, намальовані до поділу на категорії, тримають усе як «влучання», а
 // категорія в них лишилась словом у підписі («Саратов · ППО ×17»). Якщо їх
@@ -1078,8 +1057,8 @@ function dedupeMarks(list){
 }
 function drawImpact(o,c,sel){
   const k=catOf(o);
-  if(k==='ppo') return drawPPO(o,c,sel);
-  if(k==='downed') return drawDowned(o,c,sel);
+  if(k==='ppo') return drawMark(o,c,sel,S.style.ppo||{col:'#6fe3ff'});
+  if(k==='downed') return drawMark(o,c,sel,S.style.downed||{col:'#ff8a5c'});
   const IM=S.style.impact;
   const s=P(o.la,o.lo), r=o.size||IM.size||9;
   const g=c.createRadialGradient(s[0],s[1],0,s[0],s[1],r*2.2);
@@ -1095,7 +1074,7 @@ function drawImpact(o,c,sel){
     c.strokeStyle=hexa(IM.col,.85);c.lineWidth=1.6;c.stroke();
   }
   c.beginPath();c.arc(s[0],s[1],r*.5,0,7);c.fillStyle='#fff6df';c.fill();
-  if(o.label) plate(c,s[0]+8,s[1],[o.label],'#ffb01f',o);
+  markLabel(o,c,s,'#ffb01f',r,sel);
   if(sel){c.beginPath();c.arc(s[0],s[1],r*2.6,0,7);c.strokeStyle='#fff';
     c.setLineDash([3,3]);c.lineWidth=1;c.stroke();c.setLineDash([]);}
 }
@@ -1293,30 +1272,26 @@ function drawLegend(c,w,h){
         c.save();c.beginPath();c.arc(x+16,y,10,0,7);c.fillStyle=g;c.fill();
         c.restore();
       }});
+    // Значок у легенді — той самий, що на карті: кільце з променями,
+    // різниця тільки в кольорі.
+    const markIcon=col=>(c,x,y)=>{
+      c.save();c.strokeStyle=col;c.lineCap='round';c.lineWidth=1.8;
+      c.beginPath();c.arc(x+16,y,5,0,7);c.stroke();
+      c.lineWidth=1.5;
+      for(const a of [-135,-45,45,135]){
+        const rad=a*Math.PI/180;
+        c.beginPath();
+        c.moveTo(x+16+Math.cos(rad)*7.5,y+Math.sin(rad)*7.5);
+        c.lineTo(x+16+Math.cos(rad)*12,y+Math.sin(rad)*12);c.stroke();
+      }
+      c.restore();
+    };
     if(shown('ppo'))
-      rows.push({name:LZ.ppoName||'Робота ППО',draw:(c,x,y)=>{
-        const col=(S.style.ppo||{}).col||'#6fe3ff';
-        c.save();c.strokeStyle=col;c.lineCap='round';
-        for(const a of [-125,-90,-55]){
-          const rad=a*Math.PI/180;
-          c.setLineDash([3,3]);c.lineWidth=1.5;
-          c.beginPath();c.moveTo(x+16+Math.cos(rad)*3,y+4+Math.sin(rad)*3);
-          c.lineTo(x+16+Math.cos(rad)*11,y+4+Math.sin(rad)*11);c.stroke();
-        }
-        c.setLineDash([]);c.lineWidth=1.6;
-        c.beginPath();c.arc(x+16,y+4,3.4,0,7);c.stroke();c.restore();
-      }});
+      rows.push({name:LZ.ppoName||'Робота ППО',
+                 draw:markIcon((S.style.ppo||{}).col||'#6fe3ff')});
     if(shown('downed'))
-      rows.push({name:LZ.downedName||'Збиття',draw:(c,x,y)=>{
-        const col=(S.style.downed||{}).col||'#ff8a5c';
-        c.save();c.strokeStyle=col;c.lineCap='round';
-        c.setLineDash([2,4]);c.lineWidth=1.4;
-        c.beginPath();c.moveTo(x+5,y-8);c.lineTo(x+12,y-2);c.stroke();
-        c.setLineDash([]);c.lineWidth=1.7;
-        c.beginPath();c.arc(x+16,y+2,4,0,7);c.stroke();
-        c.beginPath();c.moveTo(x+13.2,y-0.8);c.lineTo(x+18.8,y+4.8);
-        c.moveTo(x+18.8,y-0.8);c.lineTo(x+13.2,y+4.8);c.stroke();c.restore();
-      }});
+      rows.push({name:LZ.downedName||'Збиття',
+                 draw:markIcon((S.style.downed||{}).col||'#ff8a5c')});
     for(const z of ZONES){
       if(!S.objs.some(o=>o.kind==='zone'&&o.zone===z.id)) continue;
       rows.push({name:z.name,draw:(c,x,y)=>{
@@ -2495,6 +2470,8 @@ function refresh(){
       +'</select>'
       +field('Підпис',o.label||'','label')
       +field('Розмір',o.size,'size','type=number min=4 max=30')
+      +`<button data-act="pin" style="margin-top:6px">${
+         o.pinLabel?'Ховати підпис, поки не вибрано':'Показувати підпис завжди'}</button>`
       +'<button data-act="lab" style="margin-top:6px">Скинути положення підпису</button>';
   }else if(o.kind==='zone'){
     p.innerHTML='<label>Тип зони</label><select data-k="zone">'
@@ -2515,6 +2492,8 @@ function refresh(){
       +'</select>'
       +'<label>Колір</label><input type="color" data-k="col" value="'+(o.col||'#e8f2fc')+'">';
   }
+  const pin=p.querySelector('[data-act="pin"]');
+  if(pin) pin.onclick=()=>{snapshot();S.sel.pinLabel=!S.sel.pinLabel;refresh();};
   for(const k of ['dash','both','glow']){
     const b=p.querySelector(`[data-act="${k}"]`);
     if(b) b.onclick=()=>{snapshot();S.sel[k]=!S.sel[k];refresh();};
@@ -2822,7 +2801,7 @@ document.getElementById('tSearch').oninput=e=>renderTargets(e.target.value);
     ['regions','назви областей'],['places','розсип НП'],
     ['targets','наші цілі'],
     ['impacts','влучання'],['ppo','робота ППО'],['downed','збиття'],
-    ['ghosts','підказки'],
+    ['ghosts','підказки'],['marklabels','підписи позначок'],
     ['legend','легенда'],['header','шапка'],
     ['scale','масштаб'],
   ];

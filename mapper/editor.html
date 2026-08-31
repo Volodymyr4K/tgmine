@@ -199,7 +199,9 @@ button.primary{background:rgba(255,62,165,.16);border-color:rgba(255,62,165,.45)
   </div>
 </div>
 
-<script src="basemap.js"></script>
+<!-- версія в адресі: браузер інакше тримає стару підкладку в кеші й
+     нові шари (наприклад контури держав) просто не доїжджають -->
+<script src="basemap.js?v=2"></script>
 <script src="targets.js"></script>
 <script src="labels.js"></script>
 <script>
@@ -647,8 +649,8 @@ function drawBase(c){
     c.strokeStyle=`rgba(186,208,232,${ST.base.countries===undefined?0.55:ST.base.countries})`;
     strokeSegs(c,BORDERS.outer);
     if(L.ruregions){
-      c.lineWidth=.75;
-      c.strokeStyle=`rgba(170,195,220,${ST.base.borders*0.5})`;
+      c.lineWidth=.8;
+      c.strokeStyle=`rgba(170,195,220,${ST.base.borders})`;
       strokeSegs(c,BORDERS.inner);
     }
     const w=ST.base.uaruW===undefined?2.8:ST.base.uaruW;
@@ -673,32 +675,36 @@ function drawBase(c){
   drawLabels(c);
   c.restore();
 }
-// Ребра кордонів рахуються один раз на сесію: 30 тисяч відрізків, і
-// перебирати їх щокадру ні до чого.
+// Кордони держав беруться з окремого шару Natural Earth admin-0
+// (`countries` у basemap). Спроба «розчинити» внутрішні межі в admin-1 була
+// помилкою: кожен обласний полігон спрощено окремо, спільних вершин у
+// сусідів нема, тому частина внутрішніх ребер лишалась непарною й вилазила
+// на карту білими уламками по всій Росії.
+//
+// Кордон РФ — Україна беремо точно: у admin-0 сусідні країни МАЮТЬ спільні
+// вершини (366 із 1511 вершин України лежать і в контурі РФ), тож ланка,
+// обидва кінці якої є в наборі вершин РФ, — це саме спільний кордон.
 let BORDERS=null;
 function buildBorders(){
-  const B=window.BASE||{}, per={}, owner=new Map();
-  const kof=p=>p[0].toFixed(3)+','+p[1].toFixed(3);
-  const key=(a,b)=>{const ka=kof(a),kb=kof(b);return ka<=kb?ka+'|'+kb:kb+'|'+ka;};
-  for(const [a3,rings] of Object.entries(B.admin||{})){
-    const m=new Map();
-    for(const r of rings) for(let i=0;i<r.length-1;i++){
-      const k=key(r[i],r[i+1]), e=m.get(k);
-      if(e) e.n++; else m.set(k,{n:1,a:r[i],b:r[i+1]});
+  const B=window.BASE||{}, C=B.countries||{};
+  const key=p=>p[0].toFixed(3)+','+p[1].toFixed(3);
+  const ru=new Set();
+  for(const r of (C.RUS||[])) for(const p of r) ru.add(key(p));
+  const outer=[], uaru=[], inner=[];
+  for(const [a3,rings] of Object.entries(C)) for(const r of rings)
+    for(let i=0;i<r.length-1;i++){
+      const seg={a:r[i],b:r[i+1]};
+      if(a3==='UKR'&&ru.has(key(r[i]))&&ru.has(key(r[i+1]))) uaru.push(seg);
+      else outer.push(seg);
     }
-    per[a3]=m;
-    for(const [k,v] of m) if(v.n===1){
-      const s2=owner.get(k); if(s2) s2.push(a3); else owner.set(k,[a3]);
-    }
-  }
-  const outer=[], inner=[], uaru=[];
-  for(const [a3,m] of Object.entries(per)) for(const [k,v] of m){
-    if(v.n>1){ if(a3==='RUS') inner.push(v); continue; }
-    const own=owner.get(k)||[a3];
-    // спільний кордон двох країн лежить у наборах обох — беремо один раз
-    if(own.length>1&&own.indexOf(a3)>0) continue;
-    if(own.includes('UKR')&&own.includes('RUS')) uaru.push(v); else outer.push(v);
-  }
+  // межі областей РФ — з admin-1, як і були
+  for(const r of ((B.admin||{}).RUS||[]))
+    for(let i=0;i<r.length-1;i++) inner.push({a:r[i],b:r[i+1]});
+  // Старий basemap без шару країн: краще показати межі областей, ніж
+  // порожню карту без жодного кордону.
+  if(!outer.length&&B.admin)
+    for(const rings of Object.values(B.admin)) for(const r of rings)
+      for(let i=0;i<r.length-1;i++) outer.push({a:r[i],b:r[i+1]});
   BORDERS={outer,inner,uaru};
 }
 function strokeSegs(c,segs){

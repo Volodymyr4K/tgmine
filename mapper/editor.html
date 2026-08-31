@@ -238,6 +238,26 @@ button.primary{background:rgba(255,62,165,.16);border-color:rgba(255,62,165,.45)
       </div>
     </section>
 
+    <section class="sec" data-sec="zones">
+      <h2>Зони</h2>
+      <div class="body">
+        <button id="zoneUA" title="Кордон України як зона: далі її можна тягати за вузли, міняти колір і штрих">Обвести Україну</button>
+        <button id="zoneTOT" style="margin-top:6px" title="Області, захоплені повністю або частково — цілими областями, не лінією фронту">Обвести окуповані області</button>
+        <div class="hint">Обидві зони — звичайні обʼєкти: вузли тягаються,
+          Alt додає й прибирає вузол, колір і штрих — у властивостях або в
+          «Стилі карти → Зони». <b>ТОТ береться цілими областями</b>: лінії
+          розмежування в наших даних нема, тож точний контур оператор
+          доводить сам.</div>
+        <label style="margin-top:10px">Збережені зони</label>
+        <select id="zoneLib"></select>
+        <div class="row" style="margin-top:6px">
+          <button id="zoneSave" title="Зберегти вибрану зону в бібліотеку цього браузера">Зберегти вибрану</button>
+          <button id="zonePut" title="Покласти збережену зону на карту">Вставити</button>
+          <button id="zoneDel" style="max-width:44px" title="видалити зі списку">✕</button>
+        </div>
+      </div>
+    </section>
+
     <section class="sec" data-sec="targets">
       <h2>Цілі з нашого переліку</h2>
       <div class="body">
@@ -456,6 +476,7 @@ function editType(id){
 // закрита зона, район роботи ППО. Готові пресети, бо оператор має ставити
 // зону за два кліки, а не підбирати колір.
 let ZONES=[
+  {id:'ukraine',  name:'Україна',             col:'#4ade80', hatch:false},
   {id:'occupied', name:'Окупована територія', col:'#ff5252', hatch:true},
   {id:'exclusion',name:'Зона відчуження',     col:'#4ade80', hatch:true},
   {id:'airdef',   name:'Район роботи ППО',    col:'#38d4dd', hatch:false},
@@ -2119,7 +2140,7 @@ function restore(){
       if(d.view)S.view=d.view;
       if(d.frame){S.frame=d.frame;S.aspect=d.aspect||0;}
       if(d.types){TYPES=d.types;retype();}
-      if(d.zones){ZONES=d.zones;rezone();}
+      ZONES=mergeZones(d.zones);rezone();
       if(d.style)S.style=fillDefaults(d.style,STYLE_DEFAULT);
       if(d.legend)S.legend=d.legend;
       if(d.brand)S.brand=d.brand;
@@ -2986,7 +3007,7 @@ function applyMap(d){
   if(d.frame!==undefined){S.frame=d.frame;S.aspect=d.aspect||0;
     const a=document.getElementById('aspect'); if(a) a.value=String(S.aspect||0);}
   if(d.types){TYPES=d.types;retype();}
-  if(d.zones){ZONES=d.zones;rezone();}
+  ZONES=mergeZones(d.zones);rezone();
   if(d.style)S.style=fillDefaults(d.style,STYLE_DEFAULT);
   if(d.legend)S.legend=d.legend;
   if(d.brand)S.brand=d.brand;
@@ -3767,6 +3788,112 @@ function wireClear(){
     refresh();toast('карта порожня');
   };
 }
+// ---- готові зони й бібліотека зон ---------------------------------------
+// Оператор просив саме цього: обвести Україну зеленим, окуповане червоним,
+// і щоб зони зберігались на майбутнє. Контури беруться з тієї самої
+// підкладки, що й кордони, тож зона лягає точно на межу, а далі це
+// звичайний обʼєкт: вузли, колір, штрих.
+// Карта, збережена до появи нового типу зони, приносить свій список ZONES —
+// і новий тип у ній просто відсутній: зона лягала «довільною» помаранчевою.
+// Тому збережений список доповнюється типами за замовчуванням.
+function mergeZones(list){
+  const out=Array.isArray(list)&&list.length?list.slice():[];
+  const have=new Set(out.map(z=>z.id));
+  for(const z of ZONES_DEFAULT) if(!have.has(z.id)) out.unshift(JSON.parse(JSON.stringify(z)));
+  return out;
+}
+function ringToZone(ring, step){
+  // Прорідження: контур країни має сотні вершин, а зону оператор тягає
+  // руками. Кожна N-та точка лишає форму впізнаваною й редагованою.
+  const out=[];
+  for(let i=0;i<ring.length;i+=step) out.push([ring[i][0],ring[i][1]]);
+  if(out.length>2 && (out[0][0]!==out[out.length-1][0])) out.push([ring[0][0],ring[0][1]]);
+  return out;
+}
+function biggestRing(rings){
+  let best=null;
+  for(const r of (rings||[])) if(!best||r.length>best.length) best=r;
+  return best;
+}
+function addZoneUA(){
+  const C=(window.BASE||{}).countries||{};
+  const r=biggestRing(C.UKR);
+  if(!r){toast('контуру України нема в підкладці');return;}
+  snapshot();
+  const o={kind:'zone',zone:'ukraine',label:'Україна',
+           pts:ringToZone(r, Math.max(1,Math.round(r.length/160)))};
+  S.objs.push(o);S.sel=o;S.selMore=[];
+  refresh();toast(`Україна: ${o.pts.length} вузлів — тягай, міняй колір`);
+}
+function addZoneTOT(){
+  const R=(window.BASE||{}).regions||{};
+  const keys=Object.keys(R).filter(k=>k==='Крим'||k.startsWith('ТОТ'));
+  if(!keys.length){toast('у підкладці нема контурів цих областей');return;}
+  snapshot();
+  let n=0, last=null;
+  for(const k of keys){
+    const r=biggestRing(R[k]);
+    if(!r) continue;
+    last={kind:'zone',zone:'occupied',label:k.replace('ТОТ_',''),
+          pts:ringToZone(r, Math.max(1,Math.round(r.length/90)))};
+    S.objs.push(last);n++;
+  }
+  S.sel=last;S.selMore=[];
+  refresh();
+  toast(`областей: ${n}. Це області ЦІЛКОМ, не лінія розмежування`);
+}
+// Бібліотека зон живе в браузері окремо від карти: контур, намальований
+// раз, потрібен у кожній наступній карті.
+const ZLIB='tgmine-zonelib';
+function zlib(){
+  try{ return JSON.parse(localStorage.getItem(ZLIB)||'{}')||{}; }catch(e){ return {}; }
+}
+function zlibWrite(o){
+  try{ localStorage.setItem(ZLIB,JSON.stringify(o)); return true; }
+  catch(e){ toast('у браузері нема місця для зони'); return false; }
+}
+function renderZoneLib(){
+  const sel=document.getElementById('zoneLib');
+  if(!sel) return;
+  const all=zlib(), names=Object.keys(all).sort();
+  sel.innerHTML=names.length
+    ? names.map(n=>`<option value="${n.replace(/"/g,'&quot;')}">${n} — ${
+        (all[n].pts||[]).length} вузлів</option>`).join('')
+    : '<option value="">(порожньо)</option>';
+}
+function wireZones(){
+  const ua=document.getElementById('zoneUA');
+  if(!ua) return;
+  ua.onclick=addZoneUA;
+  document.getElementById('zoneTOT').onclick=addZoneTOT;
+  renderZoneLib();
+  document.getElementById('zoneSave').onclick=()=>{
+    const o=S.sel;
+    if(!o||o.kind!=='zone'){toast('спершу вибери зону на карті');return;}
+    const name=prompt('Назва зони в бібліотеці', o.label||ZONE[o.zone]&&ZONE[o.zone].name||'зона');
+    if(!name) return;
+    const all=zlib();
+    all[name]={zone:o.zone,col:o.col||null,label:o.label||'',
+               pts:o.pts.map(p=>[p[0],p[1]])};
+    if(zlibWrite(all)){renderZoneLib();
+      document.getElementById('zoneLib').value=name;toast('зону збережено');}
+  };
+  document.getElementById('zonePut').onclick=()=>{
+    const sel=document.getElementById('zoneLib'), d=zlib()[sel.value];
+    if(!d){toast('нема чого вставляти');return;}
+    snapshot();
+    const o={kind:'zone',zone:d.zone||'area',label:d.label||'',
+             pts:d.pts.map(p=>[p[0],p[1]])};
+    if(d.col) o.col=d.col;
+    S.objs.push(o);S.sel=o;S.selMore=[];refresh();toast('зону вставлено');
+  };
+  document.getElementById('zoneDel').onclick=()=>{
+    const sel=document.getElementById('zoneLib'), all=zlib();
+    if(!all[sel.value]) return;
+    if(!confirm(`Видалити «${sel.value}» з бібліотеки?`)) return;
+    delete all[sel.value]; zlibWrite(all); renderZoneLib();
+  };
+}
 function wireHud(){
   const on=(id,fn)=>{const el=document.getElementById(id); if(el) el.onclick=fn;};
   on('zIn',()=>zoomBy(1.35));
@@ -3786,6 +3913,7 @@ initSections();
 wireHud();
 wireClear();
 wireSlots();
+wireZones();
 renderChrome();
 renderStyle();
 refresh();

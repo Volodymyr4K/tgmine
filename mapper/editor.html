@@ -421,7 +421,7 @@ const S={
                  ppoName:'Робота ППО',downedName:'Збиття',opacity:.9}},
   // Шапка — це чужа картка на чужій карті: назва, рядок під нею, заголовок,
   // дата й знак. Усе це має бути власним, зокрема знак картинкою.
-  brand:{name:'tgmine',handle:'',logo:true,logoImg:'',logoSize:36},
+  brand:{name:'tgmine',handle:'',logo:true,logoImg:'',logoSize:36,pad:20},
   footer:{left:'',right:''},
   watermark:{on:false,text:'',opacity:.06,step:420},
   // Кожен елемент карти вимикається окремо. Що саме потрібне — вирішує
@@ -1505,52 +1505,55 @@ function logoReady(){
 }
 function drawHeader(c,w){
   const B=S.brand, t=S.title||'', sb=S.sub||'';
-  if(!t&&!sb&&!B.name) return;
-  c.save();
-  c.font='700 22px "MapSans",ui-sans-serif,-apple-system,Arial';
-  const nameW=B.name?c.measureText(B.name).width:0;
-  c.font='700 21px "MapSans",ui-sans-serif,-apple-system,Arial';
-  const titleW=c.measureText(t).width;
-  c.font='400 12.5px "MapSans",ui-sans-serif,-apple-system,Arial';
-  const subW=Math.max(c.measureText(sb).width, c.measureText(B.handle||'').width);
+  const FF='"MapSans",ui-sans-serif,-apple-system,Arial';
+  // Відступ усередині картки задає оператор. Було жорстко 16 px від краю —
+  // на довгій назві текст ліз майже впритул до рамки й виглядало це тісно.
+  const pad=Math.max(8,Math.min(48,B.pad===undefined?20:B.pad));
+  const gap=14;                       // між знаком і текстом
   const img=logoReady();
   const ls=Math.max(16, Math.min(96, B.logoSize||36));
   const hasLogo=!!(img||B.logo);
-  const wd=Math.max(240, Math.max(nameW,titleW,subW)+(hasLogo?ls+60:36));
-  const hd=Math.max(B.name&&t?96:74, ls+28);
+  // Рядки збираються списком: порожні просто не потрапляють, і картка
+  // стискається під те, що є, а не тримає місце під усе можливе.
+  const L=[];
+  if(B.name)   L.push({t:B.name,   w:700, s:22,   col:'#eef4fb'});
+  if(B.handle) L.push({t:B.handle, w:400, s:12,   col:'rgba(146,170,194,.9)'});
+  if(t)        L.push({t,          w:700, s:21,   col:'#eef4fb'});
+  if(sb)       L.push({t:sb,       w:400, s:12.5, col:'rgba(146,170,194,.92)'});
+  if(!L.length&&!hasLogo) return;
+  c.save();
+  let textW=0, textH=0;
+  for(const l of L){
+    c.font=`${l.w} ${l.s}px ${FF}`;
+    textW=Math.max(textW,c.measureText(l.t).width);
+    l.lh=l.s*1.34;
+    textH+=l.lh;
+  }
+  const wd=Math.max(200, textW+pad*2+(hasLogo?ls+gap:0));
+  const hd=Math.max(textH+pad*2, hasLogo?ls+pad*2:0);
   c.beginPath();c.roundRect(20,20,wd,hd,8);
   c.fillStyle='rgba(7,11,18,.9)';c.fill();
   c.strokeStyle='rgba(120,150,180,.28)';c.lineWidth=1;c.stroke();
-  const tx=hasLogo?(36+ls+20):36;
   if(img){
     // Свій знак: вписуємо в квадрат ls×ls, пропорції не ламаємо.
     const k=Math.min(ls/img.naturalWidth, ls/img.naturalHeight);
     const iw=img.naturalWidth*k, ih=img.naturalHeight*k;
-    c.drawImage(img, 36+(ls-iw)/2, 20+(hd-ih)/2, iw, ih);
+    c.drawImage(img, 20+pad+(ls-iw)/2, 20+(hd-ih)/2, iw, ih);
   }else if(B.logo){
-    // Знак за замовчуванням — кружок, як у зразку.
-    c.beginPath();c.arc(36+ls/2,20+hd/2,ls/2,0,7);c.strokeStyle='rgba(255,62,165,.5)';
+    const cx=20+pad+ls/2, cy=20+hd/2;
+    c.beginPath();c.arc(cx,cy,ls/2,0,7);c.strokeStyle='rgba(255,62,165,.5)';
     c.lineWidth=1.6;c.stroke();
-    c.beginPath();c.arc(36+ls/2,20+hd/2,ls*0.18,0,7);
+    c.beginPath();c.arc(cx,cy,ls*0.18,0,7);
     c.fillStyle='rgba(255,62,165,.85)';c.fill();
   }
+  const tx=20+pad+(hasLogo?ls+gap:0);
   c.textAlign='left';
-  let y=20+(B.name?30:34);
-  if(B.name){
-    c.font='700 22px "MapSans",ui-sans-serif,-apple-system,Arial';c.fillStyle='#eef4fb';
-    c.fillText(B.name,tx,y); y+=20;
-    if(B.handle){
-      c.font='400 12px "MapSans",ui-sans-serif,-apple-system,Arial';
-      c.fillStyle='rgba(146,170,194,.9)';c.fillText(B.handle,tx,y); y+=20;
-    }
-  }
-  if(t){
-    c.font='700 21px "MapSans",ui-sans-serif,-apple-system,Arial';c.fillStyle='#eef4fb';
-    c.fillText(t,tx,y); y+=20;
-  }
-  if(sb){
-    c.font='400 12.5px "MapSans",ui-sans-serif,-apple-system,Arial';
-    c.fillStyle='rgba(146,170,194,.92)';c.fillText(sb,tx,y);
+  let y=20+(hd-textH)/2;              // текст по центру висоти картки
+  for(const l of L){
+    c.font=`${l.w} ${l.s}px ${FF}`;
+    c.fillStyle=l.col;
+    c.fillText(l.t, tx, y+l.s*0.82);  // 0.82 — приблизна висота великої літери
+    y+=l.lh;
   }
   c.restore();
 }
@@ -3058,6 +3061,8 @@ document.getElementById('chromeEdit').onclick=()=>{
     +(B.logoImg?'<button id="bImgDel" style="margin-top:6px">прибрати картинку</button>':'')
     +`<label style="margin-top:6px">Розмір знака, px</label>`
     +`<input id="bLS" type="number" min="16" max="96" value="${B.logoSize||36}">`
+    +'<label>Відступ усередині картки, px</label>'
+    +`<input id="bPad" type="number" min="8" max="48" value="${B.pad===undefined?20:B.pad}">`
     +'<label style="margin-top:10px">Підвал ліворуч</label>'
     +`<input id="fL" value="${F.left||''}">`
     +'<label>Підвал праворуч</label>'
@@ -3077,6 +3082,7 @@ document.getElementById('chromeEdit').onclick=()=>{
   bind('lzL',v=>L.marks.launchName=v); bind('lzI',v=>L.marks.impactName=v);
   bind('bN',v=>B.name=v); bind('bH',v=>B.handle=v);
   bind('bLS',v=>B.logoSize=Math.max(16,Math.min(96,+v||36)));
+  bind('bPad',v=>B.pad=Math.max(8,Math.min(48,+v||20)));
   // Заголовок і дата редагуються і тут, і вгорі панелі — це те саме поле.
   bind('bT',v=>{S.title=v;document.getElementById('mTitle').value=v;});
   bind('bS',v=>{S.sub=v;document.getElementById('mSub').value=v;});

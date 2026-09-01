@@ -934,6 +934,44 @@ function isLight(){
   const r=parseInt(b.slice(0,2),16), g=parseInt(b.slice(2,4),16), bl=parseInt(b.slice(4,6),16);
   return (r*0.299+g*0.587+bl*0.114)>140;
 }
+// Відстань по ортодромії та початковий азимут — те, що показує будь-яка
+// нормальна лінійка на карті. Меркатор для вимірювання непридатний: пряма
+// на екрані це не найкоротший шлях, і на 1000 км різниця вже помітна.
+function geoKm(p1,p2){
+  const R=6371, rad=Math.PI/180;
+  const dla=(p2[0]-p1[0])*rad, dlo=(p2[1]-p1[1])*rad;
+  return 2*R*Math.asin(Math.sqrt(Math.sin(dla/2)**2+
+    Math.cos(p1[0]*rad)*Math.cos(p2[0]*rad)*Math.sin(dlo/2)**2));
+}
+function geoAz(p1,p2){
+  const rad=Math.PI/180;
+  const y=Math.sin((p2[1]-p1[1])*rad)*Math.cos(p2[0]*rad);
+  const x=Math.cos(p1[0]*rad)*Math.sin(p2[0]*rad)-
+          Math.sin(p1[0]*rad)*Math.cos(p2[0]*rad)*Math.cos((p2[1]-p1[1])*rad);
+  return (Math.atan2(y,x)/rad+360)%360;
+}
+function kmText(km){
+  return km<1 ? Math.round(km*1000)+' м'
+       : km<10 ? km.toFixed(2)+' км'
+       : km<100 ? km.toFixed(1)+' км'
+                : Math.round(km)+' км';
+}
+// Приціл на кінці лінійки: кружок із розривами й перехрестям. Просто крапка
+// на карті з підкладкою губиться, а цілитись інакше ніяк.
+function reticle(c,x,y,col,r){
+  r=r||9;
+  c.save();
+  c.strokeStyle=col;c.lineWidth=1.4;
+  for(const a of [0,90,180,270]){
+    c.beginPath();c.arc(x,y,r,(a+12)*Math.PI/180,(a+78)*Math.PI/180);c.stroke();
+  }
+  c.beginPath();
+  c.moveTo(x-r-5,y);c.lineTo(x-3,y);c.moveTo(x+3,y);c.lineTo(x+r+5,y);
+  c.moveTo(x,y-r-5);c.lineTo(x,y-3);c.moveTo(x,y+3);c.lineTo(x,y+r+5);
+  c.stroke();
+  c.beginPath();c.arc(x,y,1.6,0,7);c.fillStyle=col;c.fill();
+  c.restore();
+}
 function drawLabels(c){
   const B=window.BASE, taken=TAKEN, ST=S.style;
   // Підписи областей ідуть ПЕРШИМИ: вони найбільші й мають право на місце,
@@ -2033,16 +2071,35 @@ function draw(){
     d.pts.forEach(p=>{const s=P(p[0],p[1]);
       ctx.beginPath();ctx.arc(s[0],s[1],3.5,0,7);ctx.fillStyle='#fff';ctx.fill();});
   }
-  if(S.ruler&&S.ruler.length===2){
-    const a=P(...S.ruler[0]), b=P(...S.ruler[1]);
-    ctx.save();ctx.setLineDash([5,4]);ctx.strokeStyle='#ffd166';ctx.lineWidth=1.4;
-    ctx.beginPath();ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);ctx.stroke();
+  // Лінійка. Ламана з будь-якої кількості колін: на кожному коліні своя
+  // відстань і азимут, у кінці — сума. Останнє коліно тягнеться за курсором,
+  // тому число видно ДО кліку, а не після.
+  if(S.ruler&&S.ruler.pts&&S.ruler.pts.length){
+    const R=S.ruler, col='#ffd166';
+    const pts=R.live?R.pts.concat([R.live]):R.pts.slice();
+    ctx.save();
+    // темна підкладка під лінією: над містом жовтий пунктир інакше зникає
+    ctx.setLineDash([]);ctx.strokeStyle='rgba(4,7,12,.75)';ctx.lineWidth=3.4;
+    ctx.beginPath();
+    pts.forEach((p,i)=>{const s2=P(p[0],p[1]); i?ctx.lineTo(s2[0],s2[1]):ctx.moveTo(s2[0],s2[1]);});
+    ctx.stroke();
+    ctx.setLineDash([6,4]);ctx.strokeStyle=col;ctx.lineWidth=1.6;
+    ctx.beginPath();
+    pts.forEach((p,i)=>{const s2=P(p[0],p[1]); i?ctx.lineTo(s2[0],s2[1]):ctx.moveTo(s2[0],s2[1]);});
+    ctx.stroke();
     ctx.setLineDash([]);
-    const R=6371,p1=S.ruler[0],p2=S.ruler[1];
-    const dla=(p2[0]-p1[0])*Math.PI/180, dlo=(p2[1]-p1[1])*Math.PI/180;
-    const km=2*R*Math.asin(Math.sqrt(Math.sin(dla/2)**2+
-      Math.cos(p1[0]*Math.PI/180)*Math.cos(p2[0]*Math.PI/180)*Math.sin(dlo/2)**2));
-    plate(ctx,(a[0]+b[0])/2,(a[1]+b[1])/2,[Math.round(km)+' км'],'#ffd166');
+    let total=0;
+    for(let i=0;i<pts.length-1;i++){
+      const km=geoKm(pts[i],pts[i+1]); total+=km;
+      const a=P(pts[i][0],pts[i][1]), b=P(pts[i+1][0],pts[i+1][1]);
+      plate(ctx,(a[0]+b[0])/2,(a[1]+b[1])/2,
+            [kmText(km)+' · '+Math.round(geoAz(pts[i],pts[i+1]))+'°'],col);
+    }
+    for(const p of pts){const s2=P(p[0],p[1]); reticle(ctx,s2[0],s2[1],col,7);}
+    if(pts.length>2){
+      const e=P(pts[pts.length-1][0],pts[pts.length-1][1]);
+      plate(ctx,e[0]+14,e[1]+18,['разом '+kmText(total)],'#fff');
+    }
     ctx.restore();
   }
   {
@@ -2431,7 +2488,11 @@ cv.addEventListener('pointerdown',e=>{
       drag={frame:'move',sx,sy,orig:{...f}};return;}
   }
   if(S.tool==='ruler'){
-    S.ruler=(S.ruler&&S.ruler.length===1)?[S.ruler[0],[la,lo]]:[[la,lo]];
+    // Клік додає коліно, Enter або подвійний клік завершує, Esc стирає.
+    // Alt-клік прибирає останнє.
+    if(!S.ruler||!S.ruler.pts||S.ruler.done) S.ruler={pts:[],live:null,done:false};
+    if(e.altKey){ S.ruler.pts.pop(); draw(); return; }
+    S.ruler.pts.push([la,lo]);
     draw();return;
   }
   if(S.tool==='arrow'){
@@ -2548,6 +2609,11 @@ cv.addEventListener('pointermove',e=>{
   const r=cv.getBoundingClientRect(), sx=e.clientX-r.left, sy=e.clientY-r.top;
   const [bx,by]=unscr(sx,sy), [la,lo]=baseLL(bx,by);
   document.getElementById('cursor').textContent=la.toFixed(2)+'° / '+lo.toFixed(2)+'°';
+  // Живе коліно лінійки: число видно ще до кліку, як у нормальній карті.
+  if(S.tool==='ruler'&&S.ruler&&S.ruler.pts&&S.ruler.pts.length&&!S.ruler.done){
+    S.ruler.live=[la,lo];
+    draw();
+  }
   if(pan){S.view.x=pan.vx-(sx-pan.sx)/S.view.k;S.view.y=pan.vy-(sy-pan.sy)/S.view.k;draw();return;}
   // Тягання з інструментом маршруту чи зони: точки лягають самі, поки
   // ведеш. Поріг у 4 px відрізняє тягання від кліку, крок у 8 px не дає
@@ -2646,6 +2712,10 @@ cv.addEventListener('wheel',e=>{
 },{passive:false});
 cv.addEventListener('dblclick',e=>{
   if(S.draft){finishRoute();return;}
+  // Подвійним кліком завершується й вимір: інакше остання ланка тягнеться
+  // за курсором по всій карті.
+  if(S.tool==='ruler'&&S.ruler&&S.ruler.pts&&S.ruler.pts.length){
+    S.ruler.done=true;S.ruler.live=null;draw();return;}
   // Подвійний клік по порожньому наближає — так поводяться всі карти.
   const r=cv.getBoundingClientRect(), sx=e.clientX-r.left, sy=e.clientY-r.top;
   const before=unscr(sx,sy);
@@ -2749,9 +2819,13 @@ addEventListener('keydown',e=>{
     document.getElementById('panelToggle').click();return;}
   if(e.key==='+'||e.key==='='){zoomBy(1.35);return;}
   if(e.key==='-'||e.key==='_'){zoomBy(1/1.35);return;}
+  if(e.key==='Enter'&&S.tool==='ruler'&&S.ruler&&S.ruler.pts&&S.ruler.pts.length){
+    S.ruler.done=true;S.ruler.live=null;draw();return;}
   if(e.key==='Enter') finishRoute();
   if(e.key==='Escape'){
-    // Esc послідовно: скасувати чернетку -> зняти вибір -> повернутись у вибір
+    // Esc послідовно: стерти вимір -> скасувати чернетку -> зняти вибір ->
+    // повернутись у «вибір»
+    if(S.ruler&&S.ruler.pts&&S.ruler.pts.length){S.ruler=null;draw();return;}
     if(S.draft){S.draft=null;toast('скасовано');}
     else if(S.sel||S.selMore.length){S.sel=null;S.selMore=[];}
     else setTool('select');
@@ -2888,7 +2962,7 @@ const HINTS={
   text:'Підпис: клікни, де почати текст (далі редагуй у панелі праворуч)',
   arrow:'Стрілка: натисни й тягни від початку до кінця',
   zone:'Зона: клікай по кутах (Enter замикає), або натисни й обведи одним рухом',
-  ruler:'Лінійка: два кліки — відстань між ними',
+  ruler:'Лінійка: клік — коліно, Enter завершує, Alt+клік прибирає останнє, Esc стирає. Показує відстань по ортодромії та азимут',
 };
 const CURSORS={select:'default',text:'text',ruler:'crosshair'};
 function toast(msg){

@@ -615,9 +615,20 @@ const S={
     impact:{col:'#ffd66e', rays:8, size:9, glow:1.0},
     // Робота ППО і збиття — НЕ влучання. Доти всі три малювались одним
     // помаранчевим спалахом, і карта читалась як суцільна пожежа.
-    ppo:{col:'#6fe3ff', size:9, glow:1.0},
-    downed:{col:'#ff8a5c', size:9, glow:1.0},
-    launch:{col:'#ffd166', pin:'#ffffff'},
+    // Кольори рознесені навмисно: збиття й вибух поруч на карті мають
+    // читатись як різні події, а не як два відтінки помаранчевого.
+    ppo:{col:'#6fe3ff', size:9, glow:1.0, glyph:''},
+    downed:{col:'#ff8a5c', size:9, glow:1.0, glyph:''},
+    boom:{col:'#ff5252', size:10, glow:1.0, glyph:''},
+    // `launch` один на дві речі, і це навмисно: пускова локація (окремий
+    // обʼєкт зі шпилькою) і позначка події «пуск» — це той самий пуск, тож
+    // колір у них має бути спільний. Раніше ключ був оголошений двічі, і
+    // другий тихо затирав перший разом із розміром і знаком.
+    //
+    // Колір змінено з #ffd166 на фіолетовий: жовтий стояв упритул до
+    // влучання (#ffd66e), і поряд на карті вони читались як одне й те саме.
+    launch:{col:'#c77dff', pin:'#ffffff', size:9, glow:1.0, glyph:''},
+    fix:{col:'#9fb3c8', size:7, glow:0.7, glyph:''},
     ghost:{col:'#7fd3ff', weakCol:'#8fa3b8', alpha:1.0},
     plate:{bg:0.86, border:0.4, text:'#dbe8f6'},
   },
@@ -1536,7 +1547,14 @@ function drawLaunch(o,c,sel){
 // властивостях, кожна має свій знак, колір і окремий шар.
 function catOf(o){ return o.kind==='impact' ? (o.cat||'impact') : null; }
 const CAT_LAYER={impact:'impacts',ppo:'ppo',downed:'downed'};
-const CAT_NAME={impact:'влучання',ppo:'робота ППО',downed:'збиття'};
+// Категорії позначок відповідають тому, що канали ПИШУТЬ (kind у події):
+// ППО, збиття, вибух, пуск, фіксація. Вигаданих сюди не додавати — позначка,
+// якій нема відповідника в даних, це вже не спостереження, а домисел.
+//
+// Порядок тут же задає порядок у віконці над позначкою й у списку.
+const CAT_NAME={impact:'влучання',ppo:'робота ППО',downed:'збиття',
+                boom:'вибух',launch:'пуск',fix:'фіксація'};
+const CAT_LIST=['ppo','downed','boom','launch','fix','impact'];
 // Один присуд видимості на всі три приймачі (екран, PNG, SVG): інакше
 // вимкнений шар зникає з екрана, а в експорті лишається.
 function objVisible(o){
@@ -1567,9 +1585,31 @@ function drawMark(o,c,sel,ST){
     c.beginPath();c.arc(s[0],s[1],r*.95,0,7);c.stroke();
   }
   c.restore();
+  markGlyph(o,c,s,r,ST);
   markLabel(o,c,s,col,r,sel);
   if(sel){c.beginPath();c.arc(s[0],s[1],r*2.6,0,7);c.strokeStyle='#fff';
     c.setLineDash([3,3]);c.lineWidth=1;c.stroke();c.setLineDash([]);}
+}
+// Знак у центрі позначки. Порожній рядок — лишається намальоване кільце, як
+// було; будь-який символ (зокрема емодзі) малюється замість нього.
+//
+// ЧОГО ЧЕКАТИ ВІД ЕМОДЗІ. Це кольоровий системний шрифт: на маку й айфоні
+// він свій, на іншій машині інший або його нема. У PNG це не важить —
+// експорт растровий, у файл потрапляє те, що намальовано. У SVG знак
+// лишається ТЕКСТОМ і візьме шрифт того, хто відкриє файл, тож для вектора
+// надійніше лишати кільце. Тому порожньо за замовчуванням.
+function markGlyph(o,c,s,r,ST){
+  const g=(o.glyph!==undefined?o.glyph:(ST&&ST.glyph))||'';
+  if(!g) return;
+  c.save();
+  c.font=`${Math.round(r*2.1)}px "Apple Color Emoji","Segoe UI Emoji",`
+        +`"Noto Color Emoji",ui-sans-serif,Arial`;
+  c.textAlign='center'; c.textBaseline='middle';
+  // Темна підкладка під знаком: на світлій ділянці супутника емодзі з
+  // тонким контуром інакше зливається.
+  shadow(c, hexa(S.style.base.halo||'#04070c',.85), 6);
+  c.fillText(g, s[0], s[1]+r*0.06);
+  c.restore();
 }
 // Підпис міста при позначці показується лише тоді, коли позначку вибрано.
 // Сімнадцять плашок одночасно перекривали одна одну й саму карту; тепер
@@ -1657,9 +1697,7 @@ function renderQuick(){
     ` title="${CAT_NAME[k]}" style="background:${col}"></button>`;
   let html='';
   if(o.kind==='impact'){
-    html+=dot('ppo',(S.style.ppo||{}).col||'#6fe3ff')
-        + dot('downed',(S.style.downed||{}).col||'#ff8a5c')
-        + dot('impact',S.style.impact.col||'#ffd66e')
+    html+=CAT_LIST.map(k=>dot(k,(S.style[k]||{}).col||'#9fb3c8')).join('')
         + '<span class="sep"></span>'
         + `<button data-q="pin" class="${o.pinLabel?'on':''}" title="Підпис завжди"`+
           `>підпис</button>`;
@@ -1744,8 +1782,7 @@ function drawImageObj(o,c,sel){
 }
 function drawImpact(o,c,sel){
   const k=catOf(o);
-  if(k==='ppo') return drawMark(o,c,sel,S.style.ppo||{col:'#6fe3ff'});
-  if(k==='downed') return drawMark(o,c,sel,S.style.downed||{col:'#ff8a5c'});
+  if(k!=='impact') return drawMark(o,c,sel,S.style[k]||{col:'#9fb3c8'});
   const IM=S.style.impact;
   const s=P(o.la,o.lo), r=o.size||IM.size||9;
   const g=c.createRadialGradient(s[0],s[1],0,s[0],s[1],r*2.2);
@@ -1761,6 +1798,7 @@ function drawImpact(o,c,sel){
     c.strokeStyle=hexa(IM.col,.85);c.lineWidth=1.6;c.stroke();
   }
   c.beginPath();c.arc(s[0],s[1],r*.5,0,7);c.fillStyle='#fff6df';c.fill();
+  markGlyph(o,c,s,r,IM);
   markLabel(o,c,s,'#ffb01f',r,sel);
   if(sel){c.beginPath();c.arc(s[0],s[1],r*2.6,0,7);c.strokeStyle='#fff';
     c.setLineDash([3,3]);c.lineWidth=1;c.stroke();c.setLineDash([]);}
@@ -2237,6 +2275,7 @@ function seedChrome(){
 }
 function draw(){
   if(!S.ready) return;
+  endPass();                      // новий прохід — кеш списку показу чистий
   seedChrome();
   document.getElementById('zoom').textContent=
     (S.view.k<0.1?(S.view.k*100).toFixed(1):Math.round(S.view.k*100))+'%';
@@ -2672,7 +2711,7 @@ function restore(){
       // Старі карти цього поля не мають — режим показу лишається вимкненим.
       S.corridors=Object.assign({on:false,km:120},d.corridors||{});
       S.hideCity=Array.isArray(d.hideCity)?d.hideCity.slice():[];
-      S.selCity=null; CORR.sig=null;
+      S.selCity=null; endPass();
       if(d.legend)S.legend=d.legend;
       if(d.brand)S.brand=d.brand;
       if(d.footer)S.footer=d.footer;
@@ -3451,11 +3490,13 @@ function refresh(){
       +'<button data-act="lab" style="margin-top:6px">Скинути положення підпису</button>';
   }else if(o.kind==='impact'){
     p.innerHTML='<label>Що це</label><select data-k="cat">'
-      +['impact','ppo','downed'].map(k=>
+      +CAT_LIST.map(k=>
         `<option value="${k}" ${k===catOf(o)?'selected':''}>${CAT_NAME[k]}</option>`).join('')
       +'</select>'
       +field('Підпис',o.label||'','label')
       +field('Розмір',o.size,'size','type=number min=4 max=30')
+      +field('Знак (емодзі, порожньо — кільце)',
+             o.glyph===undefined?'':o.glyph,'glyph')
       +`<button data-act="pin" style="margin-top:6px">${
          o.pinLabel?'Ховати підпис, поки не вибрано':'Показувати підпис завжди'}</button>`
       +'<button data-act="lab" style="margin-top:6px">Скинути положення підпису</button>'
@@ -3707,7 +3748,7 @@ function applyMap(d){
   if(d.style)S.style=fillDefaults(d.style,STYLE_DEFAULT);
   S.corridors=Object.assign({on:false,km:120},d.corridors||{});
   S.hideCity=Array.isArray(d.hideCity)?d.hideCity.slice():[];
-  S.selCity=null; CORR.sig=null;
+  S.selCity=null; endPass();
   if(d.legend)S.legend=d.legend;
   if(d.brand)S.brand=d.brand;
   if(d.footer)S.footer=d.footer;
@@ -3805,6 +3846,7 @@ document.getElementById('export').onclick=async ()=>{
   drawBase(g);
   // сховані обʼєкти (око у списку шарів) не малюються ні на екрані, ні у
   // SVG — тут їх забули відсіяти, і на PNG вони поверталися
+  endPass();                      // експорт — теж окремий прохід
   for(const o of drawList()){ if(objVisible(o)) drawObj(o,g,false); }
   // легенда, шапка й лінійка кладуться відносно РАМКИ
   g.save();g.translate(f.x,f.y);
@@ -3915,6 +3957,7 @@ document.getElementById('exportSvg').onclick=async ()=>{
   if(!NOBG){ g.fillStyle=S.style.base.bg||'#04070c'; g.fillRect(f.x,f.y,f.w,f.h); }
   seedChrome();
   drawBase(g);
+  endPass();                      // експорт — теж окремий прохід
   for(const o of drawList()){ if(objVisible(o)) drawObj(o,g,false); }
   g.save();g.translate(f.x,f.y);
   drawWatermark(g,f.w,f.h);
@@ -4126,6 +4169,11 @@ function renderStyle(){
     +`<input data-g="${grp}" data-k="${key}" value="${ST[grp][key]}" ${attrs}>`;
   const col=(lbl,grp,key)=>`<label>${lbl}</label>`
     +`<input type="color" data-g="${grp}" data-k="${key}" value="${ST[grp][key]}">`;
+  // Текстове поле стилю: знак позначки. Окремо від n(), бо там number і
+  // атрибути, а тут потрібен звичайний рядок і порожнє значення як норма.
+  const t=(lbl,grp,key)=>`<label>${lbl}</label>`
+    +`<input data-g="${grp}" data-k="${key}" maxlength="4" `
+    +`placeholder="порожньо — кільце" value="${esc((ST[grp]||{})[key]||'')}">`;
   p.innerHTML='<label style="color:#8fa3b8">Підкладка</label>'
     +n('Яскравість супутника','base','bright','type=number step=0.05 min=0.1 max=1.5')
     +n('Насиченість, %','base','sat','type=number step=5 min=0 max=100')
@@ -4149,8 +4197,13 @@ function renderStyle(){
     +col('Кордон РФ–Україна: колір','base','uaruCol')
     +'<label style="color:#8fa3b8;margin-top:10px">Маршрути</label>'
     +n('Сила ореолу','route','halo','type=number step=0.02 min=0 max=0.6')
+    +'<label style="color:#8fa3b8;margin-top:10px">Позначки подій</label>'
+    +CAT_LIST.filter(k=>k!=='impact').map(k=>
+        col(CAT_NAME[k]+': колір',k,'col')
+      + t(CAT_NAME[k]+': знак',k,'glyph')).join('')
     +'<label style="color:#8fa3b8;margin-top:10px">Влучання</label>'
     +col('Колір спалаху','impact','col')
+    +t('Влучання: знак','impact','glyph')
     +n('Променів','impact','rays','type=number min=3 max=16')
     +n('Розмір за замовчуванням','impact','size','type=number min=4 max=30')
     +n('Сила сяйва','impact','glow','type=number step=0.1 min=0.2 max=2')
@@ -4284,7 +4337,11 @@ function putStrikes(){
   // Категорія — з даних, а не з підпису: «ППО» і «збиття» це різні події,
   // і на карті вони мають різні знаки та окремі шари. Слово з підпису
   // прибрано: його тепер каже сам знак і легенда.
-  const CAT={'ППО':'ppo','збиття':'downed','влучання':'impact'};
+  // Відповідність тому, що написано в даних. «вибух», «пуск» і «фіксація»
+  // раніше згорталися у «влучання» — тобто подія, якої канали не бачили,
+  // отримувала знак наслідку. Тепер у кожної свій.
+  const CAT={'ППО':'ppo','збиття':'downed','влучання':'impact',
+             'вибух':'boom','пуск':'launch','фіксація':'fix'};
   for(const s2 of list){
     S.objs.push({kind:'impact',cat:CAT[s2.kind]||'impact',type:'unknown',
       origin:tag,la:s2.la,lo:s2.lo,src:uniqSrc(s2.src),
@@ -4361,7 +4418,7 @@ function loadNight(cb){
       const keep=S.objs.filter(isBaseZone);
       const drop=S.objs.length-keep.length;
       if(drop||S.ghosts.length) snapshot();
-      S.objs=keep; S.ghosts=[]; S.sel=null; S.selMore=[]; CORR.sig=null;
+      S.objs=keep; S.ghosts=[]; S.sel=null; S.selMore=[]; endPass();
       loadNight(ok=>{
         if(!ok){toast('ніч не завантажилась');refresh();return;}
         toast('ніч '+sel.value+(drop?` · прибрано з попередньої: ${drop}`:'')
@@ -4480,17 +4537,19 @@ function zorder(list){
   base.sort((a,b)=>baseRank(a)-baseRank(b));
   return base.concat(list.filter(o=>!isBaseZone(o)));
 }
-const CORR={sig:null, list:null};
-function corridorSig(){
-  return (S.corridors.on?'on':'off')+'|'+S.corridors.km+'|'+S.objs.length+'|'
-    +S.objs.map(o=>o.kind==='zone'?'z'+o.zone+(o.hidden?'h':'')
-      :o.kind!=='route'?'x'
-      :[o.type,o.count,o.spread,o.pts[0],o.pts[o.pts.length-1]].join(',')).join(';');
-}
+const CORR={list:null};
+// Кеш живе РІВНО ОДИН прохід малювання, а не «поки підпис не змінився».
+// Підпис описував тільки зони й маршрути, тож зміна позначки — чи підміна
+// всього S.objs на такий самий за складом набір — лишала в кеші СТАРІ
+// обʼєкти. На екрані все схоже, а малюється вже не те, що лежить у карті;
+// спіймано на тому, що знак позначки не зʼявлявся, хоч і був заданий.
+//
+// Прохід відкриває drawList(), закриває endPass(). Між проходами кеш
+// недійсний, тож устаріти нема чому.
+function endPass(){ CORR.list=null; }
 function drawList(){
-  const sig=corridorSig();
-  if(CORR.sig===sig) return CORR.list;
-  if(!S.corridors.on){ CORR.sig=sig; CORR.list=zorder(S.objs); return CORR.list; }
+  if(CORR.list) return CORR.list;
+  if(!S.corridors.on){ CORR.list=zorder(S.objs); return CORR.list; }
   const routes=S.objs.filter(o=>o.kind==='route');
   const groups=corridorGroups(routes,S.corridors.km);
   const swap=new Map();
@@ -4511,7 +4570,6 @@ function drawList(){
     if(t1.length) o.t1=t1[t1.length-1];
     for(const g of grp) swap.set(g, g===rep?o:null);
   }
-  CORR.sig=sig;
   CORR.list=zorder(S.objs.map(o=>swap.has(o)?swap.get(o):o).filter(Boolean));
   return CORR.list;
 }
@@ -4530,7 +4588,7 @@ function renderCorr(){
 }
 document.getElementById('corrToggle').onclick=()=>{
   S.corridors.on=!S.corridors.on;
-  CORR.sig=null;
+  endPass();
   // Вибір знімається: у режимі коридорів немедоїдні маршрути не малюються,
   // і виділення на невидимому обʼєкті збивало б з пантелику.
   S.sel=null; S.selMore=[];
@@ -4544,7 +4602,7 @@ document.getElementById('corrToggle').onclick=()=>{
 };
 document.getElementById('groupKm').onchange=e=>{
   S.corridors.km=Math.max(1,+e.target.value||120);
-  CORR.sig=null; touch(); renderCorr(); refresh();
+  endPass(); touch(); renderCorr(); refresh();
 };
 
 // Гуртом. Клікати по сорока підказках по одній — це не робота, це рутина, і

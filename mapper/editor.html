@@ -784,8 +784,42 @@ function hexa(hex,a){
 // в експорті ×2.6 — утричі тонший. Тримаємо коефіцієнт і множимо на нього.
 let RSCALE=1;
 // Стеля площі полотна суперсемплінгу, спільна для PNG і для растрової
-// підкладки у SVG: за нею множник падає з 2 на 1. Див. замір біля SS.
-const SS_AREA_MAX=80e6;
+// підкладки у SVG. Див. замір біля SS у exportPng.
+//
+// 96 Мпкс — це 384 МБ на полотно. Число підібране так, щоб телеграмний
+// 2048×2560 проходив при множнику 4 (8192×10240 = 83.9 Мпкс, 320 МБ —
+// перевірено в браузері, виділяється й малюється за 23 мс), а A3 при цьому
+// падав на 2 (при 4 він дав би 1114 Мпкс).
+const SS_AREA_MAX=96e6;
+
+// Найбільший СТЕПІНЬ ДВІЙКИ, що вкладається в стелю. Тільки степінь двійки:
+// зменшення пристойне лише на точному діленні навпіл, тому проміжні
+// множники не розглядаються взагалі.
+function ssFor(w,h){ let k=4; while(k>1 && w*h*k*k>SS_AREA_MAX) k/=2; return k; }
+
+// Зменшення ПОКРОКОВИМ ділінням навпіл. Одним кроком не можна: виміряно, що
+// ×4 одним `drawImage` дає 28.97 dB — гірше, ніж узагалі без суперсемплінгу
+// (31.91), тоді як те саме ділінням навпіл дає 42.60.
+function downHalving(src,w,h){
+  let cur=src;
+  while(cur.width>=w*2 && cur.width>w){
+    const t=document.createElement('canvas');
+    t.width=Math.max(w,Math.round(cur.width/2));
+    t.height=Math.max(h,Math.round(cur.height/2));
+    const g=t.getContext('2d');
+    g.imageSmoothingEnabled=true; g.imageSmoothingQuality='high';
+    g.drawImage(cur,0,0,t.width,t.height);
+    cur=t;
+  }
+  if(cur.width!==w||cur.height!==h){
+    const o=document.createElement('canvas'); o.width=w; o.height=h;
+    const g=o.getContext('2d');
+    g.imageSmoothingEnabled=true; g.imageSmoothingQuality='high';
+    g.drawImage(cur,0,0,w,h);
+    cur=o;
+  }
+  return cur;
+}
 function shadow(c,col,blur){ c.shadowColor=col; c.shadowBlur=blur*RSCALE; }
 const cv=document.getElementById('cv'), ctx=cv.getContext('2d');
 let Wp=0,Hp=0,DPR=Math.min(2,devicePixelRatio||1);
@@ -3447,22 +3481,22 @@ document.getElementById('export').onclick=async ()=>{
   // коефіцієнті сиплеться. Виміряно тут же, у браузері, на сцені з тонких
   // ліній, дрібного шрифту й насичених міток — PSNR проти еталона ×8:
   //
-  //   без суперсемплінгу   31.91
-  //   ×1.5 (було)          32.94   ← +1.0 dB, тобто дарма
-  //   ×2                   38.69   ← +5.8 dB проти було
-  //   ×2.5                 31.59   ← ГІРШЕ, ніж узагалі без нього
-  //   ×3 одним кроком      26.09   ← ще гірше
-  //   ×3 покроковим ділінням 34.68
+  //   без суперсемплінгу      31.91
+  //   ×1.5 (стояло)           32.94   ← +1.0 dB, тобто дарма
+  //   ×2  одним кроком        38.69
+  //   ×2.5                    31.59   ← ГІРШЕ, ніж узагалі без нього
+  //   ×3  одним кроком        26.09   ← ще гірше
+  //   ×4  одним кроком        28.97   ← теж гірше за відсутність
+  //   ×4  ділінням навпіл     42.60   ← +9.7 dB проти того, що стояло
   //
-  // Тобто дробові множники не «трохи слабші», а шкідливі. Правило: міняєш
-  // це число — став ціле й перевір заміром, а не оком.
+  // Два висновки, обидва обов'язкові. Множник — лише степінь двійки: дробові
+  // не «трохи слабші», а шкідливі (×2.5 програє відсутності суперсемплінгу).
+  // І зменшувати треба ПОКРОКОВО навпіл: те саме ×4 одним кроком дає 28.97,
+  // ділінням — 42.60, різниця 13.6 dB на тому самому вхідному полотні.
   //
-  // Стеля площі — щоб A3 не з'їв усю пам'ять на слабкій машині. При ×2 A3
-  // (3508×4961) дає полотно 7016×9922, це 332 МБ разом із вихідним; тут воно
-  // проходить за 1.5 с, але запас потрібен. За стелею падаємо на ×1, а не на
-  // дробове проміжне — воно гірше за відсутність суперсемплінгу.
-  let SS=2;
-  if(outW*outH*SS*SS>SS_AREA_MAX){ SS=1; toast('розмір завеликий — без суперсемплінгу'); }
+  // Правило: міняєш це — перевір заміром, а не оком.
+  const SS=ssFor(outW,outH);
+  if(SS<4) toast(`розмір великий — суперсемплінг ×${SS}`);
   const c2=document.createElement('canvas');
   c2.width=Math.round(outW*SS); c2.height=Math.round(outH*SS);
   const g=c2.getContext('2d');
@@ -3488,14 +3522,7 @@ document.getElementById('export').onclick=async ()=>{
   drawCredit(g,f.w,f.h);           // атрибуція лишається в кожному експорті
   g.restore();
   RSCALE=1;
-  let out=c2;
-  if(SS!==1){
-    out=document.createElement('canvas');
-    out.width=outW; out.height=outH;
-    const og=out.getContext('2d');
-    og.imageSmoothingEnabled=true; og.imageSmoothingQuality='high';
-    og.drawImage(c2,0,0,outW,outH);
-  }
+  const out=(SS===1)?c2:downHalving(c2,outW,outH);
   // Файл віддається як blob, а не data:URL. Причина не в красі: картинка
   // 1800×1200 у base64 — це рядок на 5 МБ, і не кожен браузер погоджується
   // такий «файл» завантажити (Safari просто відкриває його вкладкою). Blob
@@ -3550,7 +3577,7 @@ document.getElementById('exportSvg').onclick=async ()=>{
     // самої причини, що й у PNG (див. замір біля SS): на 1.5 виграш був
     // +1.0 dB, на 2 — +5.8, на 2.5 узагалі мінус. Стеля площі спільна.
     const RW=Math.round(f.w*dens), RH=Math.round(f.h*dens);
-    const RSS=(RW*RH*4>SS_AREA_MAX)?1:2;
+    const RSS=ssFor(RW,RH);
     const rc=document.createElement('canvas');
     rc.width=Math.round(f.w*dens*RSS); rc.height=Math.round(f.h*dens*RSS);
     const rg=rc.getContext('2d');
@@ -3566,11 +3593,7 @@ document.getElementById('exportSvg').onclick=async ()=>{
     }
     if(S.layers.night) drawTiles(rg,'night',ST.base.nightGlow,
       'saturate(130%) brightness(0.7)','screen',S.bias);
-    const rc2=document.createElement('canvas');
-    rc2.width=Math.round(f.w*dens); rc2.height=Math.round(f.h*dens);
-    const rg2=rc2.getContext('2d');
-    rg2.imageSmoothingEnabled=true; rg2.imageSmoothingQuality='high';
-    rg2.drawImage(rc,0,0,rc2.width,rc2.height);
+    const rc2=(RSS===1)?rc:downHalving(rc,RW,RH);
     try{ baseImg=rc2.toDataURL('image/png'); }
     catch(e){
       btn.textContent=was;S.bias=0;

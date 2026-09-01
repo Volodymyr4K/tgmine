@@ -506,10 +506,13 @@ function editType(id){
 // Зони — те, що на оглядових картах показують заливкою: окупована територія,
 // закрита зона, район роботи ППО. Готові пресети, бо оператор має ставити
 // зону за два кліки, а не підбирати колір.
+// `base:true` — зона-ТЕРИТОРІЯ: вона показує, де що лежить, і має бути під
+// усім іншим. Без цього велика заливка «Україна» чи «ТОТ», намальована
+// пізніше за маршрути, лягала поверх них і з'їдала половину карти.
 let ZONES=[
-  {id:'ukraine',  name:'Україна',             col:'#4ade80', hatch:false},
-  {id:'occupied', name:'Окупована територія', col:'#ff5252', hatch:true},
-  {id:'exclusion',name:'Зона відчуження',     col:'#4ade80', hatch:true},
+  {id:'ukraine',  name:'Україна',             col:'#4ade80', hatch:false, base:true},
+  {id:'occupied', name:'Окупована територія', col:'#ff5252', hatch:true,  base:true},
+  {id:'exclusion',name:'Зона відчуження',     col:'#4ade80', hatch:true,  base:true},
   {id:'airdef',   name:'Район роботи ППО',    col:'#38d4dd', hatch:false},
   {id:'area',     name:'Довільна зона',       col:'#ffb01f', hatch:false},
 ];
@@ -1761,8 +1764,13 @@ function drawZone(o,c,sel){
   // червоною ТОТ давала подвійну заливку й подвійний штрих, і читалось це
   // як бруд. Порядок задає список обʼєктів — його ж і видно, і його ж можна
   // перетягнути. Прапорець «підрізати» вимикає це для конкретної зони.
-  const me=S.objs.indexOf(o);
-  const cutters=(o.cut===false||me<0)?[]:S.objs.filter((x,i)=>
+  // Порядок беремо з ПОКАЗУ, не з S.objs. Території малюються найнижчим
+  // шаром, тож у списку обʼєктів вони можуть лежати після зони ППО, а на
+  // карті — під нею. Обтинання за S.objs у такому разі вигризало б дірку в
+  // зоні, яка й так зверху, і в ній світилась би діра замість заливки.
+  const order=drawList();
+  const me=order.indexOf(o);
+  const cutters=(o.cut===false||me<0)?[]:order.filter((x,i)=>
     i>me && x.kind==='zone' && x.pts && x.pts.length>2 && objVisible(x));
   // ДВА обтинання поспіль, і саме в такому порядку. Одне лише evenodd із
   // зоною й верхніми контурами дає «непарне» й ЗА межами зони — точка
@@ -4228,15 +4236,41 @@ function medoid(grp){
 // малювання. Немедоїдні учасники коридору просто не потрапляють у список, а
 // медоїда підмінюється копією з більшим пучком. Копія несе `__src` —
 // посилання на справжній обʼєкт, щоб клік вибирав його, а не тимчасовий.
+// ПОРЯДОК ПОКАЗУ. Території йдуть найнижчим шаром — не тому, що так
+// красивіше, а тому, що заливка на пів-карти поверх маршрутів робить карту
+// нечитною, і оператор мусив би стежити за порядком малювання вручну.
+//
+// Робиться в показі, а не перестановкою S.objs: порядок обʼєктів — це дані
+// карти, і міняти їх заради вигляду не можна (те саме міркування, що й у
+// коридорах).
+//
+// Старі збережені карти несуть свої ZONES без поля `base` — mergeZones
+// лишає збережений запис як є. Тому для відомих ідентифікаторів працює
+// запасний перелік: інакше правка не дійшла б до вже намальованих карт.
+const BASE_ZONE_IDS=new Set(['ukraine','occupied','exclusion']);
+function isBaseZone(o){
+  if(!o||o.kind!=='zone') return false;
+  const z=ZONE[o.zone];
+  if(z&&z.base!==undefined) return !!z.base;
+  return BASE_ZONE_IDS.has(o.zone);
+}
+function zorder(list){
+  let base=null;
+  for(const o of list) if(isBaseZone(o)){ base=base||[]; base.push(o); }
+  if(!base) return list;                       // нема територій — нема й роботи
+  return base.concat(list.filter(o=>!isBaseZone(o)));
+}
 const CORR={sig:null, list:null};
 function corridorSig(){
-  return S.corridors.km+'|'+S.objs.map(o=>o.kind!=='route'?'x'
-    :[o.type,o.count,o.spread,o.pts[0],o.pts[o.pts.length-1]].join(',')).join(';');
+  return (S.corridors.on?'on':'off')+'|'+S.corridors.km+'|'+S.objs.length+'|'
+    +S.objs.map(o=>o.kind==='zone'?'z'+o.zone+(o.hidden?'h':'')
+      :o.kind!=='route'?'x'
+      :[o.type,o.count,o.spread,o.pts[0],o.pts[o.pts.length-1]].join(',')).join(';');
 }
 function drawList(){
-  if(!S.corridors.on) return S.objs;
   const sig=corridorSig();
   if(CORR.sig===sig) return CORR.list;
+  if(!S.corridors.on){ CORR.sig=sig; CORR.list=zorder(S.objs); return CORR.list; }
   const routes=S.objs.filter(o=>o.kind==='route');
   const groups=corridorGroups(routes,S.corridors.km);
   const swap=new Map();
@@ -4258,7 +4292,7 @@ function drawList(){
     for(const g of grp) swap.set(g, g===rep?o:null);
   }
   CORR.sig=sig;
-  CORR.list=S.objs.map(o=>swap.has(o)?swap.get(o):o).filter(Boolean);
+  CORR.list=zorder(S.objs.map(o=>swap.has(o)?swap.get(o):o).filter(Boolean));
   return CORR.list;
 }
 // Скільки коридорів вийде — для напису на кнопці, без побудови списку.

@@ -1620,15 +1620,18 @@ function toolGlyphIcon(){
   if(b) b.firstChild.nodeValue=S.glyph||'💥';
 }
 function glyphPicker(cur,attr){
+  // Без title: спливна підказка на клітинці з емодзі — це той самий емодзі,
+  // лише дрібнішим шрифтом і з затримкою. Виняток — перша клітинка, де
+  // символ ◯ сам по собі нічого не пояснює.
   const cell=(v,txt,title)=>
-    `<button ${attr}="${esc(v)}" title="${esc(title)}" style="`
+    `<button ${attr}="${esc(v)}"${title?` title="${esc(title)}"`:''} style="`
     +`width:32px;height:32px;padding:0;font-size:16px;line-height:1;`
     +`border-radius:7px;cursor:pointer;`
     +`border:1px solid ${v===(cur||'')?'rgba(255,62,165,.9)':'var(--line)'};`
     +`background:${v===(cur||'')?'rgba(255,62,165,.16)':'transparent'}">${txt}</button>`;
   return '<div style="display:flex;flex-wrap:wrap;gap:5px;margin:4px 0 2px">'
-    + cell('','◯','кільце, як було')
-    + GLYPHS.map(g=>cell(g,g,g)).join('')
+    + cell('','◯','без знака — кільце')
+    + GLYPHS.map(g=>cell(g,g,'')).join('')
     + '</div>';
 }
 // Чинний знак позначки: свій, інакше зі стилю категорії.
@@ -3388,6 +3391,7 @@ const HINTS={
   text:'Підпис: клікни, де почати текст (далі редагуй у панелі праворуч)',
   arrow:'Стрілка: натисни й тягни від початку до кінця',
   zone:'Зона: клікай по кутах (Enter замикає), або натисни й обведи одним рухом',
+  glyph:'Знак: вибери його праворуч і клікни, де поставити',
   ruler:'Лінійка: клік — коліно, Enter завершує, Alt+клік прибирає останнє, Esc стирає. Показує відстань по ортодромії та азимут',
 };
 const CURSORS={select:'default',text:'text',ruler:'crosshair'};
@@ -3397,6 +3401,12 @@ function toast(msg){
   clearTimeout(toast._t);toast._t=setTimeout(()=>t.classList.remove('on'),1700);
 }
 function setTool(t){
+  // «Знак» — єдиний інструмент із власним вибором ПЕРЕД дією, і його панель
+  // конкурує з панеллю вибраного обʼєкта. Постановка знака одразу вибирає
+  // щойно поставлений, тож наступне натискання G показувало б його, а не
+  // вибирач. Беручи інструмент, оператор збирається СТАВИТИ, а не правити —
+  // тому вибір знімаємо.
+  if(t==='glyph'&&S.tool!=='glyph'){ S.sel=null; S.selMore=[]; }
   S.tool=t;S.spacePan=false;
   document.querySelectorAll('.tool[data-tool]').forEach(b=>
     b.classList.toggle('on',b.dataset.tool===t));
@@ -3409,6 +3419,10 @@ function setTool(t){
   // описує режим, а не подію. Для «вибору» — гасне, бо це стан за
   // замовчуванням і постійна смуга під картою тільки заважає.
   if(t==='select') setTool._t=setTimeout(()=>{h.style.opacity=0;},4500);
+  // Панель залежить від інструмента: у «знака» вона показує, що саме
+  // поставить наступний клік. Без цього вибирач зʼявлявся лише після
+  // випадкового refresh().
+  refresh();
 }
 document.querySelectorAll('.tool[data-tool]').forEach(b=>
   b.onclick=()=>setTool(b.dataset.tool));
@@ -3490,7 +3504,19 @@ function refresh(){
     wireHiddenCities(p);
     return;
   }
-  if(!o&&!S.objs.length){
+  // Інструмент «знак» має власну панель — вибір того, що поставить
+  // наступний клік. Стоїть ПЕРЕД гілкою порожньої карти: на чистій карті
+  // вітальний текст інакше перекривав вибирач, і знак лишався той, що в
+  // памʼяті, без способу його змінити.
+  if(!o&&S.tool==='glyph'){
+    p.innerHTML='<label>Який знак ставити</label>'
+      +glyphPicker(S.glyph||'💥','data-toolglyph')
+      +'<div class="hint">Клік по карті ставить обраний знак.</div>';
+    p.querySelectorAll('[data-toolglyph]').forEach(b=>b.onclick=()=>{
+      if(!b.dataset.toolglyph) return;      // порожня клітинка тут не має сенсу
+      S.glyph=b.dataset.toolglyph; toolGlyphIcon(); refresh();
+    });
+  }else if(!o&&!S.objs.length){
     // Порожня карта — не місце для переліку модифікаторів: спершу треба
     // сказати, з чого взагалі почати.
     p.innerHTML='<div class="hint"><b style="color:#dbe8f6">З чого почати</b><br>'
@@ -3562,10 +3588,7 @@ function refresh(){
     p.innerHTML='<label>Знак</label>'
       +glyphPicker(o.glyph||'','data-glyph')
       +field('Підпис під знаком',o.label||'','label')
-      +field('Розмір',o.size||22,'size','type=number min=8 max=96')
-      +'<div class="hint">Ставиться будь-де: завод, аеродром, місце, на яке '
-      +'треба звернути увагу. У легенду не потрапляє — це розмітка, а не '
-      +'спостереження.</div>';
+      +field('Розмір',o.size||22,'size','type=number min=8 max=96');
   }else if(o.kind==='image'){
     p.innerHTML=field('Підпис під картинкою',o.label||'','label')
       +field('Ширина, px',o.w||180,'w','type=number min=24 max=1200')

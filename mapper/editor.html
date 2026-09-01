@@ -587,6 +587,13 @@ const S={
           // кордони країн окремо від меж областей: країна має читатись
           // одразу, область — лише як фон
           countries:0.72, countryW:1.35, labelDens:1, labelMax:40,
+          // Помітність підписів міст. Оператор: «якщо з містами, то забагато
+          // літер, накидано, виглядає погано — може, зробити напівпрозорим,
+          // щоб було на фоні». Це саме ручка, а не нове число в коді: на
+          // оглядовому кадрі назви мають відступити, на кадрі однієї області
+          // вони головні. 0.72 за замовчуванням — назви читаються, але не
+          // сперечаються з маршрутами.
+          cityInk:0.72,
           // тло й колір написів: підкладка може бути не лише нічною
           bg:'#04070c', ink:'#eef4fb', inkDim:'#c6d8ea', satSrc:'sat',
           // власна темна схема: суша, вода, міські масиви, дороги
@@ -1212,15 +1219,22 @@ function drawLabels(c){
     if(hid.has(ct.n)) continue;
     if(rec) CITYBOX.push({n:ct.n,x:put[0]-3,y:put[1]-h+2,w:w+6,h:h+4,
                           dx:s2[0],dy:s2[1]});
+    // Помітність тягне за собою ВСЮ групу підпису: крапку, напис і ореол.
+    // Гасити лише текст не можна — лишається яскрава крапка з блідою назвою,
+    // і на карті це читається як помилка, а не як задум. Ореол теж мусить
+    // слабшати разом: під ледь помітним написом повний ореол виглядає
+    // брудною плямою.
+    const ci=Math.max(0,Math.min(1,ST.base.cityInk===undefined?0.72:ST.base.cityInk));
+    if(ci<=0) continue;
     c.beginPath();c.arc(s2[0],s2[1],big?2.8:mid?2.1:1.5,0,7);
-    c.fillStyle=hexa(ST.base.ink||'#eef4fb',.9);c.fill();
+    c.fillStyle=hexa(ST.base.ink||'#eef4fb',.9*ci);c.fill();
     c.save();c.textAlign='left';
     // Ореол під написом залежить від тла: на світлій підкладці чорна тінь
     // виглядає як бруд, на темній без неї напис зникає над містом.
-    shadow(c, isLight()?'rgba(255,255,255,.9)':'rgba(0,0,0,.95)', 7);
-    c.fillStyle=big?hexa(ST.base.ink||'#eef4fb',.96)
-      :mid?hexa(ST.base.ink||'#eef4fb',.86)
-          :hexa(ST.base.inkDim||'#c6d8ea',.72);
+    shadow(c, isLight()?`rgba(255,255,255,${.9*ci})`:`rgba(0,0,0,${.95*ci})`, 7);
+    c.fillStyle=big?hexa(ST.base.ink||'#eef4fb',.96*ci)
+      :mid?hexa(ST.base.ink||'#eef4fb',.86*ci)
+          :hexa(ST.base.inkDim||'#c6d8ea',.72*ci);
     c.fillText(ct.n,put[0],put[1]);c.restore();
   }
 }
@@ -4128,6 +4142,7 @@ function renderStyle(){
     +n('Кордони країн: товщина','base','countryW','type=number step=0.05 min=0.4 max=3')
     +n('Межі областей РФ','base','borders','type=number step=0.05 min=0 max=1')
     +n('Розсип НП','base','places','type=number step=0.05 min=0 max=1')
+    +n('Помітність підписів міст','base','cityInk','type=number step=0.05 min=0 max=1')
     +n('Щільність підписів міст','base','labelDens','type=number step=0.1 min=0.2 max=5')
     +n('Максимум підписів у кадрі (0 — без межі)','base','labelMax','type=number step=5 min=0 max=400')
     +n('Кордон РФ–Україна: товщина','base','uaruW','type=number step=0.2 min=0 max=8')

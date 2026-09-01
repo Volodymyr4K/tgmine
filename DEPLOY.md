@@ -162,8 +162,28 @@ cd cron && npx --yes wrangler@4 deploy
 
 `wrangler login` відкриє браузер — токен Cloudflare тут не потрібен.
 
+**`secret put` не замінює `deploy`.** На порожньому акаунті друга команда
+спитає «There doesn't seem to be a Worker called "tgmine-cron". Do you want to
+create a new Worker with that name?» — і на Y створить ЗАГОТОВКУ: ім'я є,
+секрет усередині є, коду й крону нема. Виглядає як успіх, а годинник мовчить.
+Третю команду треба виконати обов'язково, вона й заливає `src/index.js` разом
+із тригером. Ознака справжнього деплою у виводі — рядок `schedule: 0 * * * *`.
+
+Вимкнені `workers_dev` і `preview_urls` у `wrangler.toml` — не прикраса: без
+них wrangler за замовчуванням видає Worker публічну адресу
+`tgmine-cron.<акаунт>.workers.dev`. Обробника `fetch` тут нема, тож вона
+віддає 500 (error code 1101) і смикнути конвеєр через неї не можна — але це
+зайва поверхня на скрипті, що тримає токен GitHub із правом запису в Actions.
+
 Перевірити, що годинник цокає: dash → Workers & Pages → `tgmine-cron` →
-Logs, або просто глянути, чи прогони в Actions пішли рівно о :00.
+Logs, або просто глянути, чи прогони в Actions пішли рівно о :00:
+
+```bash
+gh run list --limit 40 --json event,createdAt -q '.[] | "\(.createdAt) \(.event)"'
+```
+
+Заміряно після першого деплою 1 вересня 2026: тік о 14:00:27 UTC, тобто
+затримка Worker → GitHub близько півхвилини.
 
 ## Що робить workflow
 

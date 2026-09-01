@@ -565,6 +565,10 @@ const S={
   tool:'select', type:'uav', zone:'occupied',
   frame:null, aspect:0, tpl:null, targetsOn:false, ruler:null, bias:0, ready:false,
   spacePan:false, ghostMin:2,
+  // Підписи міст, які оператор прибрав поіменно. Шар «підписи міст» гасить
+  // усі одразу, а тут потрібне протилежне: назва, що лізе на маршрут або
+  // дублює підпис позначки, прибирається сама, решта лишається.
+  hideCity:[], selCity:null,
   // Зведення маршрутів у коридори — РЕЖИМ ПОКАЗУ, вимкнений за замовчуванням.
   // Обʼєкти від нього не змінюються, тому вмикання й вимикання нічого не
   // коштує й нічого не втрачає. Перший підхід був незворотною кнопкою, яка
@@ -1172,7 +1176,12 @@ function drawLabels(c){
   const cap=Math.max(0,Math.min(400,ST.base.labelMax===undefined?40:ST.base.labelMax));
   const k=Math.max(0.02,S.view.k);
   const minPop=Math.max(3000,Math.min(3e6, 180000*(0.16/k)))/dens;
-  const list=(window.LABELS||B.cities||[]).filter(p=>p.p>=minPop);
+  const hid=new Set(S.hideCity||[]);
+  const list=(window.LABELS||B.cities||[]).filter(p=>p.p>=minPop&&!hid.has(p.n));
+  // Прямокутники підписів запамʼятовуються ЛИШЕ для екрана: клік буває тільки
+  // там, а в експорті цей масив був би сміттям, що росте з кожним кадром.
+  const rec=(c===ctx);
+  if(rec) CITYBOX.length=0;
   let placed=0;
   for(const ct of list){
     if(cap&&placed>=cap) break;
@@ -1189,6 +1198,8 @@ function drawLabels(c){
     }
     if(!put) continue;
     placed++;
+    if(rec) CITYBOX.push({n:ct.n,x:put[0]-3,y:put[1]-h+2,w:w+6,h:h+4,
+                          dx:s2[0],dy:s2[1]});
     c.beginPath();c.arc(s2[0],s2[1],big?2.8:mid?2.1:1.5,0,7);
     c.fillStyle=hexa(ST.base.ink||'#eef4fb',.9);c.fill();
     c.save();c.textAlign='left';
@@ -1200,6 +1211,32 @@ function drawLabels(c){
           :hexa(ST.base.inkDim||'#c6d8ea',.72);
     c.fillText(ct.n,put[0],put[1]);c.restore();
   }
+}
+
+// Де саме лягли підписи міст цього кадру — заповнюється малюванням екрана.
+// Без цього в назву нема чим влучити: місто це не обʼєкт карти, а частина
+// підкладки.
+const CITYBOX=[];
+function cityAt(sx,sy){
+  // згори вниз: останній намальований лежить вище
+  for(let i=CITYBOX.length-1;i>=0;i--){
+    const b=CITYBOX[i];
+    if(sx>=b.x&&sx<=b.x+b.w&&sy>=b.y&&sy<=b.y+b.h) return b;
+    // сама точка міста теж клікається — у неї цілитись простіше, ніж у текст
+    if(Math.hypot(sx-b.dx,sy-b.dy)<6) return b;
+  }
+  return null;
+}
+function hideCity(n){
+  if(!n) return;
+  snapshot();
+  S.hideCity=[...new Set([...(S.hideCity||[]),n])];
+  S.selCity=null; refresh();
+}
+function showCity(n){
+  snapshot();
+  S.hideCity=(S.hideCity||[]).filter(x=>x!==n);
+  refresh();
 }
 
 // Крива маршруту: Катмул-Ром через вузли оператора.
@@ -2240,6 +2277,18 @@ function draw(){
     const src=o.__src||o;
     drawObj(o,ctx,src===S.sel||S.selMore.includes(src));
   }
+  // Вибраний підпис міста обводиться — інакше незрозуміло, що саме
+  // прибере Delete. Тільки на екрані: в експорт рамка не йде.
+  if(S.selCity){
+    const b=CITYBOX.find(x=>x.n===S.selCity);
+    if(b){
+      ctx.save();
+      ctx.strokeStyle='rgba(255,62,165,.95)';ctx.lineWidth=1.5;
+      ctx.setLineDash([4,3]);
+      ctx.strokeRect(b.x-2,b.y-2,b.w+4,b.h+4);
+      ctx.restore();
+    }
+  }
   // Підсвітка обʼєкта, на рядок якого навели в списку. Тільки на екрані:
   // в експорт вона не потрапляє, бо там свій цикл малювання.
   if(S.hover&&S.objs.includes(S.hover)&&objVisible(S.hover)){
@@ -2545,12 +2594,18 @@ function imgToData(img){
 // зникала з обох списків. З одиночним кліком це коштувало одну підказку й
 // губилось у шумі; з кнопкою «узяти всі» один випадковий клік зносив би
 // всю ніч.
-function snapState(){ return JSON.stringify({objs:S.objs, ghosts:S.ghosts}); }
+function snapState(){
+  return JSON.stringify({objs:S.objs, ghosts:S.ghosts, hideCity:S.hideCity});
+}
 function applyState(j){
   const d=JSON.parse(j);
   // записи, зроблені до цієї правки, — плаский масив обʼєктів
   if(Array.isArray(d)){ S.objs=d; return; }
   S.objs=d.objs||[]; S.ghosts=d.ghosts||[];
+  // Прибраний підпис міста теж крок історії: інакше Delete по назві був
+  // незворотним, а виглядав як звичайне видалення.
+  if(d.hideCity) S.hideCity=d.hideCity.slice();
+  S.selCity=null;
 }
 function snapshot(){
   touch();
@@ -2590,7 +2645,8 @@ function restore(){
       if(d.style)S.style=fillDefaults(d.style,STYLE_DEFAULT);
       // Старі карти цього поля не мають — режим показу лишається вимкненим.
       S.corridors=Object.assign({on:false,km:120},d.corridors||{});
-      CORR.sig=null;
+      S.hideCity=Array.isArray(d.hideCity)?d.hideCity.slice():[];
+      S.selCity=null; CORR.sig=null;
       if(d.legend)S.legend=d.legend;
       if(d.brand)S.brand=d.brand;
       if(d.footer)S.footer=d.footer;
@@ -2790,9 +2846,19 @@ cv.addEventListener('pointerdown',e=>{
       refresh();return;
     }
   }
+  // Підпис міста. Перевіряємо ПІСЛЯ обʼєктів і підказок: назва — частина
+  // підкладки, і перехоплювати нею клік по намальованому не можна.
+  if(S.tool==='select'&&!hit(sx,sy)&&!ghostAt(sx,sy)){
+    const cb=cityAt(sx,sy);
+    if(cb){
+      S.sel=null;S.selMore=[];S.selCity=cb.n;
+      refresh();draw();return;
+    }
+  }
   // вибір
   const h=hit(sx,sy);
   if(!h){
+    S.selCity=null;
     // Порожнє місце: ліва кнопка веде карту, як у будь-якій карті. Раніше
     // вона тягла рамку вибору, і оператор не міг посунути карту взагалі —
     // панорама була тільки на пробіл, про який ніхто не здогадується.
@@ -2809,7 +2875,7 @@ cv.addEventListener('pointerdown',e=>{
     else if(S.sel){S.selMore.push(S.sel);S.sel=h.o;}
     else S.sel=h.o;
   }else if(!(S.sel===h.o||S.selMore.includes(h.o))){
-    S.sel=h.o;S.selMore=[];
+    S.sel=h.o;S.selMore=[];S.selCity=null;
   }
   snapshot();
   drag={h,sx,sy,orig:JSON.parse(JSON.stringify(h.o)),
@@ -3156,7 +3222,27 @@ function selectAll(){
   S.sel=got[0]||null;S.selMore=got.slice(1);
   toast(`вибрано: ${got.length}`);refresh();
 }
+// Перелік прибраних підписів. Без нього прибирання незворотне на око:
+// оператор не памʼятає, що саме сховав три кроки тому.
+function hiddenCityList(){
+  const list=S.hideCity||[];
+  if(!list.length) return '';
+  const rows=list.map(n=>
+    `<div style="display:flex;gap:6px;align-items:center;margin:2px 0">`
+    +`<span style="flex:1;font-size:12px">${esc(n)}</span>`
+    +`<button data-city="${esc(n)}" style="padding:2px 8px">повернути</button></div>`).join('');
+  return `<label style="margin-top:10px">Прибрані підписи (${list.length})</label>`
+    +rows+'<button data-act="cityAll" style="margin-top:6px">Повернути всі</button>';
+}
+function wireHiddenCities(p){
+  p.querySelectorAll('[data-city]').forEach(b=>b.onclick=()=>{
+    showCity(b.dataset.city); toast('підпис повернуто');});
+  p.querySelectorAll('[data-act="cityAll"]').forEach(b=>b.onclick=()=>{
+    snapshot(); S.hideCity=[]; refresh(); toast('усі підписи повернуто');});
+}
 function delSel(){
+  // Вибрано підпис міста — прибираємо його, а не обʼєкти.
+  if(S.selCity){ hideCity(S.selCity); toast('підпис прибрано'); return; }
   const all=[S.sel,...S.selMore].filter(Boolean);
   if(!all.length)return;
   snapshot();S.objs=S.objs.filter(o=>!all.includes(o));
@@ -3263,6 +3349,19 @@ function refresh(){
   renderCorr();
   // властивості
   const p=document.getElementById('props'), o=S.sel;
+  // Вибрано підпис міста — панель про нього, а не про обʼєкти.
+  if(S.selCity&&!o){
+    p.innerHTML=`<label>Місто</label><div style="font-size:13px;margin:2px 0 8px">`
+      +`${esc(S.selCity)}</div>`
+      +'<button data-act="cityHide">Прибрати цей підпис</button>'
+      +'<div class="hint">Підпис зникне з екрана і з експорту. Повернути можна '
+      +'нижче, у переліку прибраних. Клавіша Delete робить те саме.</div>'
+      +hiddenCityList();
+    p.querySelectorAll('[data-act="cityHide"]').forEach(b=>b.onclick=()=>{
+      hideCity(S.selCity); toast('підпис прибрано');});
+    wireHiddenCities(p);
+    return;
+  }
   if(!o&&!S.objs.length){
     // Порожня карта — не місце для переліку модифікаторів: спершу треба
     // сказати, з чого взагалі почати.
@@ -3272,12 +3371,16 @@ function refresh(){
       +'3. «Покласти збиття / ППО» кладе позначки тієї ночі.<br>'
       +'4. «Кадр і експорт» — рамка, PNG або SVG.<br><br>'
       +'Клавіші й підказки — кнопка <kbd>?</kbd> угорі праворуч.</div>';
-  }else if(!o){p.innerHTML='<div class="hint">Нічого не вибрано.<br>'
+  }else if(!o){
+    p.innerHTML='<div class="hint">Нічого не вибрано.<br>'
     +'Клік — вибір, Shift+клік — додати до вибору.<br>'
     +'Тягнути по порожньому — панорама (також пробіл і середня кнопка), '
     +'Shift+тягнути — рамка вибору, коліщатко — масштаб.<br>'
     +'Маршрут і зона: клік-клік ставить вузли, або натиснув і повів — '
-    +'лінія малюється одним рухом.</div>';}
+    +'лінія малюється одним рухом.<br>'
+    +'Клік по назві міста вибирає її — Delete прибирає підпис.</div>'
+    +hiddenCityList();
+    wireHiddenCities(p);}
   else if(o.kind==='route'){
     p.innerHTML=field('Кількість ліній у пучку',o.count,'count','type=number min=1 max=40')
       +field('Розкид пучка',o.spread,'spread','type=number min=0 max=60')
@@ -3509,7 +3612,7 @@ document.getElementById('fit').onclick=fit;
 function mapPayload(){
   return {title:S.title,sub:S.sub,objs:S.objs,view:S.view,
           frame:S.frame,aspect:S.aspect,types:TYPES,zones:ZONES,
-          corridors:S.corridors,
+          corridors:S.corridors, hideCity:S.hideCity,
           style:S.style,legend:S.legend,brand:S.brand,
           footer:S.footer,watermark:S.watermark};
 }
@@ -3571,7 +3674,8 @@ function applyMap(d){
   ZONES=mergeZones(d.zones);rezone();
   if(d.style)S.style=fillDefaults(d.style,STYLE_DEFAULT);
   S.corridors=Object.assign({on:false,km:120},d.corridors||{});
-  CORR.sig=null;
+  S.hideCity=Array.isArray(d.hideCity)?d.hideCity.slice():[];
+  S.selCity=null; CORR.sig=null;
   if(d.legend)S.legend=d.legend;
   if(d.brand)S.brand=d.brand;
   if(d.footer)S.footer=d.footer;
@@ -4531,6 +4635,7 @@ const HELP=[
     ['Alt+клік по лінії','вставити вузол; Alt по вузлу — прибрати'],
     ['права кнопка','контекстне меню обʼєкта'],
     ['подвійний клік по порожньому','наблизити'],
+    ['клік по назві міста','вибрати підпис; Del прибирає його з карти'],
   ]],
   ['Клавіші',[
     ['Ctrl+Z / Ctrl+Shift+Z','скасувати / повторити'],
@@ -4542,7 +4647,7 @@ const HELP=[
     ['+ / −','масштаб'],
     ['Enter','завершити маршрут або зону'],
     ['Esc','скасувати чернетку → зняти вибір → «вибір»'],
-    ['Del','видалити вибране'],
+    ['Del','видалити вибране; на вибраній назві міста — прибрати підпис'],
     ['стрілки','точне доведення (з Shift — крупніший крок)'],
     ['?','ця довідка'],
   ]],

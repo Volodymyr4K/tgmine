@@ -231,6 +231,13 @@ button.primary{background:rgba(255,62,165,.16);border-color:rgba(255,62,165,.45)
           <option value="3">лише впевнені</option>
         </select>
         <button id="ghostAll" style="margin-top:6px" title="Бере в роботу всі показані підказки одразу — те саме, що клікнути по кожній">Узяти всі підказки в роботу</button>
+        <label style="margin-top:6px">Групувати маршрути, км</label>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input id="groupKm" type="number" min="10" max="300" step="10" value="120"
+                 style="width:70px" title="Наскільки близько мають бути кінці двох маршрутів, щоб вважати їх одним коридором. 120 км узято з даних: ближче лежать приблизно 5% пар, далі розподіл стрибає">
+          <button id="groupRoutes" style="flex:1"
+                  title="Зводить маршрути, що йдуть одним коридором, в один пучок із лічильником">Звести в коридори</button>
+        </div>
         <button id="strikes" style="margin-top:6px" title="Позначки тієї ночі; повторний клік замінює попередній шар">Покласти збиття / ППО</button>
         <div class="hint">Шляхи, зшиті з наших повідомлень, лягають напівпрозорим
           шаром. Клік по ньому переводить шлях у редагований маршрут, а кнопка
@@ -4130,6 +4137,112 @@ document.getElementById('strikes').onclick=()=>{
     'python3 mapper/mknight.py raid_<дата>.json'));return;}
   putStrikes();
 };
+// ==========================================================================
+// ЗВЕДЕННЯ МАРШРУТІВ У КОРИДОРИ
+// ==========================================================================
+// Навіщо. Ніч дає два-три десятки шляхів, і половина з них іде тим самим
+// коридором: на Крим із півночі, на Крим із моря. На карті це не читається
+// як «десять апаратів одним коридором», а виглядає кашею з ліній, що
+// перетинаються. Пучок у нас уже є (`count` ліній із розкидом `spread`) —
+// лишалось зводити в нього те, що й так одне й те саме.
+//
+// ЩО НЕ РОБИТЬСЯ. Шляхи не усереднюються й не згинаються одне до одного
+// (edge bundling). Намальована лінія має лишатись лінією, яку СПОСТЕРІГАЛИ:
+// середній шлях — це шлях, якого не було, а на карті ударів вигадана
+// геометрія читається як факт. Тому представник коридору — медоїда, тобто
+// один зі справжніх шляхів групи, найближчий до решти.
+function kmPt(a,b){
+  const R=6371, r=Math.PI/180;
+  const dla=(b[0]-a[0])*r, dlo=(b[1]-a[1])*r;
+  const h=Math.sin(dla/2)**2+Math.cos(a[0]*r)*Math.cos(b[0]*r)*Math.sin(dlo/2)**2;
+  return 2*R*Math.asin(Math.min(1,Math.sqrt(h)));
+}
+// Відстань між маршрутами — гірший із двох кінців. Порівнювати середину
+// немає сенсу: два шляхи з тими самими кінцями це один коридор, як би він
+// не вигинався посередині.
+function routeGap(a,b){
+  const A=a.pts,B=b.pts;
+  return Math.max(kmPt(A[0],B[0]), kmPt(A[A.length-1],B[B.length-1]));
+}
+// Кластеризація від СІМʼЯ, а не одинарним звʼязком. Одинарний звʼязок тут
+// дав би ланцюгове злипання — рівно те, на чому вже наступали при
+// кластеризації подій: сусід сусіда через півкраїни опинявся в одній групі.
+// Прив'язка до сімʼя тримає діаметр коридору в межах 2R.
+function corridorGroups(routes,km){
+  const used=new Set(), out=[];
+  for(const seed of routes){
+    if(used.has(seed)) continue;
+    used.add(seed);
+    const grp=[seed];
+    for(const o of routes){
+      if(used.has(o)||o.type!==seed.type) continue;
+      if(routeGap(seed,o)<=km){ used.add(o); grp.push(o); }
+    }
+    out.push(grp);
+  }
+  return out;
+}
+function medoid(grp){
+  let best=grp[0], bestSum=Infinity;
+  for(const a of grp){
+    let sum=0;
+    for(const b of grp) sum+=routeGap(a,b);
+    if(sum<bestSum){ bestSum=sum; best=a; }
+  }
+  return best;
+}
+// Поріг за замовчуванням узято з ДАНИХ, а не з голови. Розподіл попарних
+// відстаней між кінцями маршрутів на трьох ночах (105, 276 і 36 пар):
+//
+//   мінімум   0-82 км
+//   5%        118-139
+//   10%       155-196
+//   медіана   543-579
+//
+// Тобто справді близькі пари — це вузький хвіст до ~150 км, далі розрив.
+// 120 км ловить той хвіст і не чіпає решту. Шістдесят, з яких я почав, не
+// зводили НІЧОГО на всіх трьох ночах: координати це центри населених
+// пунктів, і два шляхи одним коридором легко розходяться кінцями на сотню
+// кілометрів.
+document.getElementById('groupRoutes').onclick=()=>{
+  const km=Math.max(1,+document.getElementById('groupKm').value||120);
+  // Є вибір — працюємо з ним, нема — з усіма маршрутами. Так само поводяться
+  // решта дій над обʼєктами, і окремої кнопки «для вибраних» не потрібно.
+  const picked=S.sel?[S.sel,...S.selMore]:null;
+  const routes=(picked||S.objs).filter(o=>o.kind==='route');
+  if(routes.length<2){ toast('нема чого зводити — маршрутів менше двох'); return; }
+  const groups=corridorGroups(routes,km);
+  if(groups.length===routes.length){
+    toast(`жоден коридор не збігся ближче за ${km} км — спробуй більший радіус`);
+    return;
+  }
+  snapshot();
+  const merged=new Map();          // старий обʼєкт -> новий (або null, якщо зник)
+  for(const grp of groups){
+    if(grp.length===1){ merged.set(grp[0],grp[0]); continue; }
+    const rep=medoid(grp);
+    const o=JSON.parse(JSON.stringify(rep));
+    // Лічильник пучка — сума, а не кількість шляхів: маршрут уже міг бути
+    // зведеним, і тоді в ньому лежить не одна нитка.
+    o.count=Math.min(40, grp.reduce((n,g)=>n+(g.count||1),0));
+    // Розкид росте з розміром коридору, інакше десять ниток лягають одна на
+    // одну й пучок читається як одна товста лінія.
+    o.spread=Math.min(60, Math.max(...grp.map(g=>g.spread||0)) + 4*(grp.length-1));
+    const t0=grp.map(g=>g.t0).filter(Boolean).sort();
+    const t1=grp.map(g=>g.t1).filter(Boolean).sort();
+    if(t0.length) o.t0=t0[0];
+    if(t1.length) o.t1=t1[t1.length-1];
+    for(const g of grp) merged.set(g, g===rep?o:null);
+  }
+  // Порядок збережено: новий пучок стає на місце свого представника.
+  S.objs=S.objs.map(o=>merged.has(o)?merged.get(o):o).filter(Boolean);
+  S.sel=null; S.selMore=[];
+  const gone=routes.length-groups.length;
+  toast(`зведено в коридори: ${routes.length} → ${groups.length}`
+        + ` (злилось ${gone}, радіус ${km} км)`);
+  refresh();
+};
+
 // Гуртом. Клікати по сорока підказках по одній — це не робота, це рутина, і
 // на середній ночі їх саме стільки. Беремо ті, що ЗАРАЗ показані: фільтр
 // «які підказки показувати» оператор виставив свідомо, і тягнути в роботу

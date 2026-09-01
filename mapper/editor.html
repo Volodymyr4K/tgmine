@@ -231,12 +231,11 @@ button.primary{background:rgba(255,62,165,.16);border-color:rgba(255,62,165,.45)
           <option value="3">лише впевнені</option>
         </select>
         <button id="ghostAll" style="margin-top:6px" title="Бере в роботу всі показані підказки одразу — те саме, що клікнути по кожній">Узяти всі підказки в роботу</button>
-        <label style="margin-top:6px">Групувати маршрути, км</label>
-        <div style="display:flex;gap:6px;align-items:center">
+        <div style="display:flex;gap:6px;align-items:center;margin-top:6px">
+          <button id="corrToggle" style="flex:1"
+                  title="ПОКАЗ, а не правка: маршрути лишаються на місці, просто малюються зведеними. Вимикається тим самим натиском">Коридори: вимкнено</button>
           <input id="groupKm" type="number" min="10" max="300" step="10" value="120"
-                 style="width:70px" title="Наскільки близько мають бути кінці двох маршрутів, щоб вважати їх одним коридором. 120 км узято з даних: ближче лежать приблизно 5% пар, далі розподіл стрибає">
-          <button id="groupRoutes" style="flex:1"
-                  title="Зводить маршрути, що йдуть одним коридором, в один пучок із лічильником">Звести в коридори</button>
+                 style="width:66px" title="Наскільки близько мають бути кінці двох маршрутів, щоб вважати їх одним коридором. 120 км узято з даних: ближче лежать приблизно 5% пар, далі розподіл стрибає">
         </div>
         <button id="strikes" style="margin-top:6px" title="Позначки тієї ночі; повторний клік замінює попередній шар">Покласти збиття / ППО</button>
         <div class="hint">Шляхи, зшиті з наших повідомлень, лягають напівпрозорим
@@ -554,6 +553,12 @@ const S={
   tool:'select', type:'uav', zone:'occupied',
   frame:null, aspect:0, tpl:null, targetsOn:false, ruler:null, bias:0, ready:false,
   spacePan:false, ghostMin:2,
+  // Зведення маршрутів у коридори — РЕЖИМ ПОКАЗУ, вимкнений за замовчуванням.
+  // Обʼєкти від нього не змінюються, тому вмикання й вимикання нічого не
+  // коштує й нічого не втрачає. Перший підхід був незворотною кнопкою, яка
+  // зливала обʼєкти назавжди — повернути можна було лише через undo, і
+  // збережена карта вже їхала злитою.
+  corridors:{on:false, km:120},
   // СТИЛЬ КАРТИ. Тут те, що раніше стояло числами просто в коді: яскравість
   // підкладки, сила нічних вогнів, вигляд влучання, пускової, підказок і
   // плашок. Оператор міняє під конкретну карту, набір їде у файлі разом
@@ -2203,9 +2208,13 @@ function draw(){
     }
     ctx.restore();
   }
-  for(const o of S.objs){
+  // drawList() — це S.objs, поки режим коридорів вимкнений, і зведений
+  // список, коли ввімкнений. Підміна тут, а не в S.objs: обʼєкти не мають
+  // мінятись від того, як їх показують.
+  for(const o of drawList()){
     if(!objVisible(o)) continue;
-    drawObj(o,ctx,o===S.sel||S.selMore.includes(o));
+    const src=o.__src||o;
+    drawObj(o,ctx,src===S.sel||S.selMore.includes(src));
   }
   // Підсвітка обʼєкта, на рядок якого навели в списку. Тільки на екрані:
   // в експорт вона не потрапляє, бо там свій цикл малювання.
@@ -2555,6 +2564,9 @@ function restore(){
       if(d.types){TYPES=d.types;retype();}
       ZONES=mergeZones(d.zones);rezone();
       if(d.style)S.style=fillDefaults(d.style,STYLE_DEFAULT);
+      // Старі карти цього поля не мають — режим показу лишається вимкненим.
+      S.corridors=Object.assign({on:false,km:120},d.corridors||{});
+      CORR.sig=null;
       if(d.legend)S.legend=d.legend;
       if(d.brand)S.brand=d.brand;
       if(d.footer)S.footer=d.footer;
@@ -2580,9 +2592,13 @@ function ghostAt(sx,sy){
   return null;
 }
 function hit(sx,sy){
-  // перевіряємо згори вниз: останній намальований — верхній
-  for(let i=S.objs.length-1;i>=0;i--){
-    const o=S.objs[i];
+  // Перебираємо те, що НАМАЛЬОВАНО, а не те, що лежить у S.objs: у режимі
+  // коридорів немедоїдні маршрути не видно, і хапати їх курсором не можна.
+  // Повертаємо при цьому справжній обʼєкт (`__src`), інакше правка йшла б у
+  // тимчасову копію й зникала на першому перемальовуванні.
+  const list=drawList();
+  for(let i=list.length-1;i>=0;i--){
+    const o=list[i].__src||list[i];
     // Схований не малюється, тож і не вибирається. Замкнений видно, але він
     // не чіпляється курсором: інакше велика зона під усім кадром перехоплює
     // кожен клік, і дістати обʼєкт під нею неможливо.
@@ -3180,6 +3196,7 @@ function field(label,val,on,attrs=''){
   return `<label>${label}</label><input data-k="${on}" value="${val??''}" ${attrs}>`;
 }
 function refresh(){
+  renderCorr();
   // властивості
   const p=document.getElementById('props'), o=S.sel;
   if(!o&&!S.objs.length){
@@ -3426,6 +3443,7 @@ document.getElementById('fit').onclick=fit;
 function mapPayload(){
   return {title:S.title,sub:S.sub,objs:S.objs,view:S.view,
           frame:S.frame,aspect:S.aspect,types:TYPES,zones:ZONES,
+          corridors:S.corridors,
           style:S.style,legend:S.legend,brand:S.brand,
           footer:S.footer,watermark:S.watermark};
 }
@@ -3486,6 +3504,8 @@ function applyMap(d){
   if(d.types){TYPES=d.types;retype();}
   ZONES=mergeZones(d.zones);rezone();
   if(d.style)S.style=fillDefaults(d.style,STYLE_DEFAULT);
+  S.corridors=Object.assign({on:false,km:120},d.corridors||{});
+  CORR.sig=null;
   if(d.legend)S.legend=d.legend;
   if(d.brand)S.brand=d.brand;
   if(d.footer)S.footer=d.footer;
@@ -3583,7 +3603,7 @@ document.getElementById('export').onclick=async ()=>{
   drawBase(g);
   // сховані обʼєкти (око у списку шарів) не малюються ні на екрані, ні у
   // SVG — тут їх забули відсіяти, і на PNG вони поверталися
-  for(const o of S.objs){ if(objVisible(o)) drawObj(o,g,false); }
+  for(const o of drawList()){ if(objVisible(o)) drawObj(o,g,false); }
   // легенда, шапка й лінійка кладуться відносно РАМКИ
   g.save();g.translate(f.x,f.y);
   drawWatermark(g,f.w,f.h);
@@ -3693,7 +3713,7 @@ document.getElementById('exportSvg').onclick=async ()=>{
   if(!NOBG){ g.fillStyle=S.style.base.bg||'#04070c'; g.fillRect(f.x,f.y,f.w,f.h); }
   seedChrome();
   drawBase(g);
-  for(const o of S.objs){ if(objVisible(o)) drawObj(o,g,false); }
+  for(const o of drawList()){ if(objVisible(o)) drawObj(o,g,false); }
   g.save();g.translate(f.x,f.y);
   drawWatermark(g,f.w,f.h);
   if(S.layers.legend) drawLegend(g,f.w,f.h);
@@ -4204,43 +4224,73 @@ function medoid(grp){
 // зводили НІЧОГО на всіх трьох ночах: координати це центри населених
 // пунктів, і два шляхи одним коридором легко розходяться кінцями на сотню
 // кілометрів.
-document.getElementById('groupRoutes').onclick=()=>{
-  const km=Math.max(1,+document.getElementById('groupKm').value||120);
-  // Є вибір — працюємо з ним, нема — з усіма маршрутами. Так само поводяться
-  // решта дій над обʼєктами, і окремої кнопки «для вибраних» не потрібно.
-  const picked=S.sel?[S.sel,...S.selMore]:null;
-  const routes=(picked||S.objs).filter(o=>o.kind==='route');
-  if(routes.length<2){ toast('нема чого зводити — маршрутів менше двох'); return; }
-  const groups=corridorGroups(routes,km);
-  if(groups.length===routes.length){
-    toast(`жоден коридор не збігся ближче за ${km} км — спробуй більший радіус`);
-    return;
-  }
-  snapshot();
-  const merged=new Map();          // старий обʼєкт -> новий (або null, якщо зник)
+// Побудова ПОКАЗУ: обʼєкти не змінюються, повертається інший список для
+// малювання. Немедоїдні учасники коридору просто не потрапляють у список, а
+// медоїда підмінюється копією з більшим пучком. Копія несе `__src` —
+// посилання на справжній обʼєкт, щоб клік вибирав його, а не тимчасовий.
+const CORR={sig:null, list:null};
+function corridorSig(){
+  return S.corridors.km+'|'+S.objs.map(o=>o.kind!=='route'?'x'
+    :[o.type,o.count,o.spread,o.pts[0],o.pts[o.pts.length-1]].join(',')).join(';');
+}
+function drawList(){
+  if(!S.corridors.on) return S.objs;
+  const sig=corridorSig();
+  if(CORR.sig===sig) return CORR.list;
+  const routes=S.objs.filter(o=>o.kind==='route');
+  const groups=corridorGroups(routes,S.corridors.km);
+  const swap=new Map();
   for(const grp of groups){
-    if(grp.length===1){ merged.set(grp[0],grp[0]); continue; }
+    if(grp.length===1) continue;
     const rep=medoid(grp);
-    const o=JSON.parse(JSON.stringify(rep));
-    // Лічильник пучка — сума, а не кількість шляхів: маршрут уже міг бути
-    // зведеним, і тоді в ньому лежить не одна нитка.
+    const o=Object.assign({},rep);
+    o.__src=rep;
+    // Лічильник пучка — сума, а не кількість шляхів: маршрут міг уже нести
+    // не одну нитку.
     o.count=Math.min(40, grp.reduce((n,g)=>n+(g.count||1),0));
-    // Розкид росте з розміром коридору, інакше десять ниток лягають одна на
-    // одну й пучок читається як одна товста лінія.
-    o.spread=Math.min(60, Math.max(...grp.map(g=>g.spread||0)) + 4*(grp.length-1));
+    // Розкид росте з розміром коридору, інакше нитки лягають одна на одну
+    // й пучок читається як одна товста лінія.
+    o.spread=Math.min(60, Math.max(...grp.map(g=>g.spread||0))+4*(grp.length-1));
     const t0=grp.map(g=>g.t0).filter(Boolean).sort();
     const t1=grp.map(g=>g.t1).filter(Boolean).sort();
     if(t0.length) o.t0=t0[0];
     if(t1.length) o.t1=t1[t1.length-1];
-    for(const g of grp) merged.set(g, g===rep?o:null);
+    for(const g of grp) swap.set(g, g===rep?o:null);
   }
-  // Порядок збережено: новий пучок стає на місце свого представника.
-  S.objs=S.objs.map(o=>merged.has(o)?merged.get(o):o).filter(Boolean);
+  CORR.sig=sig;
+  CORR.list=S.objs.map(o=>swap.has(o)?swap.get(o):o).filter(Boolean);
+  return CORR.list;
+}
+// Скільки коридорів вийде — для напису на кнопці, без побудови списку.
+function corridorCount(){
+  const routes=S.objs.filter(o=>o.kind==='route');
+  return {маршрутів:routes.length, коридорів:corridorGroups(routes,S.corridors.km).length};
+}
+function renderCorr(){
+  const b=document.getElementById('corrToggle');
+  if(!b) return;
+  if(!S.corridors.on){ b.textContent='Коридори: вимкнено'; b.classList.remove('on'); return; }
+  const c=corridorCount();
+  b.textContent=`Коридори: ${c.маршрутів} → ${c.коридорів}`;
+  b.classList.add('on');
+}
+document.getElementById('corrToggle').onclick=()=>{
+  S.corridors.on=!S.corridors.on;
+  CORR.sig=null;
+  // Вибір знімається: у режимі коридорів немедоїдні маршрути не малюються,
+  // і виділення на невидимому обʼєкті збивало б з пантелику.
   S.sel=null; S.selMore=[];
-  const gone=routes.length-groups.length;
-  toast(`зведено в коридори: ${routes.length} → ${groups.length}`
-        + ` (злилось ${gone}, радіус ${km} км)`);
-  refresh();
+  touch(); renderCorr(); refresh();
+  if(S.corridors.on){
+    const c=corridorCount();
+    toast(c.маршрутів===c.коридорів
+      ? `нічого не зійшлось ближче за ${S.corridors.km} км — спробуй більший радіус`
+      : `коридори: ${c.маршрутів} маршрутів показані як ${c.коридорів}`);
+  } else toast('коридори вимкнено — усі маршрути окремо');
+};
+document.getElementById('groupKm').onchange=e=>{
+  S.corridors.km=Math.max(1,+e.target.value||120);
+  CORR.sig=null; touch(); renderCorr(); refresh();
 };
 
 // Гуртом. Клікати по сорока підказках по одній — це не робота, це рутина, і

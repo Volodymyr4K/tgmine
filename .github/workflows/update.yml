@@ -25,8 +25,17 @@ name: update
 # Нема `workflow_dispatch` — Worker мовчить, конвеєр живе на запобіжнику.
 on:
   schedule:
-    - cron: "0 */6 * * *"
+    # :30, а не :00 — Worker б'є рівно о годині, і збіг давав би два прогони
+    # в одну хвилину. Група concurrency їх не злила б: `cancel-in-progress:
+    # false` ставить другий у чергу, тож обидва відпрацьовують і обидва
+    # тарифікуються.
+    - cron: "30 */6 * * *"
   workflow_dispatch:          # кнопка «запустити зараз» у вкладці Actions
+    inputs:
+      trigger:
+        description: "Хто запустив: cron (Worker) чи людина"
+        required: false
+        default: "manual"
   push:
     branches: [main]
 
@@ -103,12 +112,19 @@ jobs:
       # код МІГ змінитись. Правило: додаєш тест, який залежить від газетира —
       # клади його в test_geocode/test_territory, інакше він тихо зникне з
       # швидкого набору.
+      #
+      # Умова дивиться не лише на `schedule`. Відколи розклад переїхав у Worker,
+      # регулярний тік приходить як `workflow_dispatch`, і прив'язка до
+      # `schedule` мовчки повернула повний набір на кожен годинний прогін:
+      # виміряно 133 с проти 102 с, тобто 3 білінгові хвилини замість 2 —
+      # +720 хв/міс на порожньому місці. Worker шле `trigger: cron`, кнопка в
+      # інтерфейсі лишає дефолт `manual` і повний набір.
       - name: Тести (повні)
-        if: github.event_name != 'schedule'
+        if: github.event_name != 'schedule' && github.event.inputs.trigger != 'cron'
         run: python -m unittest discover -s tests -t . -v
 
       - name: Тести (швидкі, інваріанти розбору)
-        if: github.event_name == 'schedule'
+        if: github.event_name == 'schedule' || github.event.inputs.trigger == 'cron'
         run: |
           python -m unittest -v \
             tests.test_store tests.test_extract tests.test_render \

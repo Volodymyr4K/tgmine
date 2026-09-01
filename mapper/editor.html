@@ -4089,10 +4089,12 @@ function ringDev(orig, simp){
   return worst*KM;
 }
 function ringToZone(ring, maxPts){
-  // Ціль — контур, який лягає на кордон і при цьому редагується руками.
-  // Починаємо з майже точного (200 м) і послаблюємо, поки вузлів не стане
-  // менше за стелю.
-  let eps=0.002, out=rdp(ring,eps);
+  // Точність важливіша за кількість вузлів. Стеля у 600 вузлів давала
+  // відхід до 2.5 км: на кадрі 50-60% це вже видно як зрізані закрути —
+  // «криво-косо». Тепер починаємо з 40 м і послаблюємо лише якщо контур
+  // справді величезний; тягати вузли це не заважає, бо їх видно тільки
+  // на вибраній зоні.
+  let eps=0.0004, out=rdp(ring,eps);
   while(out.length>maxPts && eps<0.2){ eps*=1.5; out=rdp(ring,eps); }
   if(out.length>2 && (out[0][0]!==out[out.length-1][0]||out[0][1]!==out[out.length-1][1]))
     out.push([ring[0][0],ring[0][1]]);
@@ -4108,7 +4110,7 @@ function addZoneUA(){
   const r=biggestRing(C.UKR);
   if(!r){toast('контуру України нема в підкладці');return;}
   snapshot();
-  const pts=ringToZone(r, 600);
+  const pts=ringToZone(r, 2400);
   const o={kind:'zone',zone:'ukraine',label:'Україна',pts};
   S.objs.push(o);S.sel=o;S.selMore=[];
   refresh();
@@ -4125,7 +4127,7 @@ function addZoneTOT(){
     const r=biggestRing(R[k]);
     if(!r) continue;
     last={kind:'zone',zone:'occupied',label:k.replace('ТОТ_',''),
-          pts:ringToZone(r, 400)};
+          pts:ringToZone(r, 1600)};
     S.objs.push(last);n++;
   }
   S.sel=last;S.selMore=[];

@@ -4166,27 +4166,27 @@ function loadNight(cb){
       `<option value="${n.date}">${n.date} — підказок ${n.routes}, позначок ${n.strikes}</option>`
     ).join('');
     sel.onchange=()=>{
-      const hadGhosts=S.ghosts.length, hadMarks=S.objs.some(fromNight);
-      // Інша доба — інша карта. Усе, що прийшло з попередньої ночі, іде геть:
-      // і позначки, і маршрути, зроблені з її підказок. Раніше йшли лише
-      // позначки (putStrikes прибирав свій шар сам), а стрілки лишались, і на
-      // карті збиралась мішанина з трьох різних ночей.
+      // ІНША ДОБА — ЧИСТИЙ АРКУШ. Лишається рівно підкладка: Україна й ТОТ.
+      // Вони не належать жодній ночі, їх обводять один раз і використовують
+      // далі. Усе решта — маршрути, позначки збиття й ППО, оперативні зони,
+      // підказки — це робота по конкретній добі, і тягти її в наступну
+      // означає збирати на карті мішанину з кількох ночей.
       //
-      // Намальоване РУКОЮ лишається: у нього нема origin, і воно не належить
-      // жодній добі. Маршрути, зроблені до цієї правки, теж без origin —
-      // прибрати їх автоматично нема за чим, доведеться руками.
+      // Раніше йшли лише позначки, а стрілки лишались назавжди; потім я
+      // прибирав ще й нічні маршрути, але автоматично докладав позначки й
+      // підказки нової доби. Тепер не докладаю нічого: що показати з нової
+      // ночі, вирішує оператор кнопками, як і першого разу.
       //
-      // Один snapshot на всю зміну, тож undo повертає й обʼєкти, і підказки.
-      const stale=S.objs.filter(fromNight);
-      if(stale.length||S.ghosts.length) snapshot();
-      if(stale.length) S.objs=S.objs.filter(o=>!fromNight(o));
-      S.ghosts=[]; S.sel=null; S.selMore=[]; CORR.sig=null;
+      // Один snapshot на всю зміну, тож undo повертає все разом.
+      const keep=S.objs.filter(isBaseZone);
+      const drop=S.objs.length-keep.length;
+      if(drop||S.ghosts.length) snapshot();
+      S.objs=keep; S.ghosts=[]; S.sel=null; S.selMore=[]; CORR.sig=null;
       loadNight(ok=>{
         if(!ok){toast('ніч не завантажилась');refresh();return;}
-        toast('ніч '+sel.value+(stale.length?` · прибрано з попередньої: ${stale.length}`:''));
-        if(hadMarks) putStrikes();
-        if(hadGhosts) document.getElementById('ghost').click();
-        else refresh();
+        toast('ніч '+sel.value+(drop?` · прибрано з попередньої: ${drop}`:'')
+              +(keep.length?` · підкладка лишилась`:''));
+        refresh();
       });
     };
   }catch(e){ /* локальна тека без nights/ — лишається night.js */ }

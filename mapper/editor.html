@@ -230,9 +230,11 @@ button.primary{background:rgba(255,62,165,.16);border-color:rgba(255,62,165,.45)
           <option value="2" selected>без слабких</option>
           <option value="3">лише впевнені</option>
         </select>
+        <button id="ghostAll" style="margin-top:6px" title="Бере в роботу всі показані підказки одразу — те саме, що клікнути по кожній">Узяти всі підказки в роботу</button>
         <button id="strikes" style="margin-top:6px" title="Позначки тієї ночі; повторний клік замінює попередній шар">Покласти збиття / ППО</button>
         <div class="hint">Шляхи, зшиті з наших повідомлень, лягають напівпрозорим
-          шаром. Клік по ньому переводить шлях у редагований маршрут.</div>
+          шаром. Клік по ньому переводить шлях у редагований маршрут, а кнопка
+          вище — усі показані разом, кольором обраного типу.</div>
       </div>
     </section>
 
@@ -655,6 +657,16 @@ function GHOST_STYLE(conf){
 function ghostVisible(g){
   const lvl={strong:3,ok:2,weak:1}[g.conf||'ok'];
   return lvl>=S.ghostMin;
+}
+// Підказка -> редагований маршрут. Одна функція на два виклики: одиночний
+// клік по шляху й кнопка «узяти всі». Якби перетворення жило у двох місцях,
+// поле, додане в одному, тихо не потрапляло б у друге.
+function ghostToRoute(g){
+  const t=TYPE[S.type]||TYPES[0];
+  return {kind:'route',type:t.id,count:Math.max(t.count||1,g.claims||1),
+          spread:t.spread||12,width:t.width||1.6,arrows:t.arrows||0,
+          dash:!!t.dash,tension:1,
+          pts:g.pts.map(p=>[p[0],p[1]]),t0:g.t0,t1:g.t1};
 }
 const TILE={cache:new Map(), noLocal:new Set(), local:{}, redraw:null};
 // Растрових підкладок кілька. Джерела ті самі, що вже в проєкті (EOX і
@@ -2487,9 +2499,22 @@ function imgToData(img){
 // ==========================================================================
 // ВЗАЄМОДІЯ
 // ==========================================================================
+// Крок історії — це обʼєкти РАЗОМ із підказками. Раніше зберігались лише
+// обʼєкти, тому взяття підказки в роботу було незворотним: undo прибирав
+// створений маршрут, а підказка, з якої він зробився, не поверталась —
+// зникала з обох списків. З одиночним кліком це коштувало одну підказку й
+// губилось у шумі; з кнопкою «узяти всі» один випадковий клік зносив би
+// всю ніч.
+function snapState(){ return JSON.stringify({objs:S.objs, ghosts:S.ghosts}); }
+function applyState(j){
+  const d=JSON.parse(j);
+  // записи, зроблені до цієї правки, — плаский масив обʼєктів
+  if(Array.isArray(d)){ S.objs=d; return; }
+  S.objs=d.objs||[]; S.ghosts=d.ghosts||[];
+}
 function snapshot(){
   touch();
-  S.undo.push(JSON.stringify(S.objs));
+  S.undo.push(snapState());
   if(S.undo.length>80) S.undo.shift();
   S.redo.length=0;                       // нова дія обриває гілку повтору
   autosave();
@@ -2711,11 +2736,7 @@ cv.addEventListener('pointerdown',e=>{
     const g=ghostAt(sx,sy);
     if(g){
       snapshot();
-      const t=TYPE[S.type]||TYPES[0];
-      const o={kind:'route',type:t.id,count:Math.max(t.count||1,g.claims||1),
-               spread:t.spread||12,width:t.width||1.6,arrows:t.arrows||0,
-               dash:!!t.dash,tension:1,
-               pts:g.pts.map(p=>[p[0],p[1]]),t0:g.t0,t1:g.t1};
+      const o=ghostToRoute(g);
       S.objs.push(o);S.sel=o;S.selMore=[];
       S.ghosts=S.ghosts.filter(x=>x!==g);
       toast('підказку взято в роботу — далі веди сам');
@@ -3028,14 +3049,14 @@ function finishRoute(){
 }
 function undo(){
   if(!S.undo.length){toast('скасовувати нема чого');return;}
-  S.redo.push(JSON.stringify(S.objs));
-  S.objs=JSON.parse(S.undo.pop());S.sel=null;S.selMore=[];autosave();
+  S.redo.push(snapState());
+  applyState(S.undo.pop());S.sel=null;S.selMore=[];autosave();
   toast('скасовано');refresh();
 }
 function redo(){
   if(!S.redo.length){toast('повторювати нема чого');return;}
-  S.undo.push(JSON.stringify(S.objs));
-  S.objs=JSON.parse(S.redo.pop());S.sel=null;S.selMore=[];autosave();
+  S.undo.push(snapState());
+  applyState(S.redo.pop());S.sel=null;S.selMore=[];autosave();
   toast('повторено');refresh();
 }
 function duplicate(){
@@ -4109,6 +4130,33 @@ document.getElementById('strikes').onclick=()=>{
     'python3 mapper/mknight.py raid_<дата>.json'));return;}
   putStrikes();
 };
+// Гуртом. Клікати по сорока підказках по одній — це не робота, це рутина, і
+// на середній ночі їх саме стільки. Беремо ті, що ЗАРАЗ показані: фільтр
+// «які підказки показувати» оператор виставив свідомо, і тягнути в роботу
+// сховані слабкі означало б зробити за нього вибір, якого він не робив.
+document.getElementById('ghostAll').onclick=()=>{
+  if(!S.ghosts.length){
+    toast('підказок нема — спершу «Показати маршрути ночі»');
+    return;
+  }
+  const take=S.ghosts.filter(ghostVisible);
+  if(!take.length){
+    toast('усі підказки сховані фільтром — послаб «які показувати»');
+    return;
+  }
+  const hidden=S.ghosts.length-take.length;
+  snapshot();                      // один знімок на всю пачку, не на кожну
+  for(const g of take) S.objs.push(ghostToRoute(g));
+  S.ghosts=S.ghosts.filter(g=>!ghostVisible(g));
+  // Виділяти сорок щойно створених маршрутів немає сенсу: будь-яке
+  // перетягування зсунуло б усі разом. Знімаємо вибір.
+  S.sel=null; S.selMore=[];
+  toast(`узято в роботу: ${take.length}`
+        + (hidden?`, сховано фільтром: ${hidden}`:'')
+        + ` · тип «${(TYPE[S.type]||TYPES[0]).name}»`);
+  refresh();
+};
+
 document.getElementById('ghost').onclick=()=>{
   if(!window.NIGHT){
     loadNight(ok=>{

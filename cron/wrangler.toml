@@ -5,6 +5,13 @@ name = "tgmine-cron"
 main = "src/index.js"
 compatibility_date = "2026-07-24"
 
+# Публічної адреси у цього Worker бути не повинно. Він має лише обробник
+# `scheduled`, тож workers.dev-URL віддає 500 (error code 1101) — але це все
+# одно зайва поверхня на скрипті, який тримає токен GitHub із правом запису.
+# Без цих двох рядків wrangler вмикає і те, і те за замовчуванням.
+workers_dev = false
+preview_urls = false
+
 # Інтервал — єдине місце, де він задається. У workflow лишається `schedule`
 # раз на 6 годин як запобіжник на випадок смерті цього Worker.
 #

@@ -33,3 +33,6 @@ mapper/*.png
 mapper/night.js
 # проміжний файл збірки підкладки: редактор читає basemap.js, а не .json
 mapper/basemap.json
+
+# Локальний кеш і стан wrangler — створюється кожним запуском, у репо не потрібен.
+.wrangler/

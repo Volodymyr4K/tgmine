@@ -1598,6 +1598,24 @@ function drawMark(o,c,sel,ST){
 // експорт растровий, у файл потрапляє те, що намальовано. У SVG знак
 // лишається ТЕКСТОМ і візьме шрифт того, хто відкриє файл, тож для вектора
 // надійніше лишати кільце. Тому порожньо за замовчуванням.
+// Набір знаків. Не «будь-який емодзі», а короткий перелік під цю карту:
+// оператор має тицьнути, а не згадувати, як викликати панель емодзі й що
+// саме шукати. Порожнє значення — намальоване кільце, як було.
+const GLYPHS=['🛡️','🎯','💥','🔥','🚀','💣','✈️','🚁','🛰️','👁️','📍','⛽','🏭','⚡'];
+// Вибирач: перша клітинка — кільце, далі знаки. Той самий вигляд і для
+// конкретної позначки, і для стилю категорії, щоб не вчити двох різних.
+function glyphPicker(cur,attr){
+  const cell=(v,txt,title)=>
+    `<button ${attr}="${esc(v)}" title="${esc(title)}" style="`
+    +`width:32px;height:32px;padding:0;font-size:16px;line-height:1;`
+    +`border-radius:7px;cursor:pointer;`
+    +`border:1px solid ${v===(cur||'')?'rgba(255,62,165,.9)':'var(--line)'};`
+    +`background:${v===(cur||'')?'rgba(255,62,165,.16)':'transparent'}">${txt}</button>`;
+  return '<div style="display:flex;flex-wrap:wrap;gap:5px;margin:4px 0 2px">'
+    + cell('','◯','кільце, як було')
+    + GLYPHS.map(g=>cell(g,g,g)).join('')
+    + '</div>';
+}
 function markGlyph(o,c,s,r,ST){
   const g=(o.glyph!==undefined?o.glyph:(ST&&ST.glyph))||'';
   if(!g) return;
@@ -3495,8 +3513,8 @@ function refresh(){
       +'</select>'
       +field('Підпис',o.label||'','label')
       +field('Розмір',o.size,'size','type=number min=4 max=30')
-      +field('Знак (емодзі, порожньо — кільце)',
-             o.glyph===undefined?'':o.glyph,'glyph')
+      +'<label>Знак</label>'
+      +glyphPicker(o.glyph===undefined?'':o.glyph,'data-glyph')
       +`<button data-act="pin" style="margin-top:6px">${
          o.pinLabel?'Ховати підпис, поки не вибрано':'Показувати підпис завжди'}</button>`
       +'<button data-act="lab" style="margin-top:6px">Скинути положення підпису</button>'
@@ -3565,6 +3583,9 @@ function refresh(){
     const b=p.querySelector(`[data-act="${k}"]`);
     if(b) b.onclick=()=>{snapshot();S.sel[k]=!S.sel[k];refresh();};
   }
+  p.querySelectorAll('[data-glyph]').forEach(b=>b.onclick=()=>{
+    snapshot(); S.sel.glyph=b.dataset.glyph; refresh(); draw();
+  });
   const reset=p.querySelector('[data-act="lab"]');
   if(reset) reset.onclick=()=>{snapshot();delete S.sel.lab;draw();};
   const clr=p.querySelector('[data-k="col"]');
@@ -4169,11 +4190,6 @@ function renderStyle(){
     +`<input data-g="${grp}" data-k="${key}" value="${ST[grp][key]}" ${attrs}>`;
   const col=(lbl,grp,key)=>`<label>${lbl}</label>`
     +`<input type="color" data-g="${grp}" data-k="${key}" value="${ST[grp][key]}">`;
-  // Текстове поле стилю: знак позначки. Окремо від n(), бо там number і
-  // атрибути, а тут потрібен звичайний рядок і порожнє значення як норма.
-  const t=(lbl,grp,key)=>`<label>${lbl}</label>`
-    +`<input data-g="${grp}" data-k="${key}" maxlength="4" `
-    +`placeholder="порожньо — кільце" value="${esc((ST[grp]||{})[key]||'')}">`;
   p.innerHTML='<label style="color:#8fa3b8">Підкладка</label>'
     +n('Яскравість супутника','base','bright','type=number step=0.05 min=0.1 max=1.5')
     +n('Насиченість, %','base','sat','type=number step=5 min=0 max=100')
@@ -4200,10 +4216,12 @@ function renderStyle(){
     +'<label style="color:#8fa3b8;margin-top:10px">Позначки подій</label>'
     +CAT_LIST.filter(k=>k!=='impact').map(k=>
         col(CAT_NAME[k]+': колір',k,'col')
-      + t(CAT_NAME[k]+': знак',k,'glyph')).join('')
+      + `<label>${CAT_NAME[k]}: знак</label>`
+      + glyphPicker((ST[k]||{}).glyph||'',`data-sg="${k}" data-sgv`)).join('')
     +'<label style="color:#8fa3b8;margin-top:10px">Влучання</label>'
     +col('Колір спалаху','impact','col')
-    +t('Влучання: знак','impact','glyph')
+    +'<label>Влучання: знак</label>'
+    +glyphPicker((ST.impact||{}).glyph||'','data-sg="impact" data-sgv')
     +n('Променів','impact','rays','type=number min=3 max=16')
     +n('Розмір за замовчуванням','impact','size','type=number min=4 max=30')
     +n('Сила сяйва','impact','glow','type=number step=0.1 min=0.2 max=2')
@@ -4223,6 +4241,14 @@ function renderStyle(){
     const f=()=>{const v=el.type==='number'?(parseFloat(el.value)||0):el.value;
       S.style[el.dataset.g][el.dataset.k]=v;touch();draw();};
     el.oninput=f; el.onchange=f;});
+  // Знак категорії — кнопками, а не полем вводу: набір короткий і під цю
+  // карту, оператор тицяє, а не згадує, як викликати панель емодзі.
+  p.querySelectorAll('[data-sg]').forEach(b=>b.onclick=()=>{
+    const k=b.dataset.sg;
+    if(!S.style[k]) S.style[k]={};
+    S.style[k].glyph=b.dataset.sgv;
+    touch(); draw(); renderStyle();
+  });
   document.getElementById('stReset').onclick=()=>{
     S.style=JSON.parse(JSON.stringify(STYLE_DEFAULT));
     touch();draw();renderStyle();};

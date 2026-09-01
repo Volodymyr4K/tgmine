@@ -690,8 +690,14 @@ function ghostToRoute(g){
   return {kind:'route',type:t.id,count:Math.max(t.count||1,g.claims||1),
           spread:t.spread||12,width:t.width||1.6,arrows:t.arrows||0,
           dash:!!t.dash,tension:1,
+          // Звідки взявся — щоб при зміні дати він пішов разом зі своєю ніччю.
+          // Позначки таке вже несли, маршрути ні, і тому лишались навічно:
+          // оператор перемикав добу, а стрілки попередньої висіли на карті.
+          origin:'night:'+((window.NIGHT&&window.NIGHT.date)||''),
           pts:g.pts.map(p=>[p[0],p[1]]),t0:g.t0,t1:g.t1};
 }
+// Обʼєкт прийшов із даних ночі, а не намальований рукою.
+function fromNight(o){ return String(o&&o.origin||'').startsWith('night:'); }
 const TILE={cache:new Map(), noLocal:new Set(), local:{}, redraw:null};
 // Растрових підкладок кілька. Джерела ті самі, що вже в проєкті (EOX і
 // NASA GIBS) — це не нові постачальники, а інші їхні шари. Кожен несе свою
@@ -4086,8 +4092,12 @@ function putStrikes(){
     const dla=(o.la-s2.la)*111, dlo=(o.lo-s2.lo)*111*Math.cos(s2.la*Math.PI/180);
     return Math.hypot(dla,dlo)<5;
   };
+  // Тільки ПОЗНАЧКИ, а не все з ночі. Відколи маршрут із підказки теж несе
+  // origin, фільтр «усе нічне геть» зносив і його: оператор клав збиття й
+  // мовчки втрачав двадцять сім щойно взятих стрілок.
   S.objs=S.objs.filter(o=>{
-    if(String(o.origin||'').startsWith('night:')) return false;
+    if(o.kind!=='impact') return true;
+    if(fromNight(o)) return false;
     return !list.some(s2=>near(o,s2));
   });
   const replaced=had-S.objs.length;
@@ -4156,14 +4166,27 @@ function loadNight(cb){
       `<option value="${n.date}">${n.date} — підказок ${n.routes}, позначок ${n.strikes}</option>`
     ).join('');
     sel.onchange=()=>{
-      const hadGhosts=S.ghosts.length, hadMarks=S.objs.some(o=>
-        String(o.origin||'').startsWith('night:'));
+      const hadGhosts=S.ghosts.length, hadMarks=S.objs.some(fromNight);
+      // Інша доба — інша карта. Усе, що прийшло з попередньої ночі, іде геть:
+      // і позначки, і маршрути, зроблені з її підказок. Раніше йшли лише
+      // позначки (putStrikes прибирав свій шар сам), а стрілки лишались, і на
+      // карті збиралась мішанина з трьох різних ночей.
+      //
+      // Намальоване РУКОЮ лишається: у нього нема origin, і воно не належить
+      // жодній добі. Маршрути, зроблені до цієї правки, теж без origin —
+      // прибрати їх автоматично нема за чим, доведеться руками.
+      //
+      // Один snapshot на всю зміну, тож undo повертає й обʼєкти, і підказки.
+      const stale=S.objs.filter(fromNight);
+      if(stale.length||S.ghosts.length) snapshot();
+      if(stale.length) S.objs=S.objs.filter(o=>!fromNight(o));
+      S.ghosts=[]; S.sel=null; S.selMore=[]; CORR.sig=null;
       loadNight(ok=>{
-        if(!ok){toast('ніч не завантажилась');return;}
-        toast('ніч '+sel.value);
+        if(!ok){toast('ніч не завантажилась');refresh();return;}
+        toast('ніч '+sel.value+(stale.length?` · прибрано з попередньої: ${stale.length}`:''));
         if(hadMarks) putStrikes();
         if(hadGhosts) document.getElementById('ghost').click();
-        else draw();
+        else refresh();
       });
     };
   }catch(e){ /* локальна тека без nights/ — лишається night.js */ }

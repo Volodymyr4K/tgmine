@@ -1578,13 +1578,23 @@ function drawZone(o,c,sel){
     for(let d=bx-bh;d<bx+bw;d+=12){
       c.beginPath();c.moveTo(d,by);c.lineTo(d+bh,by+bh);c.stroke();}
   }
-  c.restore();
+  // Обвід малюється В ТОМУ САМОМУ обтинанні, що й заливка. Інакше зелена
+  // лінія України однаково йшла берегом Криму й Азова просто під червоною
+  // зоною — а саме це й читалось як «накладаються».
+  c.beginPath();
+  ringPath(o.pts,c);
+  for(const x of cutters) ringPath(x.pts,c);
+  c.clip('evenodd');
   ring(o.pts,c);c.strokeStyle=z.col+'88';c.lineWidth=1.4;c.stroke();
-  if(o.label){
+  c.restore();
+  // Назва зони на карті — лише коли її прикріпили або коли зона вибрана.
+  // Автоматичні «Україна», «Крим», «Запоріжжя» поперек півкраїни нікому не
+  // потрібні: у списку обʼєктів вони й так підписані.
+  if(o.label&&(sel||o.pinLabel||S.layers.marklabels)){
     const mid=o.pts.reduce((a,p)=>[a[0]+p[0]/o.pts.length,a[1]+p[1]/o.pts.length],[0,0]);
     const s2=P(mid[0],mid[1]);
     c.save();c.font='600 12px "MapSans",ui-sans-serif,-apple-system,Arial';c.textAlign='center';
-    c.fillStyle=z.col+'dd';shadow(c,'rgba(0,0,0,.9)',6);
+    c.fillStyle=z.col+'dd';shadow(c,isLight()?'rgba(255,255,255,.9)':'rgba(0,0,0,.9)',6);
     c.fillText(o.label,s2[0],s2[1]);c.restore();
   }
   if(sel) o.pts.forEach(p=>{const s2=P(p[0],p[1]);
@@ -2992,6 +3002,8 @@ function refresh(){
       +`<input type="color" data-k="col" value="${o.col||(ZONE[o.zone]||ZONE.area).col}">`
       +`<button data-act="cut" style="margin-top:6px">${
          o.cut===false?'Не підрізати верхніми зонами':'Підрізається верхніми зонами'}</button>`
+      +`<button data-act="pin" style="margin-top:6px">${
+         o.pinLabel?'Ховати назву на карті':'Показувати назву на карті'}</button>`
       +`<div class="hint">Кутів: ${o.pts.length}. Зона, що лежить вище в
          списку обʼєктів, вигризає в цій дірку — тож червона ТОТ не
          накладається на зелену Україну, а займає її місце. Порядок

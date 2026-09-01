@@ -30,7 +30,11 @@ export default {
         "User-Agent": "tgmine-cron",
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ ref: env.GH_REF }),
+      // `trigger: cron` відрізняє цей тік від ручного натискання кнопки в
+      // Actions. Workflow за ним вибирає швидкий набір тестів: код між
+      // годинними прогонами не змінюється, а повний набір вантажить газетир
+      // на 132 МБ і додає ~30 с, тобто зайву білінгову хвилину на кожен тік.
+      body: JSON.stringify({ ref: env.GH_REF, inputs: { trigger: "cron" } }),
     });
 
     // 204 — прийнято. Тіла у відповіді нема, тому читати його немає сенсу.

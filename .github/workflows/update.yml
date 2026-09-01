@@ -207,13 +207,31 @@ jobs:
           path: .rank
           key: rank-${{ steps.cachekey.outputs.day }}
 
+      # Пуш бота падав, коли поки прогін ішов, у main зʼявився чужий коміт:
+      # `! [rejected] main -> main (fetch first)`. Це не рідкість — прогін
+      # триває близько двох хвилин. Наслідок був не «дані трохи запізнились»,
+      # а повний провал: крок публікації йде ПІСЛЯ цього, тож сайт не
+      # оновлювався зовсім. Тому три спроби з rebase між ними.
       - name: Зберегти дані в репозиторій
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A data store regions.json
-          git diff --staged --quiet || git commit -m "дані: $(date -u +%F\ %H:%M) UTC"
-          git push
+          if git diff --staged --quiet; then
+            echo "нових даних нема"
+            exit 0
+          fi
+          git commit -m "дані: $(date -u +%F\ %H:%M) UTC"
+          for i in 1 2 3; do
+            if git push; then
+              exit 0
+            fi
+            echo "пуш відхилено, спроба $i — підтягую main і повторюю"
+            git pull --rebase --autostash origin main || true
+            sleep $((i * 5))
+          done
+          echo "::error::не вдалося запушити дані після трьох спроб"
+          exit 1
 
       # `npx --yes wrangler@4` щопрогону тягне пакет із реєстру — це ~12 с із
       # 107 с прогону. Ключ статичний: мажорна версія прибита, тож кеш

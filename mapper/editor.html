@@ -1565,22 +1565,33 @@ function drawZone(o,c,sel){
   const me=S.objs.indexOf(o);
   const cutters=(o.cut===false||me<0)?[]:S.objs.filter((x,i)=>
     i>me && x.kind==='zone' && x.pts && x.pts.length>2 && objVisible(x));
+  // ДВА обтинання поспіль, і саме в такому порядку. Одне лише evenodd із
+  // зоною й верхніми контурами дає «непарне» й ЗА межами зони — точка
+  // всередині верхньої зони, але поза нижньою, теж вважається видимою.
+  // Через це заливка сусідньої області друкувалась удруге в межах прямокутника
+  // цієї, і на карті виходили квадратні плями густішого червоного.
   c.save();
+  c.beginPath();ringPath(o.pts,c);c.clip();          // тільки сама зона
   c.beginPath();
   ringPath(o.pts,c);
   for(const x of cutters) ringPath(x.pts,c);
-  c.clip('evenodd');
+  c.clip('evenodd');                                  // мінус верхні зони
   c.fillStyle=z.col+'14';c.fillRect(bx,by,bw,bh);
   if(z.hatch){
     // Штрих, а не суцільна заливка: зона має читатись як позначка на карті,
     // а не як зафарбований шматок країни.
     c.strokeStyle=z.col+'30';c.lineWidth=1;
-    for(let d=bx-bh;d<bx+bw;d+=12){
+    // Крок штриха рахується від СПІЛЬНОЇ сітки, а не від рамки кожної зони:
+    // інакше у сусідніх областей різна фаза, і на їхній межі видно шов, наче
+    // одна половина щільніша за другу.
+    const step=12, start=Math.floor((bx-bh)/step)*step;
+    for(let d=start;d<bx+bw;d+=step){
       c.beginPath();c.moveTo(d,by);c.lineTo(d+bh,by+bh);c.stroke();}
   }
   // Обвід малюється В ТОМУ САМОМУ обтинанні, що й заливка. Інакше зелена
   // лінія України однаково йшла берегом Криму й Азова просто під червоною
   // зоною — а саме це й читалось як «накладаються».
+  c.beginPath();ringPath(o.pts,c);c.clip();
   c.beginPath();
   ringPath(o.pts,c);
   for(const x of cutters) ringPath(x.pts,c);
@@ -2183,11 +2194,13 @@ function SvgCtx(w,h){
     clip(rule){
       const d=path.join(''); if(!d) return;
       const cid=uid();
-      // clip-rule="evenodd" потрібне для зон, які підрізають одна одну:
-      // без нього дірка у SVG не зʼявляється, і експорт розходиться з екраном.
+      // clip-rule="evenodd" потрібне для зон, які підрізають одна одну.
+      // Друге обтинання має ПЕРЕТИНАТИСЬ із першим, як на полотні, а не
+      // заміщати його: інакше SVG показує те, що екран уже відрізав.
+      const prev=cur.clip?` clip-path="url(#${cur.clip})"`:'';
       defs.push(`<clipPath id="${cid}" clipPathUnits="userSpaceOnUse">`+
                 `<path d="${d}" clip-rule="${rule||'nonzero'}" `+
-                `transform="${mstr(cur.m)}"/></clipPath>`);
+                `transform="${mstr(cur.m)}"${prev}/></clipPath>`);
       cur.clip=cid;
     },
     createRadialGradient(x0,y0,r0,x1,y1,r1){

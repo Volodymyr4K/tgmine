@@ -162,6 +162,7 @@ button.primary{background:rgba(255,62,165,.16);border-color:rgba(255,62,165,.45)
     <button class="tool" data-tool="route" title="Маршрут — клік по точках, Enter завершити (R)">↝<small>маршрут</small></button>
     <button class="tool" data-tool="launch" title="Пускова локація (L)">▲<small>пускова</small></button>
     <button class="tool" data-tool="impact" title="Влучання (I)">✷<small>влучання</small></button>
+    <button class="tool" data-tool="glyph" id="toolGlyph" title="Знак — поставити емодзі будь-де (G)">💥<small>знак</small></button>
     <button class="tool" data-tool="text" title="Підпис (T)">T<small>підпис</small></button>
     <button class="tool" data-tool="arrow" title="Стрілка — тягни від початку до кінця (A)">➤<small>стрілка</small></button>
     <button class="tool" data-tool="zone" title="Зона — клік по кутах, Enter замкнути (Z)">⬟<small>зона</small></button>
@@ -565,6 +566,10 @@ const S={
   tool:'select', type:'uav', zone:'occupied',
   frame:null, aspect:0, tpl:null, targetsOn:false, ruler:null, bias:0, ready:false,
   spacePan:false, ghostMin:2,
+  // Знак, який ставить інструмент «знак». Окремо від позначок подій: там
+  // категорія має сенс (ППО, збиття), а тут оператор просто клеїть символ
+  // туди, куди треба — завод, аеродром, стрілка уваги.
+  glyph:'💥',
   // Підписи міст, які оператор прибрав поіменно. Шар «підписи міст» гасить
   // усі одразу, а тут потрібне протилежне: назва, що лізе на маршрут або
   // дублює підпис позначки, прибирається сама, решта лишається.
@@ -1569,22 +1574,27 @@ function objVisible(o){
 function drawMark(o,c,sel,ST){
   const col=ST.col, glow=ST.glow===undefined?1:ST.glow;
   const s=P(o.la,o.lo), r=o.size||ST.size||9;
-  const g=c.createRadialGradient(s[0],s[1],0,s[0],s[1],r*1.9);
-  g.addColorStop(0,hexa(col,.55*glow));
-  g.addColorStop(1,hexa(col,0));
-  c.beginPath();c.arc(s[0],s[1],r*1.9,0,7);c.fillStyle=g;c.fill();
-  c.save();
-  c.lineCap='round';
-  // Кожен штрих двічі: спершу темна підкладка, потім колір. На світлій
-  // ділянці супутника тонке кільце інакше зникає.
-  for(const pass of [0,1]){
-    c.strokeStyle=pass?col:hexa(S.style.base.halo||'#04070c',.75);
-    const add=pass?0:2;
-    c.globalAlpha=pass?1:.55;
-    c.lineWidth=2.4+add;
-    c.beginPath();c.arc(s[0],s[1],r*.95,0,7);c.stroke();
+  // Знак стоїть ЗАМІСТЬ кільця, а не всередині нього. Емодзі в кільці з
+  // ореолом виглядає як наліпка, приклеєна поверх позначки, і читається
+  // саме так — «щось зайве». Обраний знак — це і є позначка.
+  if(!glyphOf(o,ST)){
+    const g=c.createRadialGradient(s[0],s[1],0,s[0],s[1],r*1.9);
+    g.addColorStop(0,hexa(col,.55*glow));
+    g.addColorStop(1,hexa(col,0));
+    c.beginPath();c.arc(s[0],s[1],r*1.9,0,7);c.fillStyle=g;c.fill();
+    c.save();
+    c.lineCap='round';
+    // Кожен штрих двічі: спершу темна підкладка, потім колір. На світлій
+    // ділянці супутника тонке кільце інакше зникає.
+    for(const pass of [0,1]){
+      c.strokeStyle=pass?col:hexa(S.style.base.halo||'#04070c',.75);
+      const add=pass?0:2;
+      c.globalAlpha=pass?1:.55;
+      c.lineWidth=2.4+add;
+      c.beginPath();c.arc(s[0],s[1],r*.95,0,7);c.stroke();
+    }
+    c.restore();
   }
-  c.restore();
   markGlyph(o,c,s,r,ST);
   markLabel(o,c,s,col,r,sel);
   if(sel){c.beginPath();c.arc(s[0],s[1],r*2.6,0,7);c.strokeStyle='#fff';
@@ -1604,6 +1614,11 @@ function drawMark(o,c,sel,ST){
 const GLYPHS=['🛡️','🎯','💥','🔥','🚀','💣','✈️','🚁','🛰️','👁️','📍','⛽','🏭','⚡'];
 // Вибирач: перша клітинка — кільце, далі знаки. Той самий вигляд і для
 // конкретної позначки, і для стилю категорії, щоб не вчити двох різних.
+// Кнопка інструмента показує, що саме поставить наступний клік.
+function toolGlyphIcon(){
+  const b=document.getElementById('toolGlyph');
+  if(b) b.firstChild.nodeValue=S.glyph||'💥';
+}
 function glyphPicker(cur,attr){
   const cell=(v,txt,title)=>
     `<button ${attr}="${esc(v)}" title="${esc(title)}" style="`
@@ -1616,8 +1631,10 @@ function glyphPicker(cur,attr){
     + GLYPHS.map(g=>cell(g,g,g)).join('')
     + '</div>';
 }
+// Чинний знак позначки: свій, інакше зі стилю категорії.
+function glyphOf(o,ST){ return (o.glyph!==undefined?o.glyph:(ST&&ST.glyph))||''; }
 function markGlyph(o,c,s,r,ST){
-  const g=(o.glyph!==undefined?o.glyph:(ST&&ST.glyph))||'';
+  const g=glyphOf(o,ST);
   if(!g) return;
   c.save();
   c.font=`${Math.round(r*2.1)}px "Apple Color Emoji","Segoe UI Emoji",`
@@ -1798,24 +1815,43 @@ function drawImageObj(o,c,sel){
     c.strokeRect(b.x-3,b.y-3,b.w+6,b.h+6);c.restore();
   }
 }
+// Самостійний знак: ні категорії, ні кольору — лише символ у точці. Це
+// розмітка, а не спостереження, тому в легенду він не потрапляє.
+function drawGlyphObj(o,c,sel){
+  const s=P(o.la,o.lo), r=(o.size||22)/2;
+  markGlyph(o,c,s,r,null);
+  if(o.label){
+    c.save();
+    c.font=`600 ${Math.max(10,r*0.9)}px "MapSans",ui-sans-serif,-apple-system,Arial`;
+    c.textAlign='center';
+    shadow(c,hexa(S.style.base.halo||'#04070c',.9),6);
+    c.fillStyle=hexa(S.style.base.ink||'#eef4fb',.95);
+    c.fillText(o.label,s[0],s[1]+r*1.5);
+    c.restore();
+  }
+  if(sel){c.beginPath();c.arc(s[0],s[1],r*1.5,0,7);c.strokeStyle='#fff';
+    c.setLineDash([3,3]);c.lineWidth=1;c.stroke();c.setLineDash([]);}
+}
 function drawImpact(o,c,sel){
   const k=catOf(o);
   if(k!=='impact') return drawMark(o,c,sel,S.style[k]||{col:'#9fb3c8'});
   const IM=S.style.impact;
   const s=P(o.la,o.lo), r=o.size||IM.size||9;
-  const g=c.createRadialGradient(s[0],s[1],0,s[0],s[1],r*2.2);
-  g.addColorStop(0,hexa(IM.col,.95*IM.glow));
-  g.addColorStop(.45,`rgba(255,120,40,${.55*IM.glow})`);
-  g.addColorStop(1,'rgba(255,80,20,0)');
-  c.beginPath();c.arc(s[0],s[1],r*2.2,0,7);c.fillStyle=g;c.fill();
-  const RAYS=Math.max(3,IM.rays||8);
-  for(let i=0;i<RAYS;i++){
-    const a=i*2*Math.PI/RAYS, l=r*(i%2?1.5:2.3);
-    c.beginPath();c.moveTo(s[0]+Math.cos(a)*r*.4,s[1]+Math.sin(a)*r*.4);
-    c.lineTo(s[0]+Math.cos(a)*l,s[1]+Math.sin(a)*l);
-    c.strokeStyle=hexa(IM.col,.85);c.lineWidth=1.6;c.stroke();
+  if(!glyphOf(o,IM)){                     // знак замість спалаху, не поверх
+    const g=c.createRadialGradient(s[0],s[1],0,s[0],s[1],r*2.2);
+    g.addColorStop(0,hexa(IM.col,.95*IM.glow));
+    g.addColorStop(.45,`rgba(255,120,40,${.55*IM.glow})`);
+    g.addColorStop(1,'rgba(255,80,20,0)');
+    c.beginPath();c.arc(s[0],s[1],r*2.2,0,7);c.fillStyle=g;c.fill();
+    const RAYS=Math.max(3,IM.rays||8);
+    for(let i=0;i<RAYS;i++){
+      const a=i*2*Math.PI/RAYS, l=r*(i%2?1.5:2.3);
+      c.beginPath();c.moveTo(s[0]+Math.cos(a)*r*.4,s[1]+Math.sin(a)*r*.4);
+      c.lineTo(s[0]+Math.cos(a)*l,s[1]+Math.sin(a)*l);
+      c.strokeStyle=hexa(IM.col,.85);c.lineWidth=1.6;c.stroke();
+    }
+    c.beginPath();c.arc(s[0],s[1],r*.5,0,7);c.fillStyle='#fff6df';c.fill();
   }
-  c.beginPath();c.arc(s[0],s[1],r*.5,0,7);c.fillStyle='#fff6df';c.fill();
   markGlyph(o,c,s,r,IM);
   markLabel(o,c,s,'#ffb01f',r,sel);
   if(sel){c.beginPath();c.arc(s[0],s[1],r*2.6,0,7);c.strokeStyle='#fff';
@@ -1965,6 +2001,7 @@ function drawTarget(o,c,sel){
 function drawObj(o,c,sel){
   if(o.kind==='image') return drawImageObj(o,c,sel);
   if(o.kind==='arrow') return drawArrow(o,c,sel);
+  if(o.kind==='glyph') return drawGlyphObj(o,c,sel);
   if(o.kind==='zone') return drawZone(o,c,sel);
   if(o.kind==='target') return drawTarget(o,c,sel);
   if(o.kind==='route') drawRoute(o,c,sel);
@@ -2883,11 +2920,12 @@ cv.addEventListener('pointerdown',e=>{
     freehand={sx,sy,moved:false};
     draw(); return;
   }
-  if(S.tool==='launch'||S.tool==='impact'||S.tool==='text'){
+  if(S.tool==='launch'||S.tool==='impact'||S.tool==='text'||S.tool==='glyph'){
     snapshot();
     const o={kind:S.tool,type:S.type,la,lo};
     if(S.tool==='text'){o.text='підпис';o.size=14;}
     if(S.tool==='impact'){o.size=9;}
+    if(S.tool==='glyph'){o.glyph=S.glyph||'💥';o.size=22;}
     S.objs.push(o);S.sel=o;setTool('select');refresh();return;
   }
   // Alt по лінії додає вузол, Alt по вузлу прибирає. Без цього маршрут
@@ -3206,6 +3244,7 @@ addEventListener('keydown',e=>{
   if(e.key==='t'||e.key==='T')setTool('text');
   if(e.key==='z'&&!e.ctrlKey&&!e.metaKey)setTool('zone');
   if(e.key==='a'&&!e.ctrlKey&&!e.metaKey)setTool('arrow');
+  if(e.key==='g'||e.key==='G')setTool('glyph');
   if(e.key==='m'||e.key==='M')setTool('ruler');
   if((e.ctrlKey||e.metaKey)&&e.key==='z'){e.preventDefault();e.shiftKey?redo():undo();}
   if((e.ctrlKey||e.metaKey)&&e.key==='d'){e.preventDefault();duplicate();}
@@ -3519,6 +3558,14 @@ function refresh(){
          o.pinLabel?'Ховати підпис, поки не вибрано':'Показувати підпис завжди'}</button>`
       +'<button data-act="lab" style="margin-top:6px">Скинути положення підпису</button>'
       +srcBlock(o);
+  }else if(o.kind==='glyph'){
+    p.innerHTML='<label>Знак</label>'
+      +glyphPicker(o.glyph||'','data-glyph')
+      +field('Підпис під знаком',o.label||'','label')
+      +field('Розмір',o.size||22,'size','type=number min=8 max=96')
+      +'<div class="hint">Ставиться будь-де: завод, аеродром, місце, на яке '
+      +'треба звернути увагу. У легенду не потрапляє — це розмітка, а не '
+      +'спостереження.</div>';
   }else if(o.kind==='image'){
     p.innerHTML=field('Підпис під картинкою',o.label||'','label')
       +field('Ширина, px',o.w||180,'w','type=number min=24 max=1200')
@@ -3584,7 +3631,11 @@ function refresh(){
     if(b) b.onclick=()=>{snapshot();S.sel[k]=!S.sel[k];refresh();};
   }
   p.querySelectorAll('[data-glyph]').forEach(b=>b.onclick=()=>{
-    snapshot(); S.sel.glyph=b.dataset.glyph; refresh(); draw();
+    snapshot(); S.sel.glyph=b.dataset.glyph;
+    // Знак, обраний на самостійному знаку, запамʼятовується як поточний:
+    // наступний ставиться таким самим, без другого заходу в панель.
+    if(S.sel.kind==='glyph'&&S.sel.glyph){ S.glyph=S.sel.glyph; toolGlyphIcon(); }
+    refresh(); draw();
   });
   const reset=p.querySelector('[data-act="lab"]');
   if(reset) reset.onclick=()=>{snapshot();delete S.sel.lab;draw();};
@@ -3629,7 +3680,7 @@ function refresh(){
     // там, де насправді одинадцять разів працювала ППО, — та сама каша.
     const name=o.kind==='impact' ? CAT_NAME[catOf(o)]
       : {route:'маршрут',launch:'пускова',text:'підпис',zone:'зона',
-         target:'ціль',arrow:'стрілка',image:'зображення'}[o.kind];
+         target:'ціль',arrow:'стрілка',image:'зображення',glyph:'знак'}[o.kind];
     const extra=o.kind==='route'?`${o.pts.length} вузлів${o.count>1?' · пучок '+o.count:''}`
       :(o.label||o.text||'');
     const on=o===S.sel||S.selMore.includes(o);
@@ -4740,6 +4791,7 @@ const HELP=[
     ['L / I / T','пускова локація / позначка / підпис'],
     ['A','стрілка: тягни від початку до кінця'],
     ['Z','зона: клік по кутах, Enter замкнути'],
+    ['G','знак: поставити емодзі будь-де'],
     ['M','лінійка: два кліки — відстань по ортодромії'],
     ['1…8','вибрати тип засобу'],
   ]],

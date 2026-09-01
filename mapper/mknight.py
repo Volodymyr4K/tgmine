@@ -42,15 +42,23 @@ def strikes(raid):
         key = (round(e["lat"], 2), round(e["lon"], 2))
         b = by.setdefault(key, {"la": key[0], "lo": key[1], "n": 0,
                                 "place": e.get("place") or "", "t": e.get("hhmm", ""),
-                                "kinds": collections.Counter()})
+                                "kinds": collections.Counter(), "src": []})
         b["n"] += 1
         b["kinds"][e["kind"]] += 1
+        # Джерело позначки: адреса повідомлення, час і канал. Без цього
+        # оператор бачив кружок на карті й не мав чим його перевірити, а
+        # позначка без джерела — це твердження без підстави.
+        if e.get("url"):
+            b["src"].append({"u": e["url"], "t": e.get("hhmm", ""),
+                             "k": e.get("kind", "")})
     out = []
     for b in by.values():
         name = CITY_UA.get(b["place"]) or uk(b["place"]) if b["place"] else ""
         kind = b["kinds"].most_common(1)[0][0]
+        # Більше восьми посилань на одну позначку читати ніхто не буде, а
+        # вага файла росте на кожну ніч. Скільки їх насправді — каже `n`.
         out.append({"la": b["la"], "lo": b["lo"], "n": b["n"], "place": name,
-                    "kind": kind, "t": b["t"]})
+                    "kind": kind, "t": b["t"], "src": b["src"][:8]})
     out.sort(key=lambda s: -s["n"])
     return out
 

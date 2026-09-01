@@ -694,6 +694,7 @@ function ghostToRoute(g){
           // Позначки таке вже несли, маршрути ні, і тому лишались навічно:
           // оператор перемикав добу, а стрілки попередньої висіли на карті.
           origin:'night:'+((window.NIGHT&&window.NIGHT.date)||''),
+          src:uniqSrc(g.srcs),
           pts:g.pts.map(p=>[p[0],p[1]]),t0:g.t0,t1:g.t1};
 }
 // Обʼєкт прийшов із даних ночі, а не намальований рукою.
@@ -3218,6 +3219,46 @@ retype();
 function field(label,val,on,attrs=''){
   return `<label>${label}</label><input data-k="${on}" value="${val??''}" ${attrs}>`;
 }
+function esc(v){
+  return String(v??'').replace(/[&<>"']/g,c=>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+// Список джерел без повторів: те саме повідомлення легко трапляється двічі —
+// і як вузол треку, і як кінець заявленого вектора.
+function uniqSrc(list){
+  const seen=new Set(), out=[];
+  for(const q of (list||[])){
+    if(!q||!q.u||seen.has(q.u)) continue;
+    seen.add(q.u); out.push({u:q.u,t:q.t||'',k:q.k||''});
+  }
+  return out;
+}
+// Канал із адреси: https://t.me/<канал>/<номер>
+function srcChan(u){
+  const m=/^https?:\/\/t\.me\/([^\/?#]+)/i.exec(u||'');
+  return m?('@'+m[1]):'джерело';
+}
+// Блок «Джерело» в панелі властивостей. Позначка чи стрілка без підстави —
+// це твердження, яке нема чим перевірити; посилання на повідомлення робить
+// карту такою, що її можна перечитати.
+function srcBlock(o){
+  const list=o&&o.src;
+  if(!Array.isArray(list)||!list.length){
+    if(o&&String(o.origin||'').startsWith('night:'))
+      return '<div class="hint">Джерело: нема в даних цієї ночі — вона зроблена '
+            +'до того, як адреси почали доходити до редактора. Перезбери ніч.</div>';
+    return '';
+  }
+  const rows=list.map(q=>
+    `<div style="margin:2px 0"><a href="${esc(q.u)}" target="_blank" rel="noopener"
+       style="color:#7fd3ff">${esc(srcChan(q.u))}</a>`
+    +`<span style="color:#8fa3b8"> · ${esc(q.t||'')}${q.k?' · '+esc(q.k):''}</span></div>`
+  ).join('');
+  return `<label style="margin-top:8px">Джерело (${list.length})</label>`
+    +`<div style="font-size:12px;line-height:1.5">${rows}</div>`
+    +'<div class="hint">Повідомлення, з яких зроблено цю позначку. '
+    +'Відкриються в новій вкладці.</div>';
+}
 function refresh(){
   renderCorr();
   // властивості
@@ -3255,7 +3296,8 @@ function refresh(){
       +'<button data-act="lab" style="margin-top:6px">Скинути положення підпису</button>'
       +`<div class="hint">Вузлів: ${o.pts.length}. Білі кружки — вузли,
         порожні посередині ланок — прогин: тягни, щоб зігнути ділянку
-        без нового вузла.</div>`;
+        без нового вузла.</div>`
+      +srcBlock(o);
   }else if(o.kind==='arrow'){
     p.innerHTML=field('Підпис',o.label||'','label')
       +field('Товщина',o.width,'width','type=number step=0.2 min=1 max=8')
@@ -3281,7 +3323,8 @@ function refresh(){
       +field('Розмір',o.size,'size','type=number min=4 max=30')
       +`<button data-act="pin" style="margin-top:6px">${
          o.pinLabel?'Ховати підпис, поки не вибрано':'Показувати підпис завжди'}</button>`
-      +'<button data-act="lab" style="margin-top:6px">Скинути положення підпису</button>';
+      +'<button data-act="lab" style="margin-top:6px">Скинути положення підпису</button>'
+      +srcBlock(o);
   }else if(o.kind==='image'){
     p.innerHTML=field('Підпис під картинкою',o.label||'','label')
       +field('Ширина, px',o.w||180,'w','type=number min=24 max=1200')
@@ -4107,7 +4150,7 @@ function putStrikes(){
   const CAT={'ППО':'ppo','збиття':'downed','влучання':'impact'};
   for(const s2 of list){
     S.objs.push({kind:'impact',cat:CAT[s2.kind]||'impact',type:'unknown',
-      origin:tag,la:s2.la,lo:s2.lo,
+      origin:tag,la:s2.la,lo:s2.lo,src:uniqSrc(s2.src),
       size:7+Math.min(6,s2.n*1.5),
       label:(s2.place||CAT_NAME[CAT[s2.kind]||'impact'])+(s2.n>1?' ×'+s2.n:'')});
   }
@@ -4407,6 +4450,11 @@ document.getElementById('ghost').onclick=()=>{
   S.ghosts=window.NIGHT.routes.map(r=>({pts:r.pts.map(p=>[p.la,p.lo]),
     t0:r.t0,t1:r.t1,k:r.k,conf:r.conf||'ok',claims:r.claims||1,
     legs:r.legs||null,
+    // Джерела вузлів: адреса повідомлення, час і що саме там сказано. Без
+    // цього намальована стрілка — твердження без підстави, і перевірити її
+    // оператор не може нічим, крім памʼяті.
+    srcs:(r.pts||[]).map(q=>({u:q.url||'',t:q.hhmm||'',k:q.kind||''}))
+                    .filter(q=>q.u),
     // ланка i зʼєднує pts[i] -> pts[i+1]; добудовані вузли стоять СПЕРЕДУ,
     // тому ознаку беремо з лівого кінця ланки, а не з правого
     back:(r.pts||[]).slice(0,-1).map(p=>!!p.back)}));

@@ -205,8 +205,8 @@ jobs:
           path: |
             site/raids
             site/mapper/nights
-          key: raids-v4-${{ steps.cachekey.outputs.day }}
-          restore-keys: raids-v4-
+          key: raids-v5-${{ steps.cachekey.outputs.day }}
+          restore-keys: raids-v5-
 
       # Без --days: денні сторінки за всі 93 доби коштують 6 секунд, тобто
       # обрізання архіву економило час не там, де він витрачався. --raid-days 2
@@ -225,7 +225,7 @@ jobs:
           path: |
             site/raids
             site/mapper/nights
-          key: raids-v4-${{ steps.cachekey.outputs.day }}
+          key: raids-v5-${{ steps.cachekey.outputs.day }}
 
       - name: Кеш ранжування цілей (зберегти)
         if: always() && hashFiles('.rank/**') != ''

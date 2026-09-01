@@ -561,6 +561,17 @@ const S={
           bg:'#04070c', ink:'#eef4fb', inkDim:'#c6d8ea', satSrc:'sat',
           // власна темна схема: суша, вода, міські масиви, дороги
           land:'#191d23', sea:'#0b0e12', urban:'#232931', roads:'#2e353d',
+          // Кольори, які раніше стояли числами прямо в малюванні. Через це
+          // світла схема виходила напівтемною: карта світлішала, а озера,
+          // плашки й ореоли лишались нічними. Тепер вони теж зі схеми.
+          //   lake/river — водойми;
+          //   plateCol/plateInk — плашки легенди, шапки й підписів;
+          //   halo — тьмяний бік контрасту (підкладка під знак, обвід);
+          //   glyph — яскравий бік (вістря маршруту, ручки).
+          // На світлих схемах halo і glyph міняються місцями.
+          lake:'#060c14', river:'#78a5cd',
+          plateCol:'#060a10', plateInk:'#dbe8f6',
+          halo:'#04070c', glyph:'#ffffff',
           // жирний кордон між РФ і Україною — окремо від решти
           uaruW:2.8, uaruCol:'#ffffff'},
     route:{halo:0.12, nodes:true},
@@ -938,8 +949,8 @@ function drawBase(c){
     c.restore();
   }
   if(L.water){
-    for(const g of B.lakes){ring(g,c);c.fillStyle='rgba(6,12,20,.55)';c.fill();}
-    c.strokeStyle=`rgba(120,165,205,${ST.base.water})`;c.lineWidth=1;c.lineJoin='round';
+    for(const g of B.lakes){ring(g,c);c.fillStyle=hexa(ST.base.lake||'#060c14',.55);c.fill();}
+    c.strokeStyle=hexa(ST.base.river||'#78a5cd',ST.base.water);c.lineWidth=1;c.lineJoin='round';
     for(const g of B.rivers){path(g,c);c.stroke();}
   }
   // Кордони. У даних кожна країна лежить розбита на свої області, тож
@@ -1314,8 +1325,8 @@ function drawRoute(o,c,sel){
       c.save();c.translate(s2.x,s2.y);c.rotate(s2.ang);
       c.globalAlpha=A;c.lineCap='round';c.lineJoin='round';
       c.beginPath();c.moveTo(-4.5,-4);c.lineTo(2,0);c.lineTo(-4.5,4);
-      c.strokeStyle='rgba(4,7,12,.85)';c.lineWidth=3.6;c.stroke();
-      c.strokeStyle='rgba(255,255,255,.92)';c.lineWidth=1.7;c.stroke();
+      c.strokeStyle=hexa(S.style.base.halo||'#04070c',.85);c.lineWidth=3.6;c.stroke();
+      c.strokeStyle=hexa(S.style.base.glyph||'#ffffff',.92);c.lineWidth=1.7;c.stroke();
       c.restore();
     }
   }
@@ -1391,11 +1402,11 @@ function plate(c,x,y,lines,accent,obj){
   }
   if(obj) obj.__plate={x:px,y:py,w,h,ax:x,ay:y};
   c.beginPath();c.roundRect(px,py,w,h,4);
-  c.fillStyle=`rgba(6,10,16,${S.style.plate.bg})`;c.fill();
+  c.fillStyle=hexa(S.style.base.plateCol||'#060a10',S.style.plate.bg);c.fill();
   c.strokeStyle=hexa(accent,S.style.plate.border);c.lineWidth=1;c.stroke();
   lines.forEach((l,i)=>{
     c.font=`${i?400:600} ${i?10.5:12}px "MapSans",ui-sans-serif,-apple-system,Arial`;
-    c.fillStyle=i?S.style.plate.text:accent;
+    c.fillStyle=i?(S.style.base.plateInk||S.style.plate.text):accent;
     c.textAlign='left';c.fillText(l,px+9,py+16+i*14);
   });
   return {x:px,y:py,w,h};
@@ -1443,7 +1454,7 @@ function drawMark(o,c,sel,ST){
   // Кожен штрих двічі: спершу темна підкладка, потім колір. На світлій
   // ділянці супутника тонке кільце інакше зникає.
   for(const pass of [0,1]){
-    c.strokeStyle=pass?col:'rgba(4,7,12,.75)';
+    c.strokeStyle=pass?col:hexa(S.style.base.halo||'#04070c',.75);
     const add=pass?0:2;
     c.globalAlpha=pass?1:.55;
     c.lineWidth=2.4+add;
@@ -1829,10 +1840,11 @@ function legendBox(c,L,rows,x,y,w,cols){
   const lh=22, hd=30, perCol=Math.ceil(rows.length/cols);
   const H=hd+perCol*lh+14;
   c.beginPath();c.roundRect(x,y,w,H,8);
-  c.fillStyle='rgba(7,11,18,'+(L.opacity===undefined?0.9:L.opacity)+')';c.fill();
-  c.strokeStyle='rgba(120,150,180,.28)';c.lineWidth=1;c.stroke();
+  c.fillStyle=hexa(S.style.base.plateCol||'#070b12',
+                   L.opacity===undefined?0.9:L.opacity);c.fill();
+  c.strokeStyle=hexa(S.style.base.inkDim||'#7896b4',.28);c.lineWidth=1;c.stroke();
   c.beginPath();c.roundRect(x,y,w,hd,[8,8,0,0]);
-  c.fillStyle='rgba(122,152,182,.13)';c.fill();
+  c.fillStyle=hexa(S.style.base.inkDim||'#7a98b6',.13);c.fill();
   c.save();c.font='600 11px "MapSans",ui-sans-serif,-apple-system,Arial';
   c.fillStyle=hexa(S.style.base.inkDim||'#c6d8ea',.9);
   c.letterSpacing='1.4px';c.textAlign='left';
@@ -1843,7 +1855,8 @@ function legendBox(c,L,rows,x,y,w,cols){
     const rx=x+12+col*cw, ry=y+hd+16+row*lh;
     r.draw(c,rx,ry);
     c.save();c.font='400 12px "MapSans",ui-sans-serif,-apple-system,Arial';
-    c.fillStyle='rgba(214,228,242,.9)';c.textAlign='left';
+    c.fillStyle=hexa(S.style.base.plateInk||S.style.base.ink||'#d6e4f2',.9);
+    c.textAlign='left';
     c.fillText(r.name,rx+40,ry+4);c.restore();
   });
   return H;
@@ -1970,10 +1983,14 @@ function drawHeader(c,w){
   // Рядки збираються списком: порожні просто не потрапляють, і картка
   // стискається під те, що є, а не тримає місце під усе можливе.
   const L=[];
-  if(B.name)   L.push({t:B.name,   w:700, s:22,   col:'#eef4fb'});
-  if(B.handle) L.push({t:B.handle, w:400, s:12,   col:'rgba(146,170,194,.9)'});
-  if(t)        L.push({t,          w:700, s:21,   col:'#eef4fb'});
-  if(sb)       L.push({t:sb,       w:400, s:12.5, col:'rgba(146,170,194,.92)'});
+  // Кольори тексту шапки беруться зі схеми: на світлій плашці вшите
+  // '#eef4fb' давало біле по білому й назва зникала повністю.
+  const HI=S.style.base.plateInk||S.style.base.ink||'#eef4fb';
+  const LO=hexa(S.style.base.inkDim||'#92aac2',.9);
+  if(B.name)   L.push({t:B.name,   w:700, s:22,   col:HI});
+  if(B.handle) L.push({t:B.handle, w:400, s:12,   col:LO});
+  if(t)        L.push({t,          w:700, s:21,   col:HI});
+  if(sb)       L.push({t:sb,       w:400, s:12.5, col:LO});
   if(!L.length&&!hasLogo) return;
   c.save();
   let textW=0, textH=0;
@@ -1986,8 +2003,8 @@ function drawHeader(c,w){
   const wd=Math.max(200, textW+pad*2+(hasLogo?ls+gap:0));
   const hd=Math.max(textH+pad*2, hasLogo?ls+pad*2:0);
   c.beginPath();c.roundRect(20,20,wd,hd,8);
-  c.fillStyle='rgba(7,11,18,.9)';c.fill();
-  c.strokeStyle='rgba(120,150,180,.28)';c.lineWidth=1;c.stroke();
+  c.fillStyle=hexa(S.style.base.plateCol||'#070b12',.9);c.fill();
+  c.strokeStyle=hexa(S.style.base.inkDim||'#7896b4',.28);c.lineWidth=1;c.stroke();
   if(img){
     // Свій знак: вписуємо в квадрат ls×ls, пропорції не ламаємо.
     const k=Math.min(ls/img.naturalWidth, ls/img.naturalHeight);
@@ -2017,7 +2034,8 @@ function drawFooter(c,w,h){
   const F=S.footer;
   if(!F.left&&!F.right) return;
   c.save();c.font='400 11.5px "MapSans",ui-sans-serif,-apple-system,Arial';
-  c.fillStyle='rgba(180,200,220,.85)';shadow(c,'rgba(0,0,0,.9)',5);
+  c.fillStyle=hexa(S.style.base.inkDim||'#b4c8dc',.85);
+  shadow(c,hexa(S.style.base.halo||'#000000',.9),5);
   if(F.left){c.textAlign='left';c.fillText(F.left,20,h-34);}
   if(F.right){c.textAlign='right';c.fillText(F.right,w-20,h-34);}
   c.restore();
@@ -4441,54 +4459,68 @@ const BASEMAPS=[
   {id:'sat', name:'Супутник', hint:'нічний знімок і вогні міст — як було',
    layers:{sat:true,night:true,water:true,places:true},
    style:{satSrc:'sat',bg:'#04070c',ink:'#eef4fb',inkDim:'#c6d8ea',bright:0.55,nightGlow:0.34,
-          water:0.30,countries:0.72,borders:0.26,places:0.45}},
+          water:0.30,countries:0.72,borders:0.26,places:0.45,
+          lake:'#060c14',river:'#78a5cd',plateCol:'#060a10',plateInk:'#dbe8f6',halo:'#04070c',glyph:'#ffffff'}},
   {id:'night', name:'Тільки вогні', hint:'без знімка: чорне тло й міські вогні',
    layers:{sat:false,night:true,water:true,places:false},
    style:{satSrc:'sat',bg:'#03060a',ink:'#eef4fb',inkDim:'#c6d8ea',nightGlow:0.62,
-          water:0.22,countries:0.6,borders:0.2,places:0.3}},
+          water:0.22,countries:0.6,borders:0.2,places:0.3,
+          lake:'#060c14',river:'#78a5cd',plateCol:'#060a10',plateInk:'#dbe8f6',halo:'#04070c',glyph:'#ffffff'}},
   {id:'mini', name:'Мінімальна', hint:'жодного растру: тло, кордони, підписи',
    layers:{sat:false,night:false,water:true,places:false},
    style:{satSrc:'sat',bg:'#0a0f16',ink:'#e8eef6',inkDim:'#9fb4c8',water:0.35,
-          countries:0.85,countryW:1.5,borders:0.18,places:0.3}},
+          countries:0.85,countryW:1.5,borders:0.18,places:0.3,
+          lake:'#060c14',river:'#78a5cd',plateCol:'#060a10',plateInk:'#dbe8f6',halo:'#04070c',glyph:'#ffffff'}},
   {id:'paper', name:'Паперова', hint:'світла: темні лінії по світлому тлу',
    layers:{sat:false,night:false,water:true,places:true},
    style:{satSrc:'sat',bg:'#eceae4',ink:'#1b2530',inkDim:'#4a5a6b',water:0.55,
-          countries:0.75,countryW:1.4,borders:0.3,places:0.5}},
+          countries:0.75,countryW:1.4,borders:0.3,places:0.5,
+          lake:'#b7c6d2',river:'#5b86ab',plateCol:'#ffffff',plateInk:'#1b2530',
+          halo:'#ffffff',glyph:'#1b2530'}},
   {id:'day', name:'Знімок удень', hint:'той самий Sentinel-2, але не притемнений',
    layers:{sat:true,night:false,water:true,places:false},
    style:{satSrc:'sat',bg:'#0a0f16',ink:'#f2f7ff',inkDim:'#cddbe9',
           bright:1.0,sat:75,nightGlow:0,water:0.5,
-          countries:0.8,countryW:1.4,borders:0.25,places:0.4}},
+          countries:0.8,countryW:1.4,borders:0.25,places:0.4,
+          lake:'#060c14',river:'#78a5cd',plateCol:'#060a10',plateInk:'#dbe8f6',halo:'#04070c',glyph:'#ffffff'}},
   {id:'relief', name:'Рельєф', hint:'світла карта рельєфу EOX Terrain Light',
    layers:{sat:true,night:false,water:false,places:true},
    style:{satSrc:'terrainLight',bg:'#eceae4',ink:'#1b2530',inkDim:'#4a5a6b',
           bright:1.0,sat:80,nightGlow:0,water:0.3,
-          countries:0.7,countryW:1.3,borders:0.28,places:0.45}},
+          countries:0.7,countryW:1.3,borders:0.28,places:0.45,
+          lake:'#b7c6d2',river:'#5b86ab',plateCol:'#ffffff',plateInk:'#1b2530',
+          halo:'#ffffff',glyph:'#1b2530'}},
   {id:'reliefDark', name:'Рельєф темний', hint:'той самий рельєф, притемнений під нічну карту',
    layers:{sat:true,night:true,water:true,places:false},
    style:{satSrc:'terrain',bg:'#05080d',ink:'#eef4fb',inkDim:'#c6d8ea',
           bright:0.5,sat:35,nightGlow:0.3,water:0.28,
-          countries:0.75,countryW:1.35,borders:0.24,places:0.4}},
+          countries:0.75,countryW:1.35,borders:0.24,places:0.4,
+          lake:'#060c14',river:'#78a5cd',plateCol:'#060a10',plateInk:'#dbe8f6',halo:'#04070c',glyph:'#ffffff'}},
   {id:'schema', name:'Темна схема', hint:'наша власна: суша, вода, міські масиви, дороги — без чужих плиток і написів',
    layers:{sat:false,night:false,schema:true,water:true,places:false},
    style:{bg:'#0b0e12',ink:'#e9eff7',inkDim:'#8b9aab',
           land:'#191d23',sea:'#0b0e12',urban:'#232931',roads:'#2e353d',
-          water:0.30,countries:0.55,countryW:1.2,borders:0.16,places:0.3}},
+          water:0.30,countries:0.55,countryW:1.2,borders:0.16,places:0.3,
+          lake:'#060c14',river:'#78a5cd',plateCol:'#060a10',plateInk:'#dbe8f6',halo:'#04070c',glyph:'#ffffff'}},
   {id:'schemaNight', name:'Темна схема + вогні', hint:'та сама схема з нічними вогнями міст',
    layers:{sat:false,night:true,schema:true,water:true,places:false},
    style:{bg:'#080b0f',ink:'#e9eff7',inkDim:'#8b9aab',
           land:'#151920',sea:'#080b0f',urban:'#1d232b',roads:'#282f37',
-          nightGlow:0.55,water:0.26,countries:0.5,countryW:1.2,borders:0.14,places:0.3}},
+          nightGlow:0.55,water:0.26,countries:0.5,countryW:1.2,borders:0.14,places:0.3,
+          lake:'#060c14',river:'#78a5cd',plateCol:'#060a10',plateInk:'#dbe8f6',halo:'#04070c',glyph:'#ffffff'}},
   {id:'schemaLight', name:'Світла схема', hint:'той самий кресленик, але світлий — під друк',
    layers:{sat:false,night:false,schema:true,water:true,places:true},
    style:{bg:'#dfe4e8',ink:'#1b2530',inkDim:'#586878',
           land:'#f1f0ec',sea:'#dfe4e8',urban:'#e4e0d8',roads:'#c9c6bd',
-          water:0.5,countries:0.7,countryW:1.3,borders:0.26,places:0.45}},
+          water:0.5,countries:0.7,countryW:1.3,borders:0.26,places:0.45,
+          lake:'#c3d0da',river:'#5b86ab',plateCol:'#ffffff',plateInk:'#1b2530',
+          halo:'#ffffff',glyph:'#1b2530'}},
   {id:'marble', name:'Blue Marble', hint:'знімок Землі NASA — грубий, але цілісний на широкому кадрі',
    layers:{sat:true,night:true,water:false,places:false},
    style:{satSrc:'blue',bg:'#03060a',ink:'#eef4fb',inkDim:'#c6d8ea',
           bright:0.7,sat:60,nightGlow:0.4,water:0.25,
-          countries:0.7,countryW:1.3,borders:0.2,places:0.35}},
+          countries:0.7,countryW:1.3,borders:0.2,places:0.35,
+          lake:'#060c14',river:'#78a5cd',plateCol:'#060a10',plateInk:'#dbe8f6',halo:'#04070c',glyph:'#ffffff'}},
 ];
 function applyBasemap(id){
   const b=BASEMAPS.find(x=>x.id===id);

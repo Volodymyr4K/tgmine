@@ -1130,6 +1130,115 @@ function drawRegionLabels(c,taken){
   }
 }
 
+// ==========================================================================
+// СЛІД ОБʼЄКТІВ ПІД РОЗКЛАДКУ НАЗВ МІСТ
+// ==========================================================================
+// Назва міста належить ПІДКЛАДЦІ, маршрут і позначка — даним. Тому посунути
+// можна лише назву: маршрут, перекладений «щоб не заважав», — це вигадане
+// спостереження. Тут збирається те, що вже лягає поверх карти, а назва далі
+// сама шукає вільне місце навколо своєї крапки.
+//
+// Чому цього не було раніше. Порядок кадру: рамка -> назви областей ->
+// назви міст -> обʼєкти -> їхні плашки. Назву ставили ТОДІ, коли спалаху ще
+// не існувало, тож уникнути його вона фізично не могла. Заміряно на ночі
+// 30.08: 10 назв із 40 лежали на позначці або на маршруті.
+//
+// Слід іде в ОКРЕМУ структуру, не в TAKEN. Інакше назва області, у якої
+// позиція одна-єдина (центр), почала б зникати від кожного маршруту через
+// неї, а плашки обʼєктів — від власного маршруту.
+function Obstacles(){
+  // Рівномірна сітка: назв у кадрі десятки, точок сліду тисячі, і повний
+  // перебір на кожен кандидат помітно коштує на панорамуванні.
+  const CELL=64, m=new Map();
+  let n=0;
+  const cells=(x,y,w,h,fn)=>{
+    for(let i=Math.floor(x/CELL);i<=Math.floor((x+w)/CELL);i++)
+      for(let j=Math.floor(y/CELL);j<=Math.floor((y+h)/CELL);j++)
+        if(fn(i+':'+j)) return true;
+    return false;
+  };
+  return {
+    get size(){ return n; },
+    add(x,y,w,h){
+      if(!(w>0&&h>0)||!isFinite(x)||!isFinite(y)) return;
+      if(n>24000) return;             // запобіжник: слід не має коштувати кадру
+      n++;
+      const b={x,y,w,h};
+      cells(x,y,w,h,k=>{ let a=m.get(k); if(!a){a=[];m.set(k,a);} a.push(b); });
+    },
+    hit(r){
+      return cells(r.x,r.y,r.w,r.h,k=>{
+        const a=m.get(k); if(!a) return false;
+        for(const b of a)
+          if(!(r.x+r.w<b.x||b.x+b.w<r.x||r.y+r.h<b.y||b.y+b.h<r.y)) return true;
+        return false;
+      });
+    }
+  };
+}
+// `c` потрібен лише для measureText: у SVG-приймача свій вимірювач, і брати
+// екранний контекст означало б рахувати ширину чужим масштабом.
+function objObstacles(c){
+  const O=Obstacles();
+  const dot=(s,r)=>O.add(s[0]-r,s[1]-r,2*r,2*r);
+  // Крива вкривається квадратиками вздовж себе. Крок дорівнює половині
+  // тому сусідні квадрати перекриваються: рідка вибірка лишає між ними
+  // дірки, у які підпис пролазить і сідає просто на лінію.
+  const line=(pts,bows,tension,pad)=>{
+    if(!pts||pts.length<2) return;
+    const A=pts.map(p=>P(p[0],p[1]));
+    let len=0;
+    for(let i=0;i<A.length-1;i++) len+=Math.hypot(A[i+1][0]-A[i][0],A[i+1][1]-A[i][1]);
+    if(!isFinite(len)) return;
+    const n=Math.max(2,Math.min(400,Math.round(len/Math.max(4,pad))));
+    for(const q of samplePath(pts,bows,tension,n)) O.add(q.x-pad,q.y-pad,2*pad,2*pad);
+    for(const a of [A[0],A[A.length-1]]) O.add(a[0]-pad,a[1]-pad,2*pad,2*pad);
+  };
+  // drawList(), а не S.objs: у режимі коридорів на карті лежать зведені
+  // маршрути, і слід має бути від того, що видно, а не від вихідних ниток.
+  for(const o of drawList()){
+    if(!objVisible(o)) continue;
+    if(o.kind==='impact'){
+      const ST=S.style[catOf(o)]||{};
+      dot(P(o.la,o.lo),(o.size||ST.size||9)*2.2);
+    }else if(o.kind==='glyph'){
+      dot(P(o.la,o.lo),((o.size||22)/2)*1.25);
+    }else if(o.kind==='launch'){
+      const s=P(o.la,o.lo); O.add(s[0]-10,s[1]-18,30,26);
+    }else if(o.kind==='target'){
+      dot(P(o.la,o.lo),8);
+    }else if(o.kind==='image'){
+      const b=imgBox(o); O.add(b.x,b.y,b.w,b.h);
+    }else if(o.kind==='text'){
+      const size=o.size||14, lines=String(o.text||'підпис').split('\n');
+      const s=P(o.la,o.lo);
+      c.save();
+      c.font=`${o.weight||600} ${size}px "MapSans",ui-sans-serif,-apple-system,Arial`;
+      const w=Math.max(...lines.map(l=>c.measureText(l).width));
+      c.restore();
+      const x=o.align==='center'?s[0]-w/2:o.align==='right'?s[0]-w:s[0];
+      O.add(x-3,s[1]-size,w+6,size*1.25*lines.length+4);
+    }else if(o.kind==='route'){
+      // Пучок ширший за одну нитку: слід рахується по ореолу, який і є
+      // видимою товщиною маршруту.
+      const hw=(o.width||1.6)*3.2+(o.spread||0)*0.35;
+      line(o.pts,o.bows,o.tension,Math.max(4,hw/2+2));
+    }else if(o.kind==='arrow'){
+      const head=o.head||10;
+      line(o.pts,[o.bow],1,Math.max(5,(o.width||2.2)/2+3));
+      dot(P(o.pts[1][0],o.pts[1][1]),head*0.8);
+      if(o.both) dot(P(o.pts[0][0],o.pts[0][1]),head*0.8);
+    }
+    // Зона — заливка, а не чорнило: назва поверх неї читається, і слід від
+    // неї заборонив би підписи на пів кадру.
+  }
+  for(const g of S.ghosts||[]) if(ghostVisible(g)) line(g.pts,null,1,4);
+  return O;
+}
+// Де назва стояла минулого кадру. Без цього при панорамуванні підпис
+// перекидається з боку в бік щоразу, коли під ним проїде маршрут: сама
+// розкладка щокадру оптимальна, а виглядає як мерехтіння.
+const CITYFIT=new Map();
 // Підписи за рівнями. На оглядовій карті країни підписані обласні центри, а
 // на кадрі однієї області — райцентри. Один сталий поріг дає або порожньо,
 // або кашу, тому поріг залежить від масштабу.
@@ -1215,6 +1324,25 @@ function drawLabels(c){
   const rec=(c===ctx);
   if(rec) CITYBOX.length=0;
   let placed=0;
+  // Слід обʼєктів рахується ОДИН раз на кадр і лише тоді, коли підписи міст
+  // узагалі малюються.
+  const OBST=objObstacles(c);
+  const free=r=>fits(r)&&!OBST.hit(r);
+  // Ближні позиції — ті самі шість, що були, у тому самому порядку: поки
+  // місця вистачає, розкладка не міняється взагалі. Далі чотири діагоналі
+  // й строго над/під крапкою.
+  const nearCand=(w,h)=>[[7,4],[-w-9,4],[7,-h+2],[-w-9,-h+2],[7,14],[7,-14],
+                         [-w-9,14],[-w-9,-14],[7,26],[-w-9,26],
+                         [-w/2,-h-4],[-w/2,h+16]];
+  // Дальні — кільцем, від горизонталі до вертикалі: горизонтальний винос
+  // читається краще за косий. До них іде виноска.
+  const FAR_A=[0,6,-1,1,-5,5,-2,2,-4,4,-3,3].map(k=>k*Math.PI/6);
+  const FAR_R=[26,44,66];
+  const farBox=(s2,R,th,w,h)=>{
+    const dx=Math.cos(th), dy=Math.sin(th);
+    return {x:s2[0]+dx*(R+Math.abs(dx)*w/2)-w/2,
+            y:s2[1]+dy*(R+Math.abs(dy)*h/2)-h/2, w, h};
+  };
   for(const ct of list){
     if(cap&&placed>=cap) break;
     const s2=P(ct.la,ct.lo);
@@ -1223,10 +1351,29 @@ function drawLabels(c){
     const size=big?14:mid?12:10.5;
     c.font=`${big?600:mid?500:400} ${size}px "MapSans",ui-sans-serif,-apple-system,Arial`;
     const w=c.measureText(ct.n).width, h=size+2;
-    let put=null;
-    for(const [dx,dy] of [[7,4],[-w-9,4],[7,-h+2],[-w-9,-h+2],[7,14],[7,-14]]){
-      const r={x:s2[0]+dx,y:s2[1]+dy-h+4,w,h};
-      if(fits(r)){taken.push(r);put=[r.x,r.y+h-4];break;}
+    const NEAR=nearCand(w,h);
+    const boxOf=f=>f.t==='n'
+      ? (NEAR[f.i]?{x:s2[0]+NEAR[f.i][0],y:s2[1]+NEAR[f.i][1]-h+4,w,h}:null)
+      : farBox(s2,FAR_R[(f.i/FAR_A.length)|0],FAR_A[f.i%FAR_A.length],w,h);
+    let put=null, fit=null, box=null;
+    // Спершу торішнє місце: якщо воно ще вільне, підпис не рухається.
+    const memo=CITYFIT.get(ct.n);
+    if(memo){ const r=boxOf(memo); if(r&&free(r)){ fit=memo; box=r; } }
+    if(!fit) for(let i=0;i<NEAR.length;i++){
+      const r={x:s2[0]+NEAR[i][0],y:s2[1]+NEAR[i][1]-h+4,w,h};
+      if(free(r)){ fit={t:'n',i}; box=r; break; }
+    }
+    if(!fit) for(let i=0;i<FAR_R.length*FAR_A.length;i++){
+      const r=farBox(s2,FAR_R[(i/FAR_A.length)|0],FAR_A[i%FAR_A.length],w,h);
+      if(free(r)){ fit={t:'f',i}; box=r; break; }
+    }
+    if(fit){
+      taken.push(box);
+      put=[box.x,box.y+h-4];
+      // Памʼять пише лише екран: експорт має інший кадр і масштаб, і його
+      // вибір, потрапивши в памʼять, зсунув би підписи на екрані після
+      // натискання «Експорт».
+      if(rec) CITYFIT.set(ct.n,fit);
     }
     if(!put) continue;
     placed++;                       // місце зайняте навіть під прибраний підпис
@@ -1244,6 +1391,21 @@ function drawLabels(c){
     if(ci<=0) continue;
     c.beginPath();c.arc(s2[0],s2[1],big?2.8:mid?2.1:1.5,0,7);
     c.fillStyle=hexa(ST.base.ink||'#eef4fb',.9*ci);c.fill();
+    // Виноска — тільки для дальнього виносу. Біля крапки лінія зайва: там
+    // і так видно, до чого належить напис. А назва, віднесена на 40 px без
+    // лінії, читається як підпис сусіднього обʼєкта.
+    if(fit&&fit.t==='f'){
+      const lx=Math.max(box.x,Math.min(s2[0],box.x+box.w));
+      const ly=Math.max(box.y,Math.min(s2[1],box.y+box.h));
+      const dx=lx-s2[0], dy=ly-s2[1], len=Math.hypot(dx,dy)||1;
+      c.save();
+      c.strokeStyle=hexa(ST.base.inkDim||'#c6d8ea',.5*ci);
+      c.lineWidth=1;
+      c.beginPath();
+      c.moveTo(s2[0]+dx/len*4, s2[1]+dy/len*4);
+      c.lineTo(lx-dx/len*2, ly-dy/len*2);
+      c.stroke();c.restore();
+    }
     c.save();c.textAlign='left';
     // Ореол під написом залежить від тла: на світлій підкладці чорна тінь
     // виглядає як бруд, на темній без неї напис зникає над містом.

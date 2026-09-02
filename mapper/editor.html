@@ -1161,6 +1161,10 @@ function Obstacles(){
     get size(){ return n; },
     add(x,y,w,h){
       if(!(w>0&&h>0)||!isFinite(x)||!isFinite(y)) return;
+      // Поза кадром слід нікому не заважає: підпис ставиться лише біля
+      // крапки, яка сама в кадрі, і найдальший винос — десятки пікселів.
+      const M=200;
+      if(x+w<-M||x>Wp+M||y+h<-M||y>Hp+M) return;
       if(n>24000) return;             // запобіжник: слід не має коштувати кадру
       n++;
       const b={x,y,w,h};
@@ -1187,12 +1191,30 @@ function objObstacles(c){
   const line=(pts,bows,tension,pad)=>{
     if(!pts||pts.length<2) return;
     const A=pts.map(p=>P(p[0],p[1]));
-    let len=0;
-    for(let i=0;i<A.length-1;i++) len+=Math.hypot(A[i+1][0]-A[i][0],A[i+1][1]-A[i][1]);
-    if(!isFinite(len)) return;
-    const n=Math.max(2,Math.min(400,Math.round(len/Math.max(4,pad))));
-    for(const q of samplePath(pts,bows,tension,n)) O.add(q.x-pad,q.y-pad,2*pad,2*pad);
-    for(const a of [A[0],A[A.length-1]]) O.add(a[0]-pad,a[1]-pad,2*pad,2*pad);
+    if(A.some(p=>!isFinite(p[0])||!isFinite(p[1]))) return;
+    // Вибірка йде лише по ВИДИМИХ проміжках. Рівномірна вибірка по всій
+    // довжині з обмеженням числа точок на великому зумі рідшає до пунктиру:
+    // при k=12 крок виходив 29 px на квадратиках по 14, тобто між ними
+    // лишалась дірка, у яку підпис сідає просто на лінію. Заміряно.
+    const M=140;
+    const near=(a,b)=>!(Math.max(a[0],b[0])<-M||Math.min(a[0],b[0])>Wp+M||
+                        Math.max(a[1],b[1])<-M||Math.min(a[1],b[1])>Hp+M);
+    let i=0;
+    while(i<A.length-1){
+      if(!near(A[i],A[i+1])){ i++; continue; }
+      let j=i;
+      while(j<A.length-1&&near(A[j],A[j+1])) j++;
+      // По сусідньому вузлу з кожного боку: форма Catmull-Rom залежить від
+      // них, і без них видимий шматок ліг би не там, де намальована лінія.
+      const a=Math.max(0,i-1), b=Math.min(A.length,j+2);
+      let len=0;
+      for(let q=a;q<b-1;q++) len+=Math.hypot(A[q+1][0]-A[q][0],A[q+1][1]-A[q][1]);
+      const n=Math.max(2,Math.min(1600,Math.round(len/Math.max(3,pad))));
+      const sub=pts.slice(a,b), sb=bows?bows.slice(a,Math.max(a,b-1)):null;
+      for(const q of samplePath(sub,sb,tension,n)) O.add(q.x-pad,q.y-pad,2*pad,2*pad);
+      for(const q of [A[i],A[j]]) O.add(q[0]-pad,q[1]-pad,2*pad,2*pad);
+      i=j+1;
+    }
   };
   // drawList(), а не S.objs: у режимі коридорів на карті лежать зведені
   // маршрути, і слід має бути від того, що видно, а не від вихідних ниток.
@@ -1202,7 +1224,18 @@ function objObstacles(c){
       const ST=S.style[catOf(o)]||{};
       dot(P(o.la,o.lo),(o.size||ST.size||9)*2.2);
     }else if(o.kind==='glyph'){
-      dot(P(o.la,o.lo),((o.size||22)/2)*1.25);
+      const r=(o.size||22)/2, s=P(o.la,o.lo);
+      dot(s,r*1.25);
+      // Знак може мати власний підпис під собою, і він малюється завжди —
+      // не тільки при виборі. Це така сама фарба на карті, як сам знак.
+      if(o.label){
+        const fs=Math.max(10,r*0.9);
+        c.save();
+        c.font=`600 ${fs}px "MapSans",ui-sans-serif,-apple-system,Arial`;
+        const w=c.measureText(o.label).width;
+        c.restore();
+        O.add(s[0]-w/2,s[1]+r*1.5-fs,w,fs+4);
+      }
     }else if(o.kind==='launch'){
       const s=P(o.la,o.lo); O.add(s[0]-10,s[1]-18,30,26);
     }else if(o.kind==='target'){
@@ -1214,6 +1247,7 @@ function objObstacles(c){
       const s=P(o.la,o.lo);
       c.save();
       c.font=`${o.weight||600} ${size}px "MapSans",ui-sans-serif,-apple-system,Arial`;
+      c.letterSpacing=(o.ls||0)+'px';        // як у drawText: розрядка додає ширини
       const w=Math.max(...lines.map(l=>c.measureText(l).width));
       c.restore();
       const x=o.align==='center'?s[0]-w/2:o.align==='right'?s[0]-w:s[0];
@@ -1226,13 +1260,31 @@ function objObstacles(c){
     }else if(o.kind==='arrow'){
       const head=o.head||10;
       line(o.pts,[o.bow],1,Math.max(5,(o.width||2.2)/2+3));
-      dot(P(o.pts[1][0],o.pts[1][1]),head*0.8);
-      if(o.both) dot(P(o.pts[0][0],o.pts[0][1]),head*0.8);
+      const pa=P(o.pts[0][0],o.pts[0][1]), pb=P(o.pts[1][0],o.pts[1][1]);
+      dot(pb,head*0.8);
+      if(o.both) dot(pa,head*0.8);
+      if(o.label){
+        // Те саме місце, що й у drawArrow: середина між серединою хорди
+        // й керувальною точкою, на 6 px вище.
+        const cp=o.bow?P(...bowPoint(o.pts,0,o.bow)):[(pa[0]+pb[0])/2,(pa[1]+pb[1])/2];
+        const cx=((pa[0]+pb[0])/2+cp[0])/2, cy=((pa[1]+pb[1])/2+cp[1])/2-6;
+        const fs=o.size||12;
+        c.save();
+        c.font=`600 ${fs}px "MapSans",ui-sans-serif,-apple-system,Arial`;
+        const w=c.measureText(o.label).width;
+        c.restore();
+        O.add(cx-w/2,cy-fs,w,fs+4);
+      }
     }
     // Зона — заливка, а не чорнило: назва поверх неї читається, і слід від
     // неї заборонив би підписи на пів кадру.
   }
-  for(const g of S.ghosts||[]) if(ghostVisible(g)) line(g.pts,null,1,4);
+  // Присуд видимості підказок стоїть у ДВОХ місцях: сила ланки
+  // (`ghostVisible`) і сам шар (`S.layers.ghosts`) — так це й у draw().
+  // Без другої половини вимкнений шар нічого не міняв: підказок не видно,
+  // а назви міст усе одно від них відходили. Заміряно: 9 назв із 40.
+  if(S.layers.ghosts!==false)
+    for(const g of S.ghosts||[]) if(ghostVisible(g)) line(g.pts,null,1,4);
   return O;
 }
 // Де назва стояла минулого кадру. Без цього при панорамуванні підпис

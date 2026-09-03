@@ -439,3 +439,50 @@ class TestDeclaredProfile(unittest.TestCase):
         self.assertEqual(a["with_count"], b["with_count"])
         self.assertGreater(a["largest"], b["largest"] * 4)
         self.assertGreater(b["count_regions"], a["count_regions"] * 4)
+
+
+class TestDirectionTargetIsNotThePlace(unittest.TestCase):
+    """Куди летить — не там, де спостерігають.
+
+    Координата події береться як топонім із найбільшим населенням, і саме
+    тому в крапку перетворювалась ЦІЛЬ РУХУ: місто, куди летить, майже завжди
+    більше за село, звідки дивляться. Виміряно на 15 добах — 286 із 8414
+    координат (3.4%). Напрямки й так витягує `vectors.py` окремо.
+
+    Тексти дослівні з `data/`; координати й населення підставлені з газетира,
+    щоб тест не потребував самого газетира (132 МБ).
+    """
+
+    @staticmethod
+    def _post(text, places):
+        """places: [(назва, lat, lon, населення)] — позиції беруться з тексту."""
+        return {"text": text, "entities": [
+            {"type": "нп", "match": name, "pos": text.index(name),
+             "lat": lat, "lon": lon, "geo_pop": pop, "geo_conf": "region"}
+            for name, lat, lon, pop in places]}
+
+    def test_origin_wins_over_destination(self):
+        p = self._post("Тыловое БПЛА в направлении Севастополь",
+                       [("Тыловое", 44.47, 33.74, 0),
+                        ("Севастополь", 44.60, 33.53, 393304)])
+        self.assertEqual(ST.point_entity(p)["match"], "Тыловое")
+
+    def test_further_in_direction_also_counts(self):
+        p = self._post("Трубчевск и далее в направлении Брянск тревога по БПЛА",
+                       [("Трубчевск", 52.58, 33.77, 14047),
+                        ("Брянск", 53.25, 34.37, 415721)])
+        self.assertEqual(ST.point_entity(p)["match"], "Трубчевск")
+
+    def test_lone_destination_is_kept(self):
+        """Як не лишається нічого — краще неточна крапка, ніж втрата події."""
+        p = self._post("В направлении Приморско-Ахтарск через Азовское море "
+                       "крылатая ракета ПКР Нептун или реактивный БПЛА",
+                       [("Приморско-Ахтарск", 46.05, 38.18, 33102)])
+        self.assertEqual(ST.point_entity(p)["match"], "Приморско-Ахтарск")
+
+    def test_from_is_a_place_not_a_direction(self):
+        """«От X» — це місце спостереження, і воно таким лишається."""
+        p = self._post("От Томаровки в сторону Белгорода группа БПЛА.",
+                       [("Томаровки", 50.68, 36.24, 7000),
+                        ("Белгорода", 50.60, 36.59, 391702)])
+        self.assertEqual(ST.point_entity(p)["match"], "Томаровки")

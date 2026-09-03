@@ -36,9 +36,8 @@ class TestSourceFallbacks(unittest.TestCase):
     """Район і область як джерело — тими самими правилами, що в геокоді.
 
     «Ливенский» без слова «район» лежить у газетирі як «Ливенский район» і
-    береться ТІЛЬКИ зі своєї області (admin1); «от Брянской области» дає
-    центроїд області — для dst газетир і так віддає ADM1, для src через
-    прикметникову форму — ні. Заміряно: 59 + 11 векторів за 15 діб.
+    береться ТІЛЬКИ зі своєї області (admin1). Заміряно: 59 векторів за
+    15 діб. Тексти дослівні з `data/`.
     """
 
     @classmethod
@@ -56,20 +55,35 @@ class TestSourceFallbacks(unittest.TestCase):
         self.assertTrue(vs, "вектор не розібрано")
         return vs[0]
 
-    def test_oblast_adjective_source_becomes_the_region_centroid(self):
+    def test_district_source_is_recovered_within_its_oblast(self):
+        v = self._vec("Куськино, Мантуровский район, Курская область - пролёт "
+                      "БПЛА на север в сторону Орловской области.\n📡\n"
+                      "Локатор России -\n@locatorru", "Курська")
+        self.assertIsNotNone(v["src"])
+        self.assertIn("Manturov", v["src_name"])
+
+    def test_oblast_source_stays_unresolved_on_purpose(self):
+        """Центроїд області як кінець вектора не має споживача.
+
+        Спроба віддавати його зробила два лиха: `routes.py` не впізнавав
+        українські ключі як область і пустив 9 центроїдів у маршрути
+        редактора (від чого стоїть TestAreaEndpoints), а міста-маркери
+        («Казань») давали центроїд замість міста. І в районний фолбек
+        область теж не йде — «Брянская район» знаходило міський округ
+        Брянська. Тому — None.
+        """
         v = self._vec("Следующая многочисленная волна БПЛА от ГГ Брянская "
                       "область с дальнейшим прогнозируемым пролётом через все "
                       "районы в направлении Орловской, Калужской и Смоленской "
                       "области", "Брянська")
-        self.assertIsNotNone(v["src"])
-        self.assertEqual(v["src_name"], "Брянська")
-        self.assertEqual(tuple(v["src"]), tuple(self.cfg.geo["Брянська"]))
+        self.assertIsNone(v["src"])
+        self.assertNotIn(v.get("src_name"), self.cfg.geo)
 
-    def test_without_the_maps_the_old_behaviour_is_unchanged(self):
-        """Фолбеки мовчать, якщо їм не дали карт кодів і патернів."""
-        posts = [{"text": "Следующая многочисленная волна БПЛА от ГГ Брянская "
-                          "область в направлении Орловской области",
+    def test_without_the_codes_the_old_behaviour_is_unchanged(self):
+        """Фолбек мовчить, якщо йому не дали карти кодів admin1."""
+        posts = [{"text": "Куськино, Мантуровский район, Курская область - "
+                          "пролёт БПЛА на север в сторону Орловской области.",
                   "date": "2026-08-20T10:00:00+03:00", "url": "u", "channel": "t",
-                  "entities": [{"type": "регіон", "value": "Брянська"}]}]
+                  "entities": [{"type": "регіон", "value": "Курська"}]}]
         v = V.geocode_vectors(posts, self.gaz, self.cfg.geo)[0]
         self.assertIsNone(v["src"])

@@ -315,3 +315,32 @@ class TestAdjectiveHomonyms(unittest.TestCase):
         ]:
             with self.subTest(text=text[:40]):
                 self.assertEqual(self.first_region(text), want)
+
+
+class TestVolzhsk(unittest.TestCase):
+    """Волжский (Волгоградська) і Волжск (Марій Ел) — різні місця за 600 км.
+
+    `Волжск\\w*` брав обидва: 13 постів про Марій Ел їхали у Волгоградську, і
+    через це «Волжск, Республика Марий Эл - пролёт в сторону Казань» шукав
+    Казань біля Волгограда й не знаходив. Тексти дослівні з `data/`.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.cfg = E.Config.load(CFG)
+
+    def first_region(self, text):
+        rs = [e["value"] for e in E.entities_of(text, self.cfg)
+              if e["type"] == "регіон"]
+        return rs[0] if rs else None
+
+    def test_volzhsky_city_is_volgograd(self):
+        self.assertEqual(self.first_region(
+            "Волжский, Волгоградская область\nРабота ПВО по БПЛА"), "Волгоградська")
+
+    def test_mari_el_is_not_volgograd(self):
+        for text in ["Волжский район\nРеспублика Марий Эл\nФиксация БПЛА",
+                     "Волжск, Республика Марий Эл - пролёт от 11 БПЛА в сторону "
+                     "Казань, Зеленодольск."]:
+            with self.subTest(text=text[:30]):
+                self.assertNotEqual(self.first_region(text), "Волгоградська")

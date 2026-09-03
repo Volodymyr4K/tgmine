@@ -128,6 +128,12 @@ class Borders:
                 max_km: float = NEAR_KM) -> tuple[str | None, str | None]:
         """Найближчий полігон, якщо точка не потрапила в жоден.
 
+        Відстань рахується до ВІДРІЗКА контуру, не до вершини. Різниця не
+        косметична: у полігонах театру 2348 відрізків довші за 10 км (у
+        Ленінградській є 163-кілометровий), і точка за кілометр від такої
+        прямої лежить за десятки кілометрів від обох її кінців — за
+        вершинами вона б не знайшлась і обʼєкт пішов би у відсів.
+
         Рівнокутне наближення: на цих широтах похибка часток відсотка, а
         радіус усього 10 км. Тягнути сюди haversine із `geocode` заради
         цього не варто — `territory` навмисно не залежить від газетира.
@@ -140,13 +146,22 @@ class Borders:
                     and bb[1] - deg <= lat <= bb[3] + deg):
                 continue
             for ring in rings:
-                for x, y in ring:
-                    d = math.hypot((y - lat), (x - lon) * klon) * 111.0
+                for (x1, y1), (x2, y2) in zip(ring, ring[1:]):
+                    d = self._seg_km(lat, lon, y1, x1, y2, x2, klon)
                     if best is None or d < best[0]:
                         best = (d, a3, name)
         if best is None or best[0] > max_km:
             return None, None
         return best[1], best[2]
+
+    @staticmethod
+    def _seg_km(lat, lon, y1, x1, y2, x2, klon) -> float:
+        """Відстань від точки до відрізка контуру, у кілометрах."""
+        px, py = (lon - x1) * klon, lat - y1
+        vx, vy = (x2 - x1) * klon, y2 - y1
+        L = vx * vx + vy * vy
+        t = 0.0 if L == 0 else max(0.0, min(1.0, (px * vx + py * vy) / L))
+        return math.hypot(px - t * vx, py - t * vy) * 111.0
 
 
 def is_excluded(obj: dict, borders: Borders) -> str | None:

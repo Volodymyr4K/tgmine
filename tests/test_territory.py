@@ -106,6 +106,21 @@ class TestUnlocatedPoints(unittest.TestCase):
         self.assertIsNotNone(why)
         self.assertIn("Одесская", why)
 
+    def test_distance_is_to_the_segment_not_the_vertex(self):
+        """Мілини Азова й Сиваша: контур там прокладено довгими прямими.
+
+        Заміряно: у театрі 2348 відрізків контуру довші за 10 км, і в 12
+        місцях точка за 2 км від такої прямої лежить далі 10 км від ОБОХ її
+        кінців. Найгірше — Азов біля Криму: 20 км до вершини при 2 км до
+        відрізка. За вершинами такий обʼєкт не знайшов би нічого й пішов би
+        у відсів як «не впізнали», хоча це кримське узбережжя.
+        """
+        lat, lon = 45.5307, 35.2097
+        self.assertEqual(self.borders.locate(lat, lon), (None, None),
+                         "точка мала б лежати поза полігонами")
+        self.assertEqual(self.borders.nearest(lat, lon)[0], "RUS")
+        self.assertIsNone(is_excluded({"lat": lat, "lon": lon}, self.borders))
+
     def test_current_set_loses_nothing(self):
         """Правка не має нічого викидати з наявного переліку."""
         if not TARGETS.exists():

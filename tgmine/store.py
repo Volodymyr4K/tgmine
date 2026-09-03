@@ -41,7 +41,42 @@ MSK = timezone(timedelta(hours=3))
 # 14: крапка не ставиться на цілі руху («в направлении X») — див. point_entity.
 PIPELINE_VERSION = 14
 
-COUNT_N = re.compile(r"от\s+(\d+)\s*(?:БПЛА|бпла)", re.I)
+# Число апаратів. Єдине місце в даних, де воно взагалі є, — і воно ж єдине,
+# що йде у видах числом (`declared()["largest"]`), тому ціна хибного збігу
+# найвища в проєкті: одне зведення МО РФ у наборі робить «найбільшу групу»
+# ночі втричі більшою.
+#
+# Стара регулярка була `от\s+(\d+)\s*БПЛА` — 67.1% постів, де число є.
+# Решту писав locatorru іншими словами: «Фиксация 2 БПЛА» (402), «пролёт
+# 2 БПЛА» (328), «пролёт ещё 2 БПЛА» (80), «ещё пролёт» (53), «ещё 2 БПЛА»
+# (34). Стало 83.4%.
+#
+# Розширювати без якоря не можна: у корпусі 1629 збігів «N БПЛА» на початку
+# рядка — це майже все зведення «За прошедшую ночь ... было уничтожено 76
+# БПЛА: 33 БПЛА над Саратовской...». Тому потрібен тригер спостереження ПЕРЕД
+# числом і заборона на слова зведення.
+DRONE_N = re.compile(r"(\d+)\s*(?:БПЛА|бпла)", re.I)
+#: Тригер спостереження впритул перед числом.
+DRONE_OBS = re.compile(
+    r"\b(?:фиксац\w*|прол[её]т\w*|прошло|наблюда\w*|групп\w*|зашл\w*|"
+    r"ид[уеё]т|появит\w*|от|ещ[ёе])\s*$", re.I)
+#: Слова зведення. `\b` обовʼязкове: без нього «от» збігається всередині
+#: «сосредот-от-очить», і аналітичний абзац зі «сводки» віддавав 1600 —
+#: спіймано заміром, це стало б «найбільшою групою» тієї ночі.
+DRONE_BAN = re.compile(
+    r"\b(?:уничтож\w*|сбит\w*|перехвач\w*|прошедш\w*|за\s+ноч\w*|"
+    r"в\s+период|итог\w*|всего|около|сосредоточ\w*)", re.I)
+
+
+def drones_of(text):
+    """Скільки апаратів заявлено. None, якщо числа нема або це зведення."""
+    for m in DRONE_N.finditer(text):
+        back = text[max(0, m.start() - 40):m.start()]
+        if DRONE_BAN.search(back):
+            continue
+        if DRONE_OBS.search(back):
+            return int(m.group(1))
+    return None
 GROUP_RE = re.compile(r"групп\w*", re.I)
 TYPE_RE = re.compile(r"(Хорнет|Дартс|Лютый|Бабай|реактивн\w*)", re.I)
 
@@ -454,7 +489,7 @@ class Store:
         #
         # Виміряно на корпусі: 229 -> 1059 подій, тобто 0.2% -> 1.0%.
         noise = dropped > 0 and (len(clean) < 25 or k == "інше")
-        m = COUNT_N.search(clean)
+        m = drones_of(clean)
         ty = TYPE_RE.search(clean)
         region = next((e["value"] for e in p.get("entities", [])
                        if e["type"] == "регіон"), None)
@@ -492,7 +527,7 @@ class Store:
             "geo_conf": (best or {}).get("geo_conf"),
             "depth": round(depth_km((lat, lon))) if lat else None,
             "region": region,
-            "drones": int(m.group(1)) if m else None,
+            "drones": m,
             "group": bool(GROUP_RE.search(p["text"])),
             "utype": ty.group(1).capitalize() if ty else None,
             "dup_of": p.get("_dup_of"),

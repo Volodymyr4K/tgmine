@@ -126,8 +126,17 @@ class TestNoDuplicateClassifier(unittest.TestCase):
         self.assertEqual(len(found), 1, f"копії класифікатора: {found}")
         self.assertTrue(found[0].startswith("store.py:"), found)
 
-    def test_no_stale_copy_of_drones_of(self):
-        self.assertEqual(self._definitions_of("drones_of"), [])
+    def test_drones_of_defined_once(self):
+        """Раніше тест вимагав, щоб такої функції не було ніде.
+
+        Причина була в тому, що витяг числа жив прямо в `raid.py` окремою
+        копією. Тепер він один і в `store.py` — а вимога лишається та сама:
+        рівно одне визначення. Число апаратів іде у видах числом, і дві
+        версії правила означали б два різні «найбільша група» на сайті.
+        """
+        found = self._definitions_of("drones_of")
+        self.assertEqual(len(found), 1, f"копії витягу числа: {found}")
+        self.assertTrue(found[0].startswith("store.py:"), found)
 
 
 class TestTargetId(unittest.TestCase):
@@ -534,3 +543,57 @@ class TestDirectionFixtureMatchesGazetteer(unittest.TestCase):
                 self.assertEqual(best["pop"], pop)
                 self.assertLess(GC.haversine((lat, lon),
                                              (best["lat"], best["lon"])), 1.0)
+
+
+class TestDroneCount(unittest.TestCase):
+    """Число апаратів — єдине число, яке йде у видах як число.
+
+    `declared()["largest"]` друкується на сторінці, тому ціна хибного збігу
+    тут найвища в проєкті. Стара регулярка `от\\s+(\\d+)\\s*БПЛА` брала 67.1%
+    постів, де число взагалі є; решту locatorru пише інакше — «Фиксация 2
+    БПЛА» (402), «пролёт 2 БПЛА» (328), «ещё 2 БПЛА» (34). Стало 83.4%.
+
+    Заміряно на 15 добах: `largest` не змінився ЖОДНОЇ ночі — нове ловить
+    лише дрібні числа (медіана 2), а `with_count` виріс (25 -> 51 за добу).
+
+    Тексти дослівні з `data/`.
+    """
+
+    def test_locatorru_phrasings(self):
+        for text, want in [
+            ("Бабынинский район\nКалужская область\nФиксация 2 БПЛА", 2),
+            ("Серпейск, Мещовский район, Калужская область - пролёт 2 БПЛА "
+             "на северо-восток.\n📡\nЛокатор России -\n@locatorru", 2),
+            ("Мигулинская, Верхнедонской район, Ростовская область - ещё "
+             "2 БПЛА на Вешенская.\n📡\nЛокатор России -\n@locatorru", 2),
+        ]:
+            with self.subTest(text=text[:40]):
+                self.assertEqual(ST.drones_of(text), want)
+
+    def test_old_phrasing_still_works(self):
+        self.assertEqual(ST.drones_of(
+            "Шумячи, Смоленская область - фиксация от 2 БПЛА на север.\n📡\n"
+            "Локатор России -\n@locatorru"), 2)
+
+    def test_ministry_digest_is_not_a_sighting(self):
+        """1629 збігів «N БПЛА» у корпусі — це саме такі зведення."""
+        self.assertIsNone(ST.drones_of(
+            "За прошедшую ночь силами противовоздушной обороны было "
+            "уничтожено 76 БПЛА:\n🔺\n33 БПЛА над Саратовской областью;\n🔺\n"
+            "17 БПЛА над акваторией Чёрного моря;"))
+
+    def test_analytic_prose_is_not_a_sighting(self):
+        """Ця фраза й показала, що тригеру потрібні межі слова.
+
+        Без `\\b` тригер «от» збігався всередині «сосредот-от-очить», і
+        аналітичний абзац зі зведення віддавав 1600 — тобто «найбільша група»
+        тієї ночі стала б у дванадцять разів більшою за реальний максимум
+        корпусу (130).
+        """
+        self.assertIsNone(ST.drones_of(
+            "киевские дроны летят в таком количестве, что и тактическая "
+            "ядерка им не нужна, если сосредоточить 1600 БПЛА "
+            "(подтвержденный антирекорд, кстати) на узком тыловом участке"))
+
+    def test_no_number_no_count(self):
+        self.assertIsNone(ST.drones_of("Брянская область\nТревога по БПЛА"))

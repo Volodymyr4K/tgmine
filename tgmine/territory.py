@@ -23,6 +23,7 @@
 """
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 SHP = "gazetteer/ne_10m_admin_1_states_provinces"
@@ -116,14 +117,61 @@ class Borders:
                 return a3, name
         return None, None
 
+    #: Скільки кілометрів до берега ще вважається «той самий регіон».
+    #: Усі 48 нелокалізованих обʼєктів набору лежать у межах 4.5 км від
+    #: полігону (причали Севастополя й Новоросійська, коси Азова, Приморськ
+    #: на Балтиці) — це похибка контуру NE, а не інша країна. 10 лишає запас
+    #: і не дотягується через жодну протоку.
+    NEAR_KM = 10.0
+
+    def nearest(self, lat: float, lon: float,
+                max_km: float = NEAR_KM) -> tuple[str | None, str | None]:
+        """Найближчий полігон, якщо точка не потрапила в жоден.
+
+        Рівнокутне наближення: на цих широтах похибка часток відсотка, а
+        радіус усього 10 км. Тягнути сюди haversine із `geocode` заради
+        цього не варто — `territory` навмисно не залежить від газетира.
+        """
+        deg = max_km / 111.0
+        klon = math.cos(math.radians(lat)) or 1e-9
+        best = None
+        for a3, name, bb, rings in self.polys:
+            if not (bb[0] - deg <= lon <= bb[2] + deg
+                    and bb[1] - deg <= lat <= bb[3] + deg):
+                continue
+            for ring in rings:
+                for x, y in ring:
+                    d = math.hypot((y - lat), (x - lon) * klon) * 111.0
+                    if best is None or d < best[0]:
+                        best = (d, a3, name)
+        if best is None or best[0] > max_km:
+            return None, None
+        return best[1], best[2]
+
 
 def is_excluded(obj: dict, borders: Borders) -> str | None:
-    """Причина відсіву, або None якщо обʼєкт лишається."""
+    """Причина відсіву, або None якщо обʼєкт лишається.
+
+    Правило для сумнівних — прибирати: зайве прибрати означає трохи менше
+    покриття, зайве лишити означає рівно ту шкоду, від якої все це. Тому
+    точка, яку межі не впізнали ЗОВСІМ, теж іде геть.
+
+    Але «наосліп прибирати нелокалізоване» неприпустимо: у наборі таких 48,
+    і всі до одного — прибережні (причали Севастополя, Шесхаріс у
+    Новоросійську, коси Азова, Приморськ на Балтиці), максимум 4.5 км від
+    контуру. Серед них Шесхаріс і склад БК Yany Kapu з ненульовим жаром.
+    Тому спершу дивимось найближчий полігон у межах 10 км і судимо за ним,
+    і лише коли й його нема — відсіваємо.
+    """
     a3, region = borders.locate(obj["lat"], obj["lon"])
+    if a3 is None:
+        a3, region = borders.nearest(obj["lat"], obj["lon"])
     if obj.get("osm") in EXCLUDE_OSM:
         return "ручний відсів (підконтрольна Україні територія)"
     if region in UA_REAR:
         return f"тил України ({region})"
+    if a3 is None:
+        return "межі не впізнали точку (правило сумніву)"
     if a3 == "UKR" and region not in UA_CONTESTED:
         # Нова назва регіону в NE або область, якої нема в жодному списку —
         # мовчки лишати не можна, бо це рівно той випадок, який ми ловимо.

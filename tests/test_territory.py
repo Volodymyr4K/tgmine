@@ -13,7 +13,7 @@ import json
 import unittest
 
 from tests.helpers import GAZ, ROOT
-from tgmine.territory import Borders, UA_CONTESTED, filter_objects
+from tgmine.territory import Borders, UA_CONTESTED, filter_objects, is_excluded
 
 SHP = GAZ / "ne_10m_admin_1_states_provinces"
 TARGETS = ROOT / "targets.json"
@@ -64,3 +64,53 @@ class TestNoUkrainianTargets(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(SHP.with_suffix(".shp").exists(), "нема газетира")
+class TestUnlocatedPoints(unittest.TestCase):
+    """Точка, яку межі не впізнали, теж іде геть — але не наосліп.
+
+    Правило проєкту для сумнівних — прибирати. `is_excluded` натомість
+    ЛИШАВ обʼєкт, якщо `locate` повернув (None, None), тобто діяв рівно
+    навпаки. Сьогодні це коштувало нуль (усіх таких 48, і всі російські чи
+    окуповані), але діра відкривалась би після кожного перезбору targets.
+
+    Прибирати нелокалізоване наосліп теж не можна: усі 48 — прибережні,
+    максимум 4.5 км від контуру NE, і серед них Шесхаріс (жар 78) та склад
+    БК Yany Kapu (жар 43). Тому спершу найближчий полігон у межах 10 км.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.borders = Borders.load(SHP)
+
+    def test_coastal_russian_objects_stay(self):
+        """Причал за кілометр від контуру — це той самий берег."""
+        for name, lat, lon in [("Шесхаріс (Новоросійськ)", 44.7, 37.8),
+                               ("Склад БК (Yany Kapu)", 46.09676, 33.63691),
+                               ("Нафтопорт Приморськ", 60.35, 28.68)]:
+            with self.subTest(name=name):
+                self.assertIsNone(
+                    is_excluded({"lat": lat, "lon": lon, "name": name},
+                                self.borders))
+
+    def test_open_sea_is_dropped(self):
+        """Ціль посеред Чорного моря — це або сміття, або не ціль."""
+        why = is_excluded({"lat": 43.2, "lon": 32.0}, self.borders)
+        self.assertIsNotNone(why)
+        self.assertIn("не впізнали", why)
+
+    def test_ukrainian_coast_is_dropped(self):
+        """Саме той випадок, проти якого правило: берег під Одесою."""
+        why = is_excluded({"lat": 46.35, "lon": 30.68}, self.borders)
+        self.assertIsNotNone(why)
+        self.assertIn("Одесская", why)
+
+    def test_current_set_loses_nothing(self):
+        """Правка не має нічого викидати з наявного переліку."""
+        if not TARGETS.exists():
+            self.skipTest("нема targets.json")
+        objs = json.loads(TARGETS.read_text(encoding="utf-8"))["objects"]
+        dropped = [o for o in objs if o.get("lat") is not None
+                   and is_excluded(o, self.borders)]
+        self.assertEqual(dropped, [], f"відсіялось зайве: {dropped[:3]}")

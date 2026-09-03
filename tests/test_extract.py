@@ -290,6 +290,18 @@ class TestAdjectiveHomonyms(unittest.TestCase):
             with self.subTest(text=text[:40]):
                 self.assertNotEqual(self.first_region(text), wrong)
 
+    def test_luhanske_village_is_not_luhansk(self):
+        """«Луганское» — село під Джанкоєм або під Дебальцевим, не Луганщина."""
+        self.assertEqual(self.first_region(
+            "Луганское / Новокрымское и близлежащие / Опасность по БПЛА / "
+            "Республика Крым"), "Крим")
+        self.assertEqual(self.first_region(
+            "Еленовка, Луганское ДНР ещё группа БПЛА на восток, ю-в"),
+            "ТОТ_Донецьк")
+        self.assertEqual(self.first_region(
+            "С запада фиксации БПЛА на Станица Луганская, ЛНР далее на "
+            "Чертково, Миллерово"), "ТОТ_Луганськ")
+
     def test_the_real_place_still_matches(self):
         for text, want in [
             ("Керченский полуостров | Керчь | Крымский мост | Опасность по БПЛА",

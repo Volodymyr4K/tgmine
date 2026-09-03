@@ -102,7 +102,10 @@ def main(date="2026-07-17", h_from="12", h_to="12", src=None):
               "entities": [{"type": "регіон", "value": e["region"]}] if e.get("region") else []}
              for e in raw if not e.get("dup_of") and not e.get("noise")]
 
-    vecs = [v for v in V.geocode_vectors(night, gaz, cfg.geo) if v["src"]]
+    vecs = [v for v in V.geocode_vectors(
+                night, gaz, cfg.geo,
+                region_a1=gaz.region_codes(cfg.entities["регіон"], cfg.geo),
+                region_rx=cfg.entities["регіон"]) if v["src"]]
     for v in vecs:
         v["hhmm"] = datetime.fromisoformat(v["t"]).astimezone(MSK).strftime("%H:%M")
         v["t"] = datetime.fromisoformat(v["t"]).astimezone(MSK).isoformat()

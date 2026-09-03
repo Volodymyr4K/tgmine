@@ -33,6 +33,7 @@ import re
 from datetime import datetime
 
 from tgmine import associate as AS
+from tgmine import territory as T
 
 # Клас засобу з тексту повідомлення. Регулярки дзеркалять `tags` у
 # configs/ru-monitor.yaml: у сховищі клас не зберігається (там лише `utype`,
@@ -117,12 +118,9 @@ BACK_V_MIN, BACK_V_MAX = 110.0, 260.0
 # Опорні точки кордону — ті самі, що в raid.py. Глибина потрібна, щоб
 # розрізняти «до кордону» і «вглиб»: без неї добудова однаково охоче тягла б
 # маршрут у неправильний бік.
-BORDER = [(52.15, 31.79), (51.60, 34.30), (50.45, 36.30), (49.60, 38.30),
-          (48.60, 39.70), (47.30, 38.30), (46.60, 35.30), (45.30, 32.60)]
-
-
 def depth_of(la, lo):
-    return min(hav((la, lo), b) for b in BORDER)
+    # підконтрольна Україні територія — territory.depth_km (одна на весь конвеєр)
+    return T.depth_km(la, lo)
 
 
 # Район і його ж центр — це те саме місце, названо двічі: «Киришський район ->
@@ -157,10 +155,6 @@ def _same_toponym(a, b):
             break
         common += 1
     return common >= 5 and common >= 0.6 * min(len(x), len(y))
-
-
-def depth_of(la, lo):
-    return min(hav((la, lo), b) for b in BORDER)
 
 
 def hav(a, b):

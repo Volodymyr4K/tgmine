@@ -17,13 +17,12 @@ import sys
 from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, ".")
-from tgmine import extract as E, geocode as GC, store as ST, tracker as TR, vectors as V
+from tgmine import extract as E, geocode as GC, store as ST, territory as T, tracker as TR, vectors as V
 from tgmine.labels import region_label
 
 MSK = timezone(timedelta(hours=3))
-# Кордон України — точка відліку: все, що ближче за 60 км, вважаємо заходом.
-BORDER = [(52.15, 31.79), (51.60, 34.30), (50.45, 36.30), (49.60, 38.30),
-          (48.60, 39.70), (47.30, 38.30), (46.60, 35.30), (45.30, 32.60)]
+# Точка відліку — підконтрольна Україні територія (territory.depth_km);
+# все, що ближче за 60 км, вважаємо заходом.
 
 
 def hav(a, b):
@@ -35,7 +34,7 @@ def hav(a, b):
 
 
 def depth(pt):
-    return min(hav(pt, b) for b in BORDER)
+    return T.depth_km(pt[0], pt[1])
 
 
 #: Скільки перемішувань. 20 вистачає для середнього; 40 змінюють z на ~0.1,

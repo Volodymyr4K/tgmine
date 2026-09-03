@@ -23,6 +23,7 @@
 """
 from __future__ import annotations
 
+import json
 import math
 from pathlib import Path
 
@@ -210,3 +211,64 @@ def filter_objects(objects: list[dict], borders: Borders | None = None,
     for why, objs in sorted(dropped.items(), key=lambda kv: -len(kv[1])):
         log(f"  {len(objs):4}  {why}")
     return kept
+
+
+# ---------------------------------------------------------------------------
+# Глибина: відстань до підконтрольної Україні території.
+#
+# Раніше «глибина» рахувалась як відстань до найближчої з ВОСЬМИ точок
+# ламаної, намальованої від руки, у трьох копіях (store, raid, routes).
+# Заміряно проти справжніх полігонів: зсув +53 км у медіані, у Криму −117 км.
+# Держкордон як референс відкинуто числом: Мелітополь, Донецьк, Генічеськ за
+# Natural Earth — Україна, і 7.4% точкових подій отримали б глибину 0, а
+# «заходів» (<60 км) ставало б удвічі-втричі більше. Підконтрольна територія
+# на рівні областей (Україна мінус ті самі чотири області, що в UA_CONTESTED)
+# дає майже те саме, що ламана (медіана 248 проти 242, p90 661 проти 675),
+# але з файлу, а не з голови, і без аномалії в Криму.
+#
+# Файл `ukraine_controlled.json` будує mkregions.py; у рантаймі шейпфайл не
+# потрібен. Точність — ширина області; лінію зіткнення не апроксимуємо.
+UA_CONTROLLED = Path(__file__).resolve().parent.parent / "ukraine_controlled.json"
+_UA = None
+
+
+def _ua_rings():
+    global _UA
+    if _UA is None:
+        rings = json.loads(UA_CONTROLLED.read_text(encoding="utf-8"))
+        out = []
+        for ring in rings:
+            lats = [p[0] for p in ring]; lons = [p[1] for p in ring]
+            out.append((min(lats), max(lats), min(lons), max(lons), ring))
+        _UA = out
+    return _UA
+
+
+def _in_ring_latlon(lat, lon, ring) -> bool:
+    c = False
+    n = len(ring)
+    for k in range(n):
+        y1, x1 = ring[k]
+        y2, x2 = ring[(k + 1) % n]
+        if (y1 > lat) != (y2 > lat) and lon < (x2 - x1) * (lat - y1) / (y2 - y1) + x1:
+            c = not c
+    return c
+
+
+def depth_km(lat: float, lon: float) -> float:
+    """Кілометри від точки до підконтрольної Україні території; всередині — 0."""
+    k = math.cos(math.radians(lat)) or 1e-9
+    best = 1e9
+    for la0, la1, lo0, lo1, ring in _ua_rings():
+        # нижня межа відстані до bbox — далекі контури не перебираємо
+        dy = max(la0 - lat, 0.0, lat - la1) * 111.0
+        dx = max(lo0 - lon, 0.0, lon - lo1) * 111.0 * k
+        if math.hypot(dx, dy) >= best:
+            continue
+        if la0 <= lat <= la1 and lo0 <= lon <= lo1 and _in_ring_latlon(lat, lon, ring):
+            return 0.0
+        for (y1, x1), (y2, x2) in zip(ring, ring[1:] + ring[:1]):
+            d = Borders._seg_km(lat, lon, y1, x1, y2, x2, k)
+            if d < best:
+                best = d
+    return best

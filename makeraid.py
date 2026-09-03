@@ -213,7 +213,7 @@ TPL = r"""<!doctype html>
       саме по собі не означає що дрон там <span id="lgAlert"></span></div>
     <div><span style="color:#ff3c50">▮</span> <b>тривога + свіжі фіксації</b> — там реально щось є</div>
     <div><span style="color:var(--violet)">◗━</span> <b>об'єкт у русі</b> (трек)</div>
-    <div><span style="color:#4a5b6c">┄┄</span> кордон України</div>
+    <div><span style="color:#4a5b6c">┄┄</span> підконтрольна Україні територія (межа на рівні областей) — від неї рахується глибина</div>
     <div style="margin-top:6px;color:#55677a">розмір точки = заявлена кількість апаратів</div>
   </div>
   <div class="warnbox">__WARN__</div>
@@ -242,7 +242,7 @@ L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.p
 const q=(a,p)=>a.slice().sort((x,y)=>x-y)[Math.floor(a.length*p)];
 const la=EV.map(e=>e.lat), ln=EV.map(e=>e.lon);
 map.fitBounds([[q(la,.04),q(ln,.04)],[q(la,.96),q(ln,.96)]],{padding:[40,70],maxZoom:7});
-L.polyline(__BORDER__,{color:'#4a5b6c',weight:1.6,dashArray:'8 8',interactive:false}).addTo(map);
+__UA_RINGS__.forEach(r=>L.polyline(r,{color:'#4a5b6c',weight:1.6,dashArray:'8 8',interactive:false}).addTo(map));
 
 const RG=RAID.region_geo||{};
 let POLY={};
@@ -791,8 +791,11 @@ loadShared('regions.json').then(d=>{
 sync(); start();
 </script></body></html>"""
 
-BORDER = [[52.15, 31.79], [51.60, 34.30], [50.45, 36.30], [49.60, 38.30],
-          [48.60, 39.70], [47.30, 38.30], [46.60, 35.30], [45.30, 32.60]]
+# Пунктир на карті — межа підконтрольної Україні території, той самий контур,
+# від якого рахується «глибина» (territory.depth_km). Раніше тут була ламана з
+# восьми точок від руки, і вона ж у трьох копіях рахувала глибину.
+UA_RINGS = [[[la, lo] for la, lo in ring]
+            for _, _, _, _, ring in __import__("tgmine.territory", fromlist=["x"])._ua_rings()]
 
 
 def track_warning(null, n_tracks) -> str:
@@ -888,7 +891,7 @@ def main(src="raid_2026-07-17.json"):
     # підстановкам.
     html = render(TPL, {
         "__DATA__": jsdump(raid),
-        "__BORDER__": jsdump(BORDER),
+        "__UA_RINGS__": jsdump(UA_RINGS),
         "__TITLE__": f"Доба {raid['date']}",
         "__SUB__": sub,
         "__WARN__": warn,

@@ -13,7 +13,7 @@ import json
 import unittest
 
 from tests.helpers import GAZ, ROOT
-from tgmine.territory import Borders, UA_CONTESTED, filter_objects, is_excluded
+from tgmine.territory import Borders, UA_CONTESTED, depth_km, filter_objects, is_excluded
 
 SHP = GAZ / "ne_10m_admin_1_states_provinces"
 TARGETS = ROOT / "targets.json"
@@ -129,3 +129,73 @@ class TestUnlocatedPoints(unittest.TestCase):
         dropped = [o for o in objs if o.get("lat") is not None
                    and is_excluded(o, self.borders)]
         self.assertEqual(dropped, [], f"відсіялось зайве: {dropped[:3]}")
+
+
+class TestDepthReference(unittest.TestCase):
+    """«Глибина» — відстань до підконтрольної Україні території.
+
+    Раніше — до найближчої з ВОСЬМИ точок ламаної, намальованої від руки, у
+    трьох копіях. Держкордон як референс відкинуто числом: Мелітополь,
+    Донецьк, Генічеськ за Natural Earth — Україна, 7.4% точкових подій мали б
+    глибину 0, а «заходів» (<60 км) ставало б удвічі-втричі більше.
+    Підконтрольна територія на рівні областей дає майже те саме, що ламана
+    (медіана 248 проти 242, p90 661 проти 675), але з файлу і без аномалії в
+    Криму. Файл `ukraine_controlled.json` — у репозиторії, шейпфайл не
+    потрібен, тому тест іде і на чистому клоні.
+    """
+
+    def test_controlled_ukraine_is_zero(self):
+        self.assertEqual(depth_km(49.99, 36.23), 0.0)      # Харків
+
+    def test_occupied_south_is_not_ukraine_for_depth(self):
+        """Саме те, на чому держкордон брехав би нулем."""
+        for name, la, lo in [("Мелітополь", 46.85, 35.37), ("Донецьк", 48.0, 37.8),
+                             ("Генічеськ", 46.17, 34.8)]:
+            with self.subTest(name=name):
+                self.assertGreater(depth_km(la, lo), 40)
+
+    def test_crimea_is_measured_from_the_mainland(self):
+        self.assertGreater(depth_km(44.6, 33.5), 200)      # Севастополь
+
+    def test_known_distances(self):
+        self.assertAlmostEqual(depth_km(55.75, 37.6), 447, delta=15)   # Москва
+        self.assertAlmostEqual(depth_km(50.6, 36.6), 35, delta=8)      # Бєлгород
+
+    def test_oblast_granularity_is_the_documented_price(self):
+        """Запоріжжя-місто підконтрольне, але вся область рахується як ні.
+
+        Тому глибина там не 0, а ~18 км — і саме це написано на сторінці.
+        Якщо цей тест упав, бо стало 0 — хтось додав лінію зіткнення, чого
+        CLAUDE.md прямо забороняє.
+        """
+        d = depth_km(47.84, 35.14)
+        self.assertGreater(d, 5)
+        self.assertLess(d, 60)
+
+
+class TestOneDepthImplementation(unittest.TestCase):
+    """Глибина рахується в одному місці. Було три копії ламаної й чотири
+    функції (store.depth_km, raid.depth, routes.depth_of x2) — і всі від руки."""
+
+    def test_no_hand_drawn_border_left(self):
+        """Шукає перший вузол старої ламаної (52.15, 31.79), не імʼя змінної."""
+        hits = []
+        for p in sorted(ROOT.glob("*.py")) + sorted((ROOT / "tgmine").glob("*.py")):
+            src = p.read_text(encoding="utf-8")
+            if "52.15, 31.79" in src:
+                hits.append(p.name)
+        self.assertEqual(hits, [], f"ламана лишилась у: {hits}")
+
+    def test_depth_defined_once(self):
+        import ast
+        found = []
+        for p in sorted(ROOT.glob("*.py")) + sorted((ROOT / "tgmine").glob("*.py")):
+            for n in ast.walk(ast.parse(p.read_text(encoding="utf-8"))):
+                if isinstance(n, ast.FunctionDef) and n.name in ("depth_km", "depth", "depth_of"):
+                    found.append(f"{p.name}:{n.name}")
+        # обгортки в store/raid/routes лишаються, але всі кличуть territory
+        self.assertIn("territory.py:depth_km", found)
+        for p in sorted(ROOT.glob("*.py")) + sorted((ROOT / "tgmine").glob("*.py")):
+            src = p.read_text(encoding="utf-8")
+            if p.name in ("store.py", "raid.py", "routes.py"):
+                self.assertIn("T.depth_km(", src, f"{p.name} рахує глибину не через territory")

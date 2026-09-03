@@ -28,6 +28,7 @@ from pathlib import Path
 from . import dedupe as D
 from . import extract as E
 from . import geocode as GC
+from . import territory as T
 from .atomic import atomic_write, write_text
 
 MSK = timezone(timedelta(hours=3))
@@ -116,9 +117,6 @@ KIND = [(k, re.compile(v, re.I)) for k, v in KIND]
 
 # Спостереження в точці vs стан по площі
 POINT_KINDS = {"вибух", "збиття", "ППО", "фіксація", "пуск"}
-
-BORDER = [(52.15, 31.79), (51.60, 34.30), (50.45, 36.30), (49.60, 38.30),
-          (48.60, 39.70), (47.30, 38.30), (46.60, 35.30), (45.30, 32.60)]
 
 # Пріоритет цілі при прив'язці. Спостереження — це центр НП, а не координата
 # удару, тому «поблизу» орієнтовне. Цінні точкові обʼєкти (НПЗ, склад БК,
@@ -366,7 +364,9 @@ def point_entity(p):
 
 
 def depth_km(pt):
-    return min(GC.haversine(pt, b) for b in BORDER)
+    # відстань до підконтрольної Україні території — див. territory.depth_km;
+    # раніше тут була ламана з восьми точок від руки, у трьох копіях
+    return T.depth_km(pt[0], pt[1])
 
 
 def declared(events):

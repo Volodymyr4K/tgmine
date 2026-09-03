@@ -16,6 +16,15 @@ import shapefile
 
 SHP = "gazetteer/ne_10m_admin_1_states_provinces"
 OUT = "regions.json"
+#: Підконтрольна Україні територія — референс для «глибини» (store.depth,
+#: raid, routes). Україна за Natural Earth МІНУС чотири окуповані області;
+#: Крим NE і так відносить до RUS. Той самий список, що в territory.UA_CONTESTED,
+#: тобто цілі й глибина міряються від однієї лінії. Точність — ширина області:
+#: Запоріжжя-місто чи Херсон-місто підконтрольні, але вся область рахується як
+#: ні. Лінію зіткнення НЕ апроксимуємо (див. CLAUDE.md).
+OUT_UA = "ukraine_controlled.json"
+UA_OCCUPIED = ("Донецкая область", "Луганская область",
+               "Херсонская область", "Запорожская область")
 
 # ключ конфіга -> підрядок у полі name_ru (Natural Earth)
 MATCH = {
@@ -136,6 +145,18 @@ def main(eps="0.04"):
     pts = sum(len(ring) for rings in out.values() for ring in rings)
     json.dump(out, open(OUT, "w", encoding="utf-8"),
               ensure_ascii=False, separators=(",", ":"))
+
+    ua = []
+    for s in recs:
+        if s.record["admin"] != "Ukraine":
+            continue
+        nr = s.record["name_ru"] or ""
+        if any(o.lower() in nr.lower() for o in UA_OCCUPIED):
+            continue
+        ua.extend(rings_of(s.shape, eps))
+    json.dump(ua, open(OUT_UA, "w", encoding="utf-8"),
+              ensure_ascii=False, separators=(",", ":"))
+    print(f"{OUT_UA}: контурів {len(ua)}, вершин {sum(len(r) for r in ua)}")
     import os
     print(f"регіонів: {len(out)}   контурів: {sum(len(v) for v in out.values())}"
           f"   точок: {pts}")

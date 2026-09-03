@@ -46,10 +46,12 @@ class TestYoNormalisation(unittest.TestCase):
     Патерни KIND написані без «ё», тому пости з нею падали в «інше» й губили
     scope="точка": на карту не йшли, у жар цілей не рахувались. Виміряно на
     корпусі — 2942 події міняють тип, з них 2690 «інше» -> «фіксація»; на
-    останніх 14 добах це +514 точкових спостережень (+16.1%), бо locatorru
+    останніх повних добах це +15.2% точкових спостережень, бо locatorru
     пише саме з «ё».
 
-    Тексти взято дослівно з `data/`.
+    Тексти взято дослівно з `data/` — перевірено `grep -F`. Вигаданий приклад
+    тут коштує дорого: розбір залежить від сусідніх слів у рядку, і на
+    придуманій фразі тест тримає не те правило, яке працює на корпусі.
     """
 
     def test_yo_trigger_is_a_sighting(self):
@@ -70,8 +72,9 @@ class TestYoNormalisation(unittest.TestCase):
 
     def test_negation_survives_normalisation(self):
         """Заміна «ё» не має відкривати спростування як спостереження."""
-        self.assertEqual(ST.kind_of("Пензенская область / Ложные пролёты"),
-                         "інше")
+        self.assertEqual(
+            ST.kind_of("По ракетной были ложные цели. Прилётов нет. / "
+                       "📡 / Локатор России - / @locatorru"), "інше")
 
     def test_explosion_stays_on_raw_text(self):
         """«прилёт» у ё-формі — це переказ, а не подія.
@@ -90,8 +93,12 @@ class TestYoNormalisation(unittest.TestCase):
 
     def test_explosion_without_yo_untouched(self):
         """Звуження не має погасити те, що працювало."""
-        self.assertEqual(ST.kind_of("Взрыв в Белгороде"), "вибух")
-        self.assertEqual(ST.kind_of("Прилет по нефтебазе"), "вибух")
+        self.assertEqual(ST.kind_of("Мелитополь - взрыв / Тревога по БПЛА"),
+                         "вибух")
+        self.assertEqual(
+            ST.kind_of("Внимание, Козинка! / Объявлена опасность сбросов "
+                       "с «Бабы-Яги», будьте бдительны, так же прилеты "
+                       "в районе мапа / Белгород"), "вибух")
 
 
 class TestNoDuplicateClassifier(unittest.TestCase):

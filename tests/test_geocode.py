@@ -357,3 +357,86 @@ class TestNormalisation(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@needs_gazetteer
+class TestDistrictSuffix(unittest.TestCase):
+    """«<Назва> район» — це район, і в газетирі він є під двослівним ключем.
+
+    Слово «район» іде з малої літери, тому шаблон freeform його не бере, і в
+    газетир летить сам прикметник. «Панинский» -> PPL у Рязанській за 214 км
+    від Воронезької, тоді як «Панинский Район» ADM2 RU.86 лежить за 64 км.
+    Заміряно на 15 добах: розвʼязань, що стоять поза ВСІМА областями, названими
+    у їхньому ж пості, було 1627, стало 1057 (-35%); 574 переїхали ззовні
+    всередину своєї області, 0 — навпаки, ще 469 розвʼязались уперше.
+
+    Полігон області тут не рятує: серед 2055 фолбеків кандидат усередині
+    полігону знайшовся лише в 4. Річ не у фільтрі, а в тому, що правильного
+    запису серед кандидатів не було взагалі.
+
+    Тексти дослівні з `data/`.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.cfg = E.Config.load(CFG)
+        cls.gaz = GC.Gazetteer.load(GAZ / "RU.txt", GAZ / "UA.txt")
+        cls.a1 = cls.gaz.region_codes(cls.cfg.entities["регіон"], cls.cfg.geo)
+        cls.polys = json.loads((ROOT / "regions.json").read_text(encoding="utf-8"))
+
+    @staticmethod
+    def _inside(lat, lon, rings):
+        """Промінь праворуч. Кільця вже спрощені, тож межа з похибкою ~км."""
+        ins = False
+        for ring in rings:
+            j = len(ring) - 1
+            for i, (yi, xi) in enumerate(ring):
+                yj, xj = ring[j]
+                if (xi > lon) != (xj > lon):
+                    if lat < (yj - yi) * (lon - xi) / (xj - xi) + yi:
+                        ins = not ins
+                j = i
+        return ins
+
+    def _resolve(self, text):
+        posts = [{"channel": "t", "id": 1, "date": "2026-08-20T10:00:00+00:00",
+                  "text": text}]
+        posts = E.enrich(posts, self.cfg)
+        GC.geocode_posts(posts, self.gaz, self.cfg.geo,
+                         aliases=self.cfg.geo_aliases, region_a1=self.a1)
+        return [e for e in posts[0]["entities"]
+                if e["type"] == "нп" and "lat" in e]
+
+    def test_district_lands_in_its_own_oblast(self):
+        for text, reg in [
+            ("Панинский район, Воронежская область - опасность по БПЛА.\n"
+             "📡\nЛокатор России -\n@locatorru", "Воронезька"),
+            ("Стародубский район, Погарский район, Брянская область - ещё "
+             "фиксации БПЛА от госграницы.\n📡\nЛокатор России -\n@locatorru",
+             "Брянська"),
+            ("Рудовка, Пичаевский район, Тамбовская область - пролёт от 3 БПЛА "
+             "в сторону Пичаево.\n📡\nЛокатор России -\n@locatorru",
+             "Тамбовська"),
+        ]:
+            with self.subTest(text=text[:30]):
+                got = self._resolve(text)
+                self.assertTrue(got, "жодного НП не розвʼязано")
+                rings = self.polys[reg]
+                self.assertTrue(
+                    any(self._inside(e["lat"], e["lon"], rings) for e in got),
+                    f"жодна точка не в {reg}: "
+                    f"{[(e.get('geo_name'), e['lat'], e['lon']) for e in got]}")
+
+    def test_missing_district_keeps_old_answer(self):
+        """Району в газетирі може не бути — тоді нічого не змінюється.
+
+        «Урицкий район» Орловської області в GeoNames відсутній; правка не має
+        ні падати, ні підставляти район із чужої області.
+        """
+        got = self._resolve("п.Гагаринский, Урицкий район, Орловская область - "
+                            "пролёт БПЛА на Нарышкино.\n📡\nЛокатор России -\n"
+                            "@locatorru")
+        self.assertTrue(got, "розбір не має ламатись на відсутньому районі")
+        self.assertEqual(
+            self.gaz.by_name.get(GC.norm("Урицкий район")), None,
+            "район зʼявився в газетирі — тест більше не про той випадок")

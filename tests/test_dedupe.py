@@ -50,9 +50,19 @@ class TestMirrorDups(unittest.TestCase):
         self.assertIsNone(m["lpr1_treugolnik/1"])
 
     def test_alarm_and_all_clear_are_two_messages(self):
-        """Ті самі назви, різні типи — не зливати: тривога і відбій."""
-        n, m = run([post("lpr1_treugolnik", 1, 'Севастополь\nТревога по БПЛА', "17:42:32"),
-                    post("kupolrussia", 2, 'Севастополь\nОтбой опасности по БПЛА.\nПереходим в режим повышенного внимания', "17:42:50")])
+        """Той самий ключ, різні типи — не зливати: тривога і відбій.
+
+        Перша версія цього тесту брала «Севастополь / Отбой опасности по
+        БПЛА. / Переходим в режим…» — і проходила не через правило типів, а
+        тому що «Переходим» потрапляло в ключ як «топонім». Критична перевірка
+        це спіймала; тепер пара з буквально однаковим ключом {ростовская}.
+        """
+        a, b = ("Ростовская область ракетная опасность",
+                "Ростовская область отбой ракетной опасности")
+        self.assertEqual(D.topo_key(a), D.topo_key(b))
+        self.assertNotEqual(ST.kind_of(a), ST.kind_of(b))
+        n, _ = run([post("lpr1_treugolnik", 1, a, "03:25:50"),
+                    post("kupolrussia", 2, b, "03:26:03")])
         self.assertEqual(n, 0)
 
     def test_outside_the_window_is_not_a_duplicate(self):

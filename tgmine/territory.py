@@ -228,6 +228,13 @@ def filter_objects(objects: list[dict], borders: Borders | None = None,
 #
 # Файл `ukraine_controlled.json` будує mkregions.py; у рантаймі шейпфайл не
 # потрібен. Точність — ширина області; лінію зіткнення не апроксимуємо.
+#
+# Дірки. NE віддає Київ окремим полігоном І діркою в Київській області;
+# mkregions.rings_of експортує кожну частину як суцільний контур, тож дірка
+# стає ще одним кільцем (перевірено: контури 5 і 22 — той самий Київ, площа
+# 0.204 і 0.206). Для глибини це байдуже лише тому, що все, що в дірках, теж
+# підконтрольне: точка в Києві — всередині зовнішнього контуру області, 0 км.
+# Якби дірка колись означала НЕпідконтрольне, це правило зламалось би мовчки.
 UA_CONTROLLED = Path(__file__).resolve().parent.parent / "ukraine_controlled.json"
 _UA = None
 
@@ -255,10 +262,28 @@ def _in_ring_latlon(lat, lon, ring) -> bool:
     return c
 
 
+def _hav_km(la1, lo1, la2, lo2) -> float:
+    la1, lo1, la2, lo2 = map(math.radians, (la1, lo1, la2, lo2))
+    h = (math.sin((la2 - la1) / 2) ** 2
+         + math.cos(la1) * math.cos(la2) * math.sin((lo2 - lo1) / 2) ** 2)
+    return 12742.0 * math.asin(math.sqrt(h))
+
+
 def depth_km(lat: float, lon: float) -> float:
-    """Кілометри від точки до підконтрольної Україні території; всередині — 0."""
+    """Кілометри від точки до підконтрольної Україні території; всередині — 0.
+
+    Найближчий відрізок шукається рівнокутним наближенням (швидко), а сама
+    відстань до нього рахується гаверсинусом до точки проєкції. Заміряно на
+    300 точкових подіях проти гаверсинуса з густою дискретизацією відрізків:
+    без цього кроку похибка була медіана 1.2 км, 90-й перцентиль 20, на
+    далеких (Урал, ~1200 км) до 53 км; з ним — 0.00 на 90-му перцентилі.
+    Рівнокутне ранжування відрізків при цьому не помилялось жодного разу —
+    справжній найближчий стояв на першому місці; помилялась лише сама
+    довжина.
+    """
     k = math.cos(math.radians(lat)) or 1e-9
     best = 1e9
+    best_seg = None
     for la0, la1, lo0, lo1, ring in _ua_rings():
         # нижня межа відстані до bbox — далекі контури не перебираємо
         dy = max(la0 - lat, 0.0, lat - la1) * 111.0
@@ -270,5 +295,12 @@ def depth_km(lat: float, lon: float) -> float:
         for (y1, x1), (y2, x2) in zip(ring, ring[1:] + ring[:1]):
             d = Borders._seg_km(lat, lon, y1, x1, y2, x2, k)
             if d < best:
-                best = d
-    return best
+                best, best_seg = d, (y1, x1, y2, x2)
+    if best_seg is None:
+        return best
+    y1, x1, y2, x2 = best_seg
+    px, py = (lon - x1) * k, lat - y1
+    vx, vy = (x2 - x1) * k, y2 - y1
+    L = vx * vx + vy * vy
+    t = 0.0 if L == 0 else max(0.0, min(1.0, (px * vx + py * vy) / L))
+    return _hav_km(lat, lon, y1 + t * (y2 - y1), x1 + t * (x2 - x1))

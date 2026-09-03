@@ -3,7 +3,8 @@ import json
 import unittest
 from datetime import datetime, timedelta, timezone
 
-from tests.helpers import ROOT, load_script, needs_store
+from tests.helpers import ROOT, load_script, needs_gazetteer, needs_store
+from tgmine import geocode as GC
 from tgmine import store as ST
 
 
@@ -449,40 +450,87 @@ class TestDirectionTargetIsNotThePlace(unittest.TestCase):
     більше за село, звідки дивляться. Виміряно на 15 добах — 286 із 8414
     координат (3.4%). Напрямки й так витягує `vectors.py` окремо.
 
-    Тексти дослівні з `data/`; координати й населення підставлені з газетира,
-    щоб тест не потребував самого газетира (132 МБ).
+    Тексти дослівні з `data/`. Координати й населення — літерали, щоб тест
+    ішов без газетира (132 МБ, у .gitignore); що вони СПРАВЖНІ, стереже
+    `TestDirectionFixtureMatchesGazetteer` нижче. Першу версію цього тесту я
+    написав із памʼяті, і шість констант із семи були вигадані — «Белгорода»
+    відрізнялось у чотири рази, бо газетир на цей запит віддає Бєлгородську
+    ОБЛАСТЬ (1.5 млн, 72 км від міста), а не місто.
     """
 
-    @staticmethod
-    def _post(text, places):
-        """places: [(назва, lat, lon, населення)] — позиції беруться з тексту."""
+    #: (запит, lat, lon, населення) — найвагоміший кандидат вузького набору.
+    GAZ = {
+        "Тыловое": (44.44134, 33.73228, 573),
+        "Севастополь": (44.60795, 33.52134, 547820),
+        "Трубчевск": (52.58031, 33.76574, 16100),
+        "Брянск": (53.27096, 34.32143, 427236),
+        "Приморско-Ахтарск": (46.04847, 38.17899, 33102),
+        "Томаровки": (50.68337, 36.23443, 7916),
+        "Белгорода": (50.83333, 37.54167, 1549876),
+        "Почепский": (52.91488, 33.4993, 38742),
+        "Жуковку": (53.53381, 33.73075, 19690),
+    }
+
+    def _post(self, text, names):
+        """Пост із розвʼязаними топонімами; позиції беруться з самого тексту."""
         return {"text": text, "entities": [
-            {"type": "нп", "match": name, "pos": text.index(name),
-             "lat": lat, "lon": lon, "geo_pop": pop, "geo_conf": "region"}
-            for name, lat, lon, pop in places]}
+            {"type": "нп", "match": n, "pos": text.index(n),
+             "lat": self.GAZ[n][0], "lon": self.GAZ[n][1],
+             "geo_pop": self.GAZ[n][2], "geo_conf": "region"}
+            for n in names]}
 
     def test_origin_wins_over_destination(self):
         p = self._post("Тыловое БПЛА в направлении Севастополь",
-                       [("Тыловое", 44.47, 33.74, 0),
-                        ("Севастополь", 44.60, 33.53, 393304)])
+                       ["Тыловое", "Севастополь"])
         self.assertEqual(ST.point_entity(p)["match"], "Тыловое")
 
     def test_further_in_direction_also_counts(self):
         p = self._post("Трубчевск и далее в направлении Брянск тревога по БПЛА",
-                       [("Трубчевск", 52.58, 33.77, 14047),
-                        ("Брянск", 53.25, 34.37, 415721)])
+                       ["Трубчевск", "Брянск"])
         self.assertEqual(ST.point_entity(p)["match"], "Трубчевск")
 
     def test_lone_destination_is_kept(self):
         """Як не лишається нічого — краще неточна крапка, ніж втрата події."""
         p = self._post("В направлении Приморско-Ахтарск через Азовское море "
                        "крылатая ракета ПКР Нептун или реактивный БПЛА",
-                       [("Приморско-Ахтарск", 46.05, 38.18, 33102)])
+                       ["Приморско-Ахтарск"])
         self.assertEqual(ST.point_entity(p)["match"], "Приморско-Ахтарск")
+
+    def test_enumeration_after_the_preposition(self):
+        """Прийменник стоїть лише перед першою назвою переліку.
+
+        Без цього кроку правило ловило перший пункт, а крапка переїжджала на
+        другий: заміряно 168 постів із 1026 (16%).
+        """
+        p = self._post("Почепский район и далее на Жуковку, Брянск "
+                       "опасность по БПЛА",
+                       ["Почепский", "Жуковку", "Брянск"])
+        self.assertEqual(ST.point_entity(p)["match"], "Почепский")
 
     def test_from_is_a_place_not_a_direction(self):
         """«От X» — це місце спостереження, і воно таким лишається."""
         p = self._post("От Томаровки в сторону Белгорода группа БПЛА.",
-                       [("Томаровки", 50.68, 36.24, 7000),
-                        ("Белгорода", 50.60, 36.59, 391702)])
+                       ["Томаровки", "Белгорода"])
         self.assertEqual(ST.point_entity(p)["match"], "Томаровки")
+
+
+@needs_gazetteer
+class TestDirectionFixtureMatchesGazetteer(unittest.TestCase):
+    """Літерали в TestDirectionTargetIsNotThePlace мають бути справжніми.
+
+    Перша версія тих тестів була написана з памʼяті: шість констант із семи
+    не збігались із газетиром, а «Белгорода» відрізнялось у чотири рази.
+    Тест на вигаданих числах перевіряє не той відбір, що працює на даних.
+    """
+
+    def test_fixture_is_real(self):
+        from tests.helpers import GAZ as GAZDIR
+        gaz = GC.Gazetteer.load(GAZDIR / "RU.txt", GAZDIR / "UA.txt")
+        for q, (lat, lon, pop) in TestDirectionTargetIsNotThePlace.GAZ.items():
+            with self.subTest(query=q):
+                cands = gaz.candidates(q, GC.THEATER)
+                self.assertTrue(cands, f"{q}: газетир не дає кандидатів")
+                best = max(cands, key=lambda c: c["pop"])
+                self.assertEqual(best["pop"], pop)
+                self.assertLess(GC.haversine((lat, lon),
+                                             (best["lat"], best["lon"])), 1.0)

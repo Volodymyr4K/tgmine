@@ -186,6 +186,7 @@ button.primary{background:rgba(255,62,165,.16);border-color:rgba(255,62,165,.45)
       <span class="sep"></span><span id="saved" title="Робота зберігається в цьому браузері">—</span>
       <button class="hudb" id="cleanBtn" title="Тільки карта, без панелей (\\)">⛶</button>
       <button class="hudb" id="helpBtn" title="Клавіші та підказки (?)">?</button>
+      <button class="hudb" id="bugBtn" title="Щось пішло не так — зібрати звіт із журналом (Ctrl+Shift+L)">🐞</button>
     </div>
     <div id="hint2"></div>
     <div id="toast"></div>
@@ -361,6 +362,248 @@ button.primary{background:rgba(255,62,165,.16);border-color:rgba(255,62,165,.45)
 //
 // Дані з конвеєра лишаються, але як ПІДКАЗКА (шар-привид), а не як результат.
 // ==========================================================================
+
+// ==========================================================================
+// ЖУРНАЛ ДІЙ І ЗВІТ ПРО ЗБІЙ
+// ==========================================================================
+// Навіщо. Редактором працює інша людина й на іншій машині. Коли в неї
+// «намалював, а воно не зʼявилось», з нашого боку не лишалось НІЧОГО: ні
+// сліду дій, ні стану карти. Переказ по памʼяті — не свідчення, а на
+// скріншоті не видно ні ввімкнених коридорів, ні вимкненого шару, ні того,
+// що обʼєкт лежить за краєм кадру.
+//
+// Тепер кожна дія лишає рядок. Кнопка 🐞 (або Ctrl+Shift+L) пакує журнал
+// разом зі станом карти й перевіркою «чому останнє намальоване не видно»,
+// дає звіту короткий ідентифікатор INC-XXXX і кладе його у файл та в буфер
+// обміну. Ідентифікатор — це те, за що чіпляються в розмові: «дивись INC-3F7K».
+//
+// Журнал НЕ їде у файл карти й нікуди сам не відсилається: він лежить у
+// localStorage цього браузера, і віддає його оператор власноруч.
+const LOG={key:'tgmine-log', max:900, buf:[], sid:'', on:true, dirty:false};
+function rid(n){
+  const A='23456789ABCDEFGHJKLMNPQRSTUVWXYZ';   // без 0/O/1/I: це диктують уголос
+  let s='';for(let i=0;i<n;i++)s+=A[Math.floor(Math.random()*A.length)];
+  return s;
+}
+// Один рядок журналу. Час абсолютний: звіти з двох машин мають складатись
+// в одну стрічку, а не в дві шкали «від запуску».
+function jlog(ev,d){
+  if(!LOG.on) return null;
+  // Поля часу, сеансу й події кладуться ОСТАННІМИ: інакше дані з ключем `t`
+  // (а такий був у записі про інструмент) затирали мітку часу, і рядок
+  // журналу виходив «NaN:NaN:NaN» — спіймано заміром на живому редакторі.
+  const r=Object.assign({},d||{},{t:Date.now(),s:LOG.sid,ev});
+  LOG.buf.push(r);
+  if(LOG.buf.length>LOG.max) LOG.buf.splice(0,LOG.buf.length-LOG.max);
+  LOG.dirty=true;
+  return r;
+}
+// Пишемо не на кожну дію, а раз на дві секунди: тягання вузла — це сотні
+// подій, і localStorage на кожній із них підвішує малювання.
+function jflush(){
+  if(!LOG.dirty) return;
+  LOG.dirty=false;
+  try{ localStorage.setItem(LOG.key,JSON.stringify(LOG.buf)); }
+  catch(e){
+    // Сховище переповнене (карта з картинками зʼїдає квоту). Журнал —
+    // страховка, а не цінність: ріжемо половину й пробуємо ще раз.
+    LOG.buf.splice(0,Math.floor(LOG.buf.length/2));
+    try{ localStorage.setItem(LOG.key,JSON.stringify(LOG.buf)); }catch(_){}
+  }
+}
+function jinit(){
+  LOG.sid=rid(4);
+  try{ const old=JSON.parse(localStorage.getItem(LOG.key)||'[]');
+       LOG.buf=Array.isArray(old)?old:[]; }
+  catch(e){ LOG.buf=[]; }
+  // Перезавантаження сторінки — теж подія: після нього стан інший, і плутати
+  // «до» з «після» не можна.
+  jlog('start',{w:innerWidth,h:innerHeight,dpr:+(devicePixelRatio||1).toFixed(2),
+                ua:navigator.userAgent});
+  jflush();
+}
+setInterval(jflush,2000);
+addEventListener('beforeunload',jflush);
+
+// ---- чому обʼєкт не видно ------------------------------------------------
+// Це і є відповідь на «намалював, а воно не зʼявилось». Перевіряємо рівно ті
+// причини, які РЕАЛЬНО є в цьому редакторі, і жодної вигаданої: сховано,
+// вимкнений шар, зведення в коридор, за краєм кадру, нульова довжина,
+// прозорість, колір упритул до тла.
+function jrgb(h){
+  const m=/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(String(h||'').trim());
+  if(!m) return null;
+  let v=m[1];
+  if(v.length===3) v=v[0]+v[0]+v[1]+v[1]+v[2]+v[2];
+  return [parseInt(v.slice(0,2),16),parseInt(v.slice(2,4),16),parseInt(v.slice(4,6),16)];
+}
+function jdist(a,b){
+  const x=jrgb(a),y=jrgb(b);
+  return (x&&y)?Math.round(Math.hypot(x[0]-y[0],x[1]-y[1],x[2]-y[2])):null;
+}
+// Колір, яким обʼєкт справді малюється. Береться з тих самих місць, що й у
+// малюванні: інакше звіт показував би не те, що на екрані.
+function objCol(o){
+  if(!o) return '';
+  if(o.kind==='route')  return o.col||((TYPE[o.type]||TYPES[0])||{}).col||'';
+  if(o.kind==='arrow')  return o.col||'#e8f2fc';
+  if(o.kind==='launch') return ((TYPE[o.type]||TYPES[0])||{}).col||'';
+  if(o.kind==='impact') return (S.style[catOf(o)]||{}).col||'';
+  if(o.kind==='text')   return o.col||S.style.base.ink;
+  if(o.kind==='zone')   return o.col||((typeof ZONE!=='undefined'&&ZONE[o.zone])||{}).col||'';
+  return o.col||'';
+}
+function objPts(o){
+  return o&&o.pts ? o.pts : (o&&o.la!==undefined ? [[o.la,o.lo]] : []);
+}
+function whyInvisible(o){
+  const r=[];
+  if(!o) return r;
+  if(o.hidden) r.push('обʼєкт позначено «сховати»');
+  const k=catOf(o);
+  if(k&&S.layers[CAT_LAYER[k]]===false)
+    r.push('вимкнено шар позначок «'+(CAT_NAME[k]||k)+'»');
+  if(S.corridors.on&&o.kind==='route'){
+    endPass();
+    const L=drawList();
+    endPass();
+    if(!L.some(x=>x===o||x.__src===o))
+      r.push('режим коридорів звів цей маршрут в інший — вимкни «Коридори»');
+  }
+  const pts=objPts(o);
+  if(pts.length){
+    const ss=pts.map(p=>P(p[0],p[1]));
+    if(ss.every(s=>s[0]<-40||s[0]>Wp+40||s[1]<-40||s[1]>Hp+40))
+      r.push('лежить поза видимою частиною карти (F — показати все)');
+  }
+  if(o.pts&&o.pts.length===2){
+    const a=P(o.pts[0][0],o.pts[0][1]), b=P(o.pts[1][0],o.pts[1][1]);
+    if(Math.hypot(a[0]-b[0],a[1]-b[1])<2)
+      r.push('нульова довжина: натиснуто й відпущено, не протягнувши');
+  }
+  if(o.alpha!==undefined&&o.alpha<0.06) r.push('прозорість майже нуль');
+  const c=objCol(o), bg=S.style.base.bg, d=jdist(c,bg);
+  if(d!==null&&d<40) r.push('колір ('+c+') майже як тло ('+bg+')');
+  return r;
+}
+// Обʼєкт щойно потрапив на карту. Якщо його не буде видно — кажемо ОДРАЗУ,
+// а не через день у переписці.
+function jadd(o,how){
+  if(!o) return;
+  jlog('add',{kind:o.kind,type:o.type||'',how:how||'',n:S.objs.length,
+              col:objCol(o),pts:(o.pts||[]).length});
+  const why=whyInvisible(o);
+  if(why.length){
+    jlog('invisible',{kind:o.kind,why});
+    toast('намальовано, але не видно: '+why[0]);
+  }
+}
+
+// ---- звіт ----------------------------------------------------------------
+function jstate(){
+  const cnt={};
+  for(const o of S.objs) cnt[o.kind]=(cnt[o.kind]||0)+1;
+  return {
+    інструмент:S.tool, тип:S.type,
+    обʼєктів:S.objs.length, поВидах:cnt, підказок:S.ghosts.length,
+    коридори:(S.corridors.on?('увімкнено, '+S.corridors.km+' км'):'вимкнено'),
+    вимкненіШари:Object.keys(S.layers).filter(k=>!S.layers[k]).join(',')||'—',
+    тло:S.style.base.bg, підкладка:S.style.base.satSrc,
+    вигляд:'x='+(+S.view.x).toFixed(1)+' y='+(+S.view.y).toFixed(1)+
+           ' k='+(+S.view.k).toFixed(3),
+    полотно:Math.round(Wp)+'×'+Math.round(Hp)+' dpr='+DPR,
+    ніч:(window.NIGHT&&window.NIGHT.date)||'—',
+    крокуНазад:S.undo.length, вибрано:S.sel?S.sel.kind:'—',
+    адреса:location.href, браузер:navigator.userAgent
+  };
+}
+function jrow(r){
+  const d=new Date(r.t), p=n=>String(n).padStart(2,'0');
+  const rest=Object.keys(r).filter(k=>k!=='t'&&k!=='ev'&&k!=='s')
+    .map(k=>k+'='+(typeof r[k]==='object'?JSON.stringify(r[k]):r[k])).join(' ');
+  return '  '+p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds())+
+         ' ['+(r.s||'----')+'] '+r.ev+(rest?' '+rest:'');
+}
+function jreport(note){
+  const id='INC-'+rid(4);
+  const at=new Date();
+  jlog('incident',{id,note:note||''});
+  jflush();
+  const st=jstate();
+  const last=S.objs.slice(-5);
+  const L=[];
+  L.push('tgmine · редактор карт · звіт про збій');
+  L.push('ідентифікатор: '+id);
+  L.push('час: '+at.toISOString()+'  ('+at.toString()+')');
+  L.push('сеанс: '+LOG.sid);
+  if(note) L.push('оператор каже: '+note);
+  L.push('');
+  L.push('СТАН');
+  for(const k of Object.keys(st))
+    L.push('  '+k+': '+(typeof st[k]==='object'?JSON.stringify(st[k]):st[k]));
+  L.push('');
+  L.push('ОСТАННІ ОБʼЄКТИ — видно чи ні');
+  if(!last.length) L.push('  (на карті порожньо)');
+  last.forEach((o,i)=>{
+    const why=whyInvisible(o);
+    L.push('  '+(i+1)+') '+o.kind+(o.type?'/'+o.type:'')+' '+objCol(o)+
+      (why.length?'  — НЕ ВИДНО: '+why.join('; '):'  — видно'));
+  });
+  L.push('');
+  const tail=LOG.buf.slice(-300);
+  L.push('ЖУРНАЛ — останні '+tail.length+' подій, час місцевий');
+  for(const r of tail) L.push(jrow(r));
+  // Сама карта: з нею збій відтворюється, без неї лишається здогадка.
+  // Великі карти (картинки в data:) не тягнемо — файл має лишатись
+  // таким, що його можна кинути в месенджер.
+  try{
+    const map=JSON.stringify(mapPayload());
+    L.push('');
+    L.push(map.length>400000
+      ? 'КАРТА: '+Math.round(map.length/1024)+' КБ — завелика для звіту, '+
+        'надішли окремо кнопкою «зберегти»'
+      : 'КАРТА (JSON)\n'+map);
+  }catch(e){ L.push(''); L.push('КАРТА: не вдалось зібрати — '+e); }
+  return {id,text:L.join('\n')};
+}
+// Кнопка 🐞. Один натиск: файл на диск + текст у буфер + ідентифікатор у
+// журналі. Нічого нікуди не відсилається — оператор кидає файл сам.
+function jincident(){
+  const note=prompt('Що пішло не так? Одним рядком, можна й порожньо.','');
+  if(note===null) return;                    // передумав — звіту нема
+  let rep;
+  try{ rep=jreport(note); }
+  catch(e){ toast('звіт не зібрався: '+e); return; }
+  try{
+    const blob=new Blob([rep.text],{type:'text/plain;charset=utf-8'});
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download='tgmine-'+rep.id+'.txt';
+    a.click();
+    setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+  }catch(e){}
+  const done=ok=>toast('збій '+rep.id+' · файл збережено'+(ok?' · і в буфері':''));
+  if(navigator.clipboard&&navigator.clipboard.writeText)
+    navigator.clipboard.writeText(rep.text).then(()=>done(true),()=>done(false));
+  else done(false);
+}
+// Помилка в коді — теж свідчення, і саме вона найчастіше пояснює «нічого не
+// сталось»: обробник упав на півдорозі, обʼєкт не додався.
+addEventListener('error',e=>{
+  jlog('js-error',{msg:String((e&&e.message)||''),
+                   src:String((e&&e.filename)||''),line:(e&&e.lineno)||0});
+  jflush();
+  toast('помилка в редакторі — натисни 🐞 і кинь файл');
+});
+addEventListener('unhandledrejection',e=>{
+  jlog('js-reject',{msg:String((e&&e.reason&&e.reason.message)||(e&&e.reason)||'')});
+  jflush();
+});
+{
+  const b=document.getElementById('bugBtn');
+  if(b) b.onclick=jincident;
+}
+jinit();
 
 // Типи засобів — це ДАНІ карти, а не константа коду. Оператор додає свої,
 // перейменовує, міняє колір і значок; набір зберігається у файлі карти.
@@ -3178,6 +3421,8 @@ function snap(la,lo,sx,sy){
 let drag=null, pan=null, freehand=null;
 cv.addEventListener('pointerdown',e=>{
   const r=cv.getBoundingClientRect(), sx=e.clientX-r.left, sy=e.clientY-r.top;
+  jlog('down',{tool:S.tool,btn:e.button,sx:Math.round(sx),sy:Math.round(sy),
+               alt:e.altKey?1:0,shift:e.shiftKey?1:0,draft:S.draft?S.draft.pts.length:0});
   // Без захоплення вказівника рух повз край полотна (а праворуч одразу
   // панель) обривав тягання: обʼєкт застрягав на півдорозі.
   try{ cv.setPointerCapture(e.pointerId); }catch(_){}
@@ -3209,7 +3454,7 @@ cv.addEventListener('pointerdown',e=>{
     const o={kind:'arrow',pts:[[la,lo],[la,lo]],width:2.2,head:10,bow:0,
              col:'#e8f2fc',glow:true};
     S.objs.push(o);S.sel=o;S.selMore=[];
-    drag={h:{o,vertex:1},sx,sy,orig:JSON.parse(JSON.stringify(o))};
+    drag={h:{o,vertex:1},sx,sy,orig:JSON.parse(JSON.stringify(o)),newArrow:o};
     return;
   }
   if(S.tool==='route'){
@@ -3236,7 +3481,7 @@ cv.addEventListener('pointerdown',e=>{
     if(S.tool==='text'){o.text='підпис';o.size=14;}
     if(S.tool==='impact'){o.size=9;}
     if(S.tool==='glyph'){o.glyph=S.glyph||'💥';o.size=22;}
-    S.objs.push(o);S.sel=o;setTool('select');refresh();return;
+    S.objs.push(o);S.sel=o;jadd(o,'клік');setTool('select');refresh();return;
   }
   // Alt по лінії додає вузол, Alt по вузлу прибирає. Без цього маршрут
   // доводилось перемальовувати заново через один зайвий клік.
@@ -3277,7 +3522,7 @@ cv.addEventListener('pointerdown',e=>{
     if(g){
       snapshot();
       const o=ghostToRoute(g);
-      S.objs.push(o);S.sel=o;S.selMore=[];
+      S.objs.push(o);S.sel=o;S.selMore=[];jadd(o,'з підказки');
       S.ghosts=S.ghosts.filter(x=>x!==g);
       toast('підказку взято в роботу — далі веди сам');
       refresh();return;
@@ -3394,6 +3639,9 @@ cv.addEventListener('pointermove',e=>{
   touch();draw();
 });
 addEventListener('pointerup',()=>{
+  // Стрілка готова саме тут: на натиску вона ще нульової довжини, і судити
+  // про її видимість було б зарано.
+  if(drag&&drag.newArrow) jadd(drag.newArrow,'протяг');
   if(freehand){
     const f=freehand; freehand=null;
     // Вів рукою — обʼєкт готовий. Просто клікнув — малювання триває
@@ -3569,6 +3817,9 @@ addEventListener('keydown',e=>{
   if((e.ctrlKey||e.metaKey)&&e.key==='o'){e.preventDefault();
     document.getElementById('load').click();}
   if((e.ctrlKey||e.metaKey)&&e.key==='y'){e.preventDefault();redo();}
+  // Звіт про збій: комбінація одна на всі розкладки, тож ловимо код клавіші.
+  if((e.ctrlKey||e.metaKey)&&e.shiftKey&&e.code==='KeyL'){
+    e.preventDefault();jincident();}
   if(e.key===']')order(1);
   if(e.key==='[')order(-1);
   // 1..8 — тип засобу: оператор перемикає його частіше за будь-що інше
@@ -3594,17 +3845,21 @@ addEventListener('keydown',e=>{
 function finishRoute(){
   if(S.draft){
     const need=S.draft.kind==='zone'?3:2;
-    if(S.draft.pts.length>=need){snapshot();S.objs.push(S.draft);S.sel=S.draft;}
+    if(S.draft.pts.length>=need){snapshot();S.objs.push(S.draft);S.sel=S.draft;
+      jadd(S.draft,'завершено');}
+    else jlog('drop-draft',{kind:S.draft.kind,pts:S.draft.pts.length,need});
   }
   S.draft=null;setTool('select');refresh();
 }
 function undo(){
+  jlog('undo',{depth:S.undo.length});
   if(!S.undo.length){toast('скасовувати нема чого');return;}
   S.redo.push(snapState());
   applyState(S.undo.pop());S.sel=null;S.selMore=[];autosave();
   toast('скасовано');refresh();
 }
 function redo(){
+  jlog('redo',{depth:S.redo.length});
   if(!S.redo.length){toast('повторювати нема чого');return;}
   S.undo.push(snapState());
   applyState(S.redo.pop());S.sel=null;S.selMore=[];autosave();
@@ -3683,6 +3938,7 @@ function delSel(){
   if(S.selCity){ hideCity(S.selCity); toast('підпис прибрано'); return; }
   const all=[S.sel,...S.selMore].filter(Boolean);
   if(!all.length)return;
+  jlog('del',{n:all.length,kinds:all.map(o=>o.kind).join(',')});
   snapshot();S.objs=S.objs.filter(o=>!all.includes(o));
   S.sel=null;S.selMore=[];refresh();
 }
@@ -3714,6 +3970,7 @@ function setTool(t){
   // вибирач. Беручи інструмент, оператор збирається СТАВИТИ, а не правити —
   // тому вибір знімаємо.
   if(t==='glyph'&&S.tool!=='glyph'){ S.sel=null; S.selMore=[]; }
+  if(S.tool!==t) jlog('tool',{tool:t});
   S.tool=t;S.spacePan=false;
   document.querySelectorAll('.tool[data-tool]').forEach(b=>
     b.classList.toggle('on',b.dataset.tool===t));
@@ -4292,7 +4549,7 @@ document.getElementById('export').onclick=async ()=>{
   setTimeout(()=>URL.revokeObjectURL(url),10000);
   toast(`PNG готовий: ${outW}×${outH}, ${Math.round(blob.size/1024)} КБ`);
   }catch(e){
-    console.error('експорт PNG:',e);
+    console.error('експорт PNG:',e);jlog('export-fail',{fmt:'png',msg:String(e)});
     toast('експорт не вдався: '+((e&&e.message)||e));
   }finally{
     S.bias=0;btn.textContent=was;RSCALE=1;draw();
@@ -4394,7 +4651,7 @@ document.getElementById('exportSvg').onclick=async ()=>{
   a.download=(S.tpl?S.tpl.id:'map')+'.svg';a.click();
   toast(`SVG готовий: ${out.w}×${out.h}, ${Math.round(svg.length/1024)} КБ`);
   }catch(e){
-    console.error('експорт SVG:',e);
+    console.error('експорт SVG:',e);jlog('export-fail',{fmt:'svg',msg:String(e)});
     toast('експорт не вдався: '+((e&&e.message)||e));
   }finally{
     // Стан малювання спільний із екраном: якщо вийти з експорту через
@@ -4448,7 +4705,9 @@ document.getElementById('tSearch').oninput=e=>renderTargets(e.target.value);
          <span class="sw" style="background:${S.layers[k]?'#4ade80':'#33414f'}"></span>${n}</div>`
     ).join('');
     box.querySelectorAll('[data-l]').forEach(el=>el.onclick=()=>{
-      S.layers[el.dataset.l]=!S.layers[el.dataset.l];render();touch();draw();
+      S.layers[el.dataset.l]=!S.layers[el.dataset.l];
+      jlog('layer',{k:el.dataset.l,on:S.layers[el.dataset.l]?1:0});
+      render();touch();draw();
     });
   };
   render();
@@ -4847,6 +5106,7 @@ function loadNight(cb){
       // Один snapshot на всю зміну, тож undo повертає все разом.
       const keep=S.objs.filter(isBaseZone);
       const drop=S.objs.length-keep.length;
+      jlog('night',{date:sel.value,drop,keep:keep.length});
       if(drop||S.ghosts.length) snapshot();
       S.objs=keep; S.ghosts=[]; S.sel=null; S.selMore=[]; endPass();
       loadNight(ok=>{
@@ -5018,6 +5278,7 @@ function renderCorr(){
 }
 document.getElementById('corrToggle').onclick=()=>{
   S.corridors.on=!S.corridors.on;
+  jlog('corridors',{on:S.corridors.on?1:0,km:S.corridors.km});
   endPass();
   // Вибір знімається: у режимі коридорів немедоїдні маршрути не малюються,
   // і виділення на невидимому обʼєкті збивало б з пантелику.
@@ -5486,6 +5747,7 @@ function applyBasemap(id){
   const b=BASEMAPS.find(x=>x.id===id);
   if(!b) return;
   snapshot();
+  jlog('basemap',{id:b.id,bg:b.style.bg});
   Object.assign(S.layers,b.layers);
   Object.assign(S.style.base,b.style);
   touch();renderStyle();refresh();

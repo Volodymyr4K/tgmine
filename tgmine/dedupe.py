@@ -96,3 +96,85 @@ def report(posts: list[dict], events: list[dict], out=print) -> None:
 
 
 
+
+
+# ---------------------------------------------------------------------------
+# Нечіткі дублі ДЗЕРКАЛА. Точний збіг тексту ловить 59% постів kupolrussia,
+# але дзеркало переписує не буквально: викидає рядок загрози («Опасность по
+# БПЛА») або міняє його на область. Заміряно на 15 добах: 1220 пар, де
+# жодна сторона не позначена, — 8.3% усіх «унікальних» подій, ≈81 на добу,
+# тобто добові підсумки по областях роздуті на ~8%, а один голос рахується
+# двічі. Точковий шар це майже не чіпає (59 із 1220 — точки).
+#
+# Правило навмисно вузьке: ТІЛЬКИ пара дзеркал, ±180 с (медіана лагу 23 с,
+# 90-й перцентиль 45), той самий набір топонімів (Жаккар ≥ 0.6 або один
+# набір вкладений в інший), та сама область поста, і типи або однакові, або
+# один із них «інше» — бо саме рядок загрози дзеркало й губить. Різні типи
+# (тривога проти відбою) з тими самими назвами — це два різні повідомлення,
+# і вони не зливаються. На 20 випадкових злиттях, прочитаних очима, хибних 0.
+MIRRORS = {frozenset(("lpr1_treugolnik", "kupolrussia"))}
+MIRROR_WINDOW_S = 180
+TOPO_STOP = {"области", "область", "республика", "край", "района", "район",
+             "близлежащие", "тревога", "опасность", "отбой", "бпла", "ракетная",
+             "внимание", "меры", "безопасности", "фиксация", "фиксации",
+             "повторно", "сохраняется", "хорнет", "удар", "ударных", "группа",
+             "городской", "округ", "срочно", "принять"}
+TOPO = re.compile(r"[А-ЯЁ][а-яё\-]{3,}")
+
+
+def topo_key(text: str) -> frozenset:
+    """Назви з великої літери мінус службові слова — «про що» пост."""
+    return frozenset(w.lower() for w in TOPO.findall(text or "")
+                     if w.lower() not in TOPO_STOP)
+
+
+def same_story(a: frozenset, b: frozenset) -> bool:
+    if not a or not b:
+        return False
+    if a <= b or b <= a:
+        return min(len(a), len(b)) >= 2 or a == b
+    return len(a & b) / len(a | b) >= 0.6
+
+
+def mirror_dups(posts: list[dict], kind_of, region_of) -> int:
+    """Проставляє `_dup_of` нечітким дублям між каналами-дзеркалами.
+
+    `posts` уже впорядковані за датою; ті, що вже мають `_dup_of`, минаються.
+    Дублем стає МЕНШ інформативний пост: якщо типи різні, «інше» іде в дубль
+    незалежно від того, хто перший (інакше загроза з пізнішого поста зникала
+    б із унікальних; таких 3 на 1576). Якщо типи однакові — пізніший.
+    Повертає кількість позначених.
+    """
+    idx = [i for i, p in enumerate(posts)
+           if not p.get("_dup_of") and any(p["channel"] in m for m in MIRRORS)]
+    times = [datetime.fromisoformat(posts[i]["date"]) for i in idx]
+    keys = [topo_key(posts[i]["text"]) for i in idx]
+    kinds = [kind_of(posts[i]) for i in idx]
+    regs = [region_of(posts[i]) for i in idx]
+    used = set()
+    n = 0
+    for a in range(len(idx)):
+        if a in used or not keys[a]:
+            continue
+        pa = posts[idx[a]]
+        for b in range(a + 1, len(idx)):
+            if times[b] - times[a] > timedelta(seconds=MIRROR_WINDOW_S):
+                break
+            if b in used or not keys[b]:
+                continue
+            pb = posts[idx[b]]
+            if pa["channel"] == pb["channel"]:
+                continue
+            if frozenset((pa["channel"], pb["channel"])) not in MIRRORS:
+                continue
+            if regs[a] != regs[b] or not same_story(keys[a], keys[b]):
+                continue
+            ka, kb = kinds[a], kinds[b]
+            if ka != kb and "інше" not in (ka, kb):
+                continue
+            # хто дубль: менш інформативний, інакше пізніший
+            dup, orig = (pa, pb) if (ka == "інше" and kb != "інше") else (pb, pa)
+            dup["_dup_of"] = f"{orig['channel']}/{orig['id']}"
+            used.add(a); used.add(b); n += 1
+            break
+    return n

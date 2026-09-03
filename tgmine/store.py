@@ -40,7 +40,8 @@ MSK = timezone(timedelta(hours=3))
 # 13: «<Назва> район» шукається в газетирі як район, а не як однойменне село.
 # 14: крапка не ставиться на цілі руху («в направлении X») — див. point_entity.
 # 15: «БпЛА + куди йде» без слова-тригера — це фіксація, а не «інше».
-PIPELINE_VERSION = 15
+# 16: нечіткі дублі дзеркала kupolrussia<->lpr1 — dedupe.mirror_dups.
+PIPELINE_VERSION = 16
 
 # Число апаратів. Єдине місце в даних, де воно взагалі є, — і воно ж єдине,
 # що йде у видах числом (`declared()["largest"]`), тому ціна хибного збігу
@@ -476,6 +477,13 @@ class Store:
                 p["_dup_of"] = prev[0]
             else:
                 seen[key] = (f"{p['channel']}/{p['id']}", t)
+        # Нечіткі дублі дзеркала — див. dedupe.mirror_dups. Тип і область
+        # рахуються так само, як далі в _event, з очищеного тексту.
+        D.mirror_dups(
+            posts,
+            kind_of=lambda p: kind_of(strip_promo(p["text"], cfg)[0]),
+            region_of=lambda p: next((e["value"] for e in p.get("entities", [])
+                                      if e["type"] == "регіон"), None))
 
         by_date = collections.defaultdict(list)
         for p in posts:

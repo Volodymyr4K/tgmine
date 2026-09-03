@@ -191,3 +191,59 @@ class TestConfigIntegrity(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestKrasnoarmeysk(unittest.TestCase):
+    """Однойменні місця в пʼятьох регіонах: іменник — Донеччина, решта — ні.
+
+    `Красноармейск\\w*` стояв у ТОТ_Донецьк і згрібав усі форми. Заміряно на
+    45 добах: область поста визначило це слово у 162 постах, і в 100 з них
+    помилково. Розклад: «Красноармейск» 62 — Донеччина 62 з 62;
+    «Красноармейский» 93 — Кубань 84, ще Волгоград і Саратов;
+    «Красноармейское» 7 — Крим і Чувашія. Після правки 84 пости їдуть на
+    Кубань, 5 у Волгоградську, 4 в Саратовську, 4 в Крим, а 62 донецькі
+    лишаються донецькими.
+
+    Тексти дослівні з `data/`.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.cfg = E.Config.load(CFG)
+
+    def first_region(self, text):
+        rs = [e["value"] for e in E.entities_of(text, self.cfg)
+              if e["type"] == "регіон"]
+        return rs[0] if rs else None
+
+    def test_noun_is_donetsk(self):
+        for text in ["Красноармейск ДНР активность БПЛА Хорнет",
+                     "Константиновка, Красноармейск, Артемовск и близлежащие "
+                     "тревога по УАБ"]:
+            with self.subTest(text=text):
+                self.assertEqual(self.first_region(text), "ТОТ_Донецьк")
+
+    def test_adjective_is_kuban(self):
+        self.assertEqual(
+            self.first_region("Чебургольская, Красноармейский район, "
+                              "Краснодарский край - пролёт БПЛА.\n📡\n"
+                              "Локатор России -\n@locatorru"),
+            "Краснодарський")
+
+    def test_namesake_districts_keep_their_own_oblast(self):
+        """Волгоград і Саратов називають своє одразу після району."""
+        self.assertEqual(
+            self.first_region("Тракторный район, Волгоград\nБПЛА в направлении "
+                              "Волжский/Красноармейский\nВолгоградская область"),
+            "Волгоградська")
+        self.assertEqual(
+            self.first_region("Красноармейский район\nРовенский район\n"
+                              "Саратовская область\nФиксация группы БПЛА"),
+            "Саратовська")
+
+    def test_neuter_form_is_not_donetsk(self):
+        """«Красноармейское» — кримське село, а не Покровськ."""
+        self.assertEqual(
+            self.first_region("Красноармейское\nВишневка\nИсточное\nВоинка\n"
+                              "Новопавловка\nИшунь и близлежащие\n"
+                              "Республика Крым\nТревога по БПЛА"), "Крим")

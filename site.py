@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import collections
+import re
 import html
 import json
 import shutil
@@ -129,8 +130,9 @@ def voice_coverage(st, threshold=SOLO_SHARE):
     """Скільки регіонів висвітлює по суті один голос.
 
     Проєкт слухає три канали, але незалежних голосів два, і покривають вони
-    РІЗНЕ. Виміряно: подій, підтверджених другим голосом (те саме місце й тип
-    у вікні 60 хв), лише 3.1%.
+    РІЗНЕ. Подій, підтверджених другим голосом (те саме місце й тип у вікні
+    60 хв), у липні 2026 було близько трьох відсотків; тепер це число рахує
+    `confirmed_share` на кожній збірці.
 
     Спершу хотів ставити позначку «одне джерело» біля регіонів у таблиці. Не
     вийшло: при порозі 90% таких регіонів 35 із 39, при 95% — 23. Значок на
@@ -163,6 +165,62 @@ def voice_coverage(st, threshold=SOLO_SHARE):
             mono += 1
             solo_events += total
     return (mono, len(by), solo_events / total_events if total_events else 0.0)
+
+
+def count_share(st):
+    """Частка згадок БпЛА, де канал назвав число. Йде в прозу як «нижня межа».
+
+    Стояло літералом 3.2% (виміряно в липні 2026). Після розширення витягу
+    числа (`store.drones_of`) стало 4.5%, а сторінка далі показувала старе —
+    тому число рахується на кожній збірці. Лише унікальні події, без реклами.
+    """
+    days = st.dates()
+    if not days:
+        return 0.0
+    lo = datetime.fromisoformat(days[0]).replace(tzinfo=MSK)
+    hi = datetime.fromisoformat(days[-1]).replace(tzinfo=MSK) + timedelta(days=2)
+    rx = re.compile(r"БПЛА|бпла|дрон", re.I)
+    men = num = 0
+    for e in st.window(lo, hi):
+        if e.get("noise") or e.get("dup_of") or not rx.search(e.get("text") or ""):
+            continue
+        men += 1
+        num += bool(e.get("drones"))
+    return num / men if men else 0.0
+
+
+def confirmed_share(st, window_s=3600):
+    """Частка точкових спостережень, які підтвердив ІНШИЙ голос: те саме
+    місце й тип у вікні години. Дзеркала — один голос (див. VOICE).
+
+    Стояло літералом 3.1% (липень 2026). Після добору locatorru — третього
+    незалежного голосу — стало 10.4%; сторінка не помітила. Тому рахується
+    на збірці. Це і є число «скільки тут другої думки», і воно має рухатись
+    разом із набором каналів, а не з чиєюсь памʼяттю.
+    """
+    days = st.dates()
+    if not days:
+        return 0.0
+    lo = datetime.fromisoformat(days[0]).replace(tzinfo=MSK)
+    hi = datetime.fromisoformat(days[-1]).replace(tzinfo=MSK) + timedelta(days=2)
+    by = collections.defaultdict(list)
+    for e in st.window(lo, hi):
+        if (e.get("noise") or e.get("dup_of") or e.get("scope") != "точка"
+                or not e.get("place")):
+            continue
+        by[(e["place"], e["kind"])].append(
+            (datetime.fromisoformat(e["t"]), VOICE.get(e["channel"], e["channel"])))
+    total = confirmed = 0
+    for rows in by.values():
+        rows.sort()
+        for i, (t, v) in enumerate(rows):
+            total += 1
+            # сусіди за часом — сортовано, тож досить дивитись у вікно навколо
+            for t2, v2 in rows[max(0, i - 40):i + 40]:
+                if v2 != v and abs((t2 - t).total_seconds()) <= window_s:
+                    confirmed += 1
+                    break
+    return confirmed / total if total else 0.0
 
 
 def target_label(name, tid, dup_names):
@@ -254,8 +312,11 @@ def hour_hist(events, lo, hi, w=520, h=52):
             + "".join(bars) + "".join(labels) + "</svg>")
 
 
-def day_page(date, ev, s, prev_stats, have_raid, prev_date=None, next_date=None):
+def day_page(date, ev, s, prev_stats, have_raid, prev_date=None, next_date=None,
+             count_pct=None):
     lo, hi = day_window(date)
+    # частка згадок із числом — рахує main() раз на збірку (count_share)
+    cp = f"{count_pct:.1%}" if count_pct is not None else "кількох відсотків"
     uniq = clean(ev)
     pts = [e for e in uniq if e["scope"] == "точка"]
 
@@ -397,7 +458,7 @@ def day_page(date, ev, s, prev_stats, have_raid, prev_date=None, next_date=None)
 <div class=note>
 «Спостереження» — повідомлення про побачений чи почутий апарат, не підтверджений
 факт. «Найбільша група» — найбільше число, яке назвали канали за добу; число
-вони вказують рідко (3.2% згадок), тому це нижня межа. Суму чисел за добу тут
+вони вказують рідко ({cp} згадок), тому це нижня межа. Суму чисел за добу тут
 свідомо не показано: одна група летить через кілька районів і кожен дає власне
 повідомлення, тож сума рахує її по кілька разів. Збиття і вибухи систематично занижені: канали
 моніторять підліт, а не наслідки. Порівняння «до норми» — з медіаною попередніх
@@ -628,6 +689,10 @@ def main():
 
     have = {p.stem for p in (OUT / "raids").glob("*.html")}
 
+    # Числа для прози — раз на збірку, з поточного сховища, не з памʼяті.
+    count_pct = count_share(st)
+    conf_pct = confirmed_share(st)
+
     # ---- денні звіти ------------------------------------------------------
     (OUT / "day").mkdir(exist_ok=True)
     for i, r in enumerate(rows):
@@ -637,7 +702,8 @@ def main():
         (OUT / "day" / f"{r['date']}.html").write_text(
             day_page(r["date"], ev, r, prev, r["date"] in have,
                      rows[i - 1]["date"] if i > 0 else None,
-                     rows[i + 1]["date"] if i + 1 < len(rows) else None),
+                     rows[i + 1]["date"] if i + 1 < len(rows) else None,
+                     count_pct=count_pct),
             encoding="utf-8")
 
     # ---- жива сторінка ----------------------------------------------------
@@ -778,7 +844,7 @@ def main():
 <div class=note>
 <b>Як це читати.</b> «Спостереження» — це повідомлення про побачений або почутий
 апарат у конкретному місці, а не підтверджений факт. «Найбільша група» — найбільше
-з чисел, які назвали самі канали; число вони пишуть лише в 3.2% згадок, тому це
+з чисел, які назвали самі канали; число вони пишуть лише в {count_pct:.1%} згадок, тому це
 <b>нижня межа</b>. Суми чисел за добу тут нема навмисно: одну групу фіксують
 у кількох районах поспіль, і сума рахує її двічі-тричі. «Глибина» — 90-й перцентиль відстані від українського
 кордону.<br><br>
@@ -791,7 +857,7 @@ def main():
 <b>Скільки тут незалежних свідчень.</b> Каналів три, але два з них дзеркалять
 одне одного, тож незалежних голосів лише два — і покривають вони різні
 території, а не перевіряють одне одного. Спостережень, які підтвердив другий
-голос (те саме місце й тип у вікні години), — <b>3.1%</b>. У <b>{n_solo} з
+голос (те саме місце й тип у вікні години), — <b>{conf_pct:.1%}</b>. У <b>{n_solo} з
 {n_reg}</b> регіонів понад 90% спостережень дає один канал; на них припадає
 {solo_share:.0%} усіх точкових спостережень. Практично це означає: майже скрізь
 на цій карті другої думки немає, і помилка, мовчання чи упередженість одного

@@ -247,3 +247,71 @@ class TestMapsAreByteStable(unittest.TestCase):
         page = sorted(raid.glob("*.html"))[0].read_text(encoding="utf-8")
         self.assertIn("дані до", page)
         self.assertNotIn("збірка", page)
+
+
+class TestProseNumbersAreComputed(unittest.TestCase):
+    """Числа в поясненнях сайту мають рахуватись на збірці, не бути вшитими.
+
+    У прозі стояло «число пишуть у 3.2% згадок» і «підтверджених другим
+    голосом 3.1%». Обидва виміряні один раз у липні 2026 і вшиті літералами.
+    Після правки витягу числа перше стало 4.5%, після добору locatorru
+    друге — 10.4%; сторінка при цьому далі показувала старі.
+
+    Докстрінги й коментарі не перевіряються — там історичні заміри доречні.
+    Перевіряється лише код і рядкові літерали, які йдуть у HTML.
+    """
+
+    @staticmethod
+    def _doc_lines(tree):
+        out = set()
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Module, ast.FunctionDef, ast.ClassDef)) \
+                    and node.body and isinstance(node.body[0], ast.Expr) \
+                    and isinstance(getattr(node.body[0], "value", None), ast.Constant) \
+                    and isinstance(node.body[0].value.value, str):
+                d = node.body[0]
+                out.update(range(d.lineno, d.end_lineno + 1))
+        return out
+
+    def test_no_literal_percent_in_page_prose(self):
+        src = (ROOT / "site.py").read_text(encoding="utf-8")
+        skip = self._doc_lines(ast.parse(src))
+        bad = [f"{n}: {ln.strip()[:70]}" for n, ln in enumerate(src.splitlines(), 1)
+               if n not in skip
+               and not ln.strip().startswith("#")
+               and re.search(r"\d+[.,]\d+ ?%", ln)
+               and re.search(r"[а-яіїє]", ln)
+               and "{" not in ln]
+        self.assertEqual(bad, [], f"вшиті відсотки в прозі: {bad}")
+
+    def test_the_two_known_literals_are_gone(self):
+        src = (ROOT / "site.py").read_text(encoding="utf-8")
+        self.assertNotIn("3.2% згадок", src)
+        self.assertNotIn("<b>3.1%</b>", src)
+
+
+class TestProseNumbersActuallyCompute(unittest.TestCase):
+    """Сторож вище дивиться на текст; цей — виконує функції.
+
+    Перша версія count_share/confirmed_share пройшла 161 тест і впала на
+    першій же збірці: у site.py не було `import re`. Жоден тест ці функції
+    не викликав. Тепер викликає — на реальному сховищі, з межами, у які
+    справжні числа вкладаються з запасом.
+    """
+
+    def setUp(self):
+        if not any((ROOT / "store" / "events").glob("*.jsonl")):
+            self.skipTest("нема store/events — спершу sync.py")
+
+    def test_shares_are_sane_fractions(self):
+        site = load_script("site.py")
+        from tgmine import store as ST
+        st = ST.Store(root=ROOT / "store")
+        c = site.count_share(st)
+        v = site.confirmed_share(st)
+        # число пишуть рідко, але не ніколи: у липні 3.2%, у вересні 4.5%
+        self.assertGreater(c, 0.005)
+        self.assertLess(c, 0.30)
+        # другий голос є, але його мало: 3.1% -> 10.4% після locatorru
+        self.assertGreater(v, 0.005)
+        self.assertLess(v, 0.50)

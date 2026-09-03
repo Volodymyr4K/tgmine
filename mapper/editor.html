@@ -347,7 +347,7 @@ button.primary{background:rgba(255,62,165,.16);border-color:rgba(255,62,165,.45)
 
 <!-- версія в адресі: браузер інакше тримає стару підкладку в кеші й
      нові шари (наприклад контури держав) просто не доїжджають -->
-<script src="basemap.js?v=3"></script>
+<script src="basemap.js?v=4"></script>
 <script src="targets.js"></script>
 <script src="labels.js"></script>
 <script>
@@ -1358,6 +1358,14 @@ function reticle(c,x,y,col,r){
 // прибраних підписів і памʼять розкладки, і перемикання мови їх не губить.
 function toponym(o){
   return (S.lang==='en'&&o.e) ? o.e : o.n;
+}
+// Та сама назва для ПАНЕЛІ. Ключ усередині лишається українським, але
+// пропонувати «повернути Воронеж», коли на карті стоїть Voronezh, — це
+// перекладати оператора туди-сюди руками.
+function cityShown(n){
+  if(S.lang!=='en') return n;
+  const c=(window.LABELS||[]).find(x=>x.n===n);
+  return (c&&c.e)||n;
 }
 function drawLabels(c){
   const B=window.BASE, taken=TAKEN, ST=S.style;
@@ -2888,7 +2896,17 @@ function SvgCtx(w,h){
            `text-anchor="${anchor}"${ls?` letter-spacing="${ls}"`:''} ${common()}>`+
            `${esc(t)}</text>`);
     },
-    measureText(t){ meas.font=cur.font; return meas.measureText(t); },
+    // Розрядка МУСИТЬ входити в замір. Полотно її враховує, а тут її не
+    // було: «Voronezh Oblast» на екрані 146 px, у вектор ішло 95 px. Отже
+    // розкладка підписів у SVG інша, ніж на екрані, — мовчки, бо кожен
+    // приймач сам по собі виглядає правильним.
+    measureText(t){
+      meas.font=cur.font;
+      try{ meas.letterSpacing=cur.ls||'0px'; }catch(e){}
+      const r=meas.measureText(t);
+      try{ meas.letterSpacing='0px'; }catch(e){}
+      return r;
+    },
     drawImage(img,x,y,w2,h2){
       let href='';
       try{ href=img.toDataURL?img.toDataURL('image/png'):imgToData(img); }catch(e){ return; }
@@ -3640,7 +3658,7 @@ function hiddenCityList(){
   if(!list.length) return '';
   const rows=list.map(n=>
     `<div style="display:flex;gap:6px;align-items:center;margin:2px 0">`
-    +`<span style="flex:1;font-size:12px">${esc(n)}</span>`
+    +`<span style="flex:1;font-size:12px">${esc(cityShown(n))}</span>`
     +`<button data-city="${esc(n)}" style="padding:2px 8px">повернути</button></div>`).join('');
   return `<label style="margin-top:10px">Прибрані підписи (${list.length})</label>`
     +rows+'<button data-act="cityAll" style="margin-top:6px">Повернути всі</button>';
@@ -3774,7 +3792,7 @@ function refresh(){
   // Вибрано підпис міста — панель про нього, а не про обʼєкти.
   if(S.selCity&&!o){
     p.innerHTML=`<label>Місто</label><div style="font-size:13px;margin:2px 0 8px">`
-      +`${esc(S.selCity)}</div>`
+      +`${esc(cityShown(S.selCity))}</div>`
       +'<button data-act="cityHide">Прибрати цей підпис</button>'
       +'<div class="hint">Підпис зникне з екрана і з експорту. Повернути можна '
       +'нижче, у переліку прибраних. Клавіша Delete робить те саме.</div>'

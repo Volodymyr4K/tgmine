@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Підписи населених пунктів українською.
+"""Підписи населених пунктів: українська назва і англійська поруч.
 
 ЗАДАЧА. На карті театру було 53 підписи — обласні центри. Кадр однієї області
 лишався порожнім: маршрут іде повз десяток міст, і жодне не названо.
@@ -20,6 +20,7 @@
 import json
 import re
 import sys
+import unicodedata
 
 import os
 
@@ -136,6 +137,50 @@ DROP = {
 }
 
 
+# Англійський підпис. Латиниця в газетирі вже є — саме з неї й будується
+# українська назва, тож англійська версія карти не потребує ані нового
+# джерела, ані перекладу: береться те саме поле `name`.
+#
+# Що з ним усе-таки роблять. По-перше, розкладають діакритику й прибирають
+# мʼякий знак-апостроф: «Orël» і «Ryazan’» на карті мають бути «Orel» і
+# «Ryazan». По-друге, словник винятків нижче — там, де GeoNames тримає
+# застарілу або нестандартну латинку («Zaporizhzhya» замість офіційного
+# «Zaporizhzhia», «Nizhniy Novgorod» замість узвичаєного «Nizhny Novgorod»).
+# Дрібні НП лишаються як у газетирі: помилка в підписі райцентру коштує
+# менше, ніж механічне правило, що зіпсує сусідні правильні назви.
+CITY_EN = {
+    "Nizhniy Novgorod": "Nizhny Novgorod", "Orël": "Oryol",
+    "Naberezhnyye Chelny": "Naberezhnye Chelny",
+    "Zheleznodorozhnyy": "Zheleznodorozhny",
+    "Zaporizhzhya": "Zaporizhzhia", "Kryvyy Rih": "Kryvyi Rih",
+    "Mykolayiv": "Mykolaiv", "Vinnytsya": "Vinnytsia",
+    "Makiyivka": "Makiivka", "Kamyanske": "Kamianske",
+    "Slovyansk": "Sloviansk", "Siverskodonetsk": "Sievierodonetsk",
+    "Izmayil": "Izmail", "Yenakiyeve": "Yenakiieve",
+    "Ilovays’k": "Ilovaisk", "Mohyliv-Podilskyy": "Mohyliv-Podilskyi",
+    "Novoukrayinka": "Novoukrainka", "Chuhuyiv": "Chuhuiv",
+    "Avdiyivka": "Avdiivka", "Dokuchayevsk": "Dokuchaievsk",
+    "Kadiyivka": "Kadiivka", "Dzhankoy": "Dzhankoi",
+    "Bakhchysaray": "Bakhchysarai", "Pervomaysk": "Pervomaisk",
+    "Yevpatoriya": "Yevpatoriia", "Feodosiya": "Feodosiia",
+    "Oleksandriya": "Oleksandriia", "Berdyansk": "Berdiansk",
+    "Kupyansk": "Kupiansk", "Izyum": "Izium",
+}
+
+
+def en(name: str) -> str:
+    """Латиниця газетира, придатна до друку: без діакритики й апострофів."""
+    if name in CITY_EN:
+        return CITY_EN[name]
+    out = unicodedata.normalize("NFKD", name)
+    out = "".join(c for c in out if not unicodedata.combining(c))
+    out = out.replace("’", "").replace("ʼ", "").replace("'", "").strip()
+    # Кінцеве -yy/-iy на англійських картах пишуть одним «y»: «Staryy Oskol»
+    # це запис системи BGN, а очима читається як помилка набору. Українських
+    # назв правило не чіпає: там кінцівка -yi («Khmelnytskyi»).
+    return re.sub(r"(?:yy|iy)\b", "y", out)
+
+
 # ЧОМУ НЕ З alternatenames. Спроба брати звідти російську назву дала
 # «Волагду» замість Вологди й «Плоскуров» замість Хмельницького: у тому полі
 # лежать назви багатьма мовами БЕЗ позначки мови, і перший кириличний рядок
@@ -249,7 +294,10 @@ def uk(name: str) -> str:
     return "".join(out)
 
 
-def main(min_pop="15000", out=None):
+# 12000, а не 15000: саме з цим порогом зібрано labels.js у репозиторії
+# (977 підписів). Стояло 15000, і перезбірка «без параметрів» мовчки
+# викидала 164 назви — файл ставав меншим, а причина не видно ніде.
+def main(min_pop="12000", out=None):
     out = out or os.path.join(HERE, "labels.js")
     min_pop = int(min_pop)
     BOX = (41.0, 60.5, 25.0, 53.0)
@@ -271,7 +319,11 @@ def main(min_pop="15000", out=None):
             if name in seen:
                 continue
             seen.add(name)
-            res.append({"n": name, "la": round(la, 3), "lo": round(lo, 3), "p": pop})
+            # `e` — той самий пункт англійською. Ключем скрізь лишається `n`:
+            # прибрані оператором назви й памʼять розкладки прив'язані до
+            # української назви, тож перемикання мови їх не губить.
+            res.append({"n": name, "e": en(f[1]), "la": round(la, 3),
+                        "lo": round(lo, 3), "p": pop})
     res.sort(key=lambda c: -c["p"])
     open(out, "w", encoding="utf-8").write(
         "window.LABELS=" + json.dumps(res, ensure_ascii=False,

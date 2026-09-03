@@ -657,6 +657,10 @@ const S={
           impacts:true,ppo:true,downed:true,ghosts:true,marklabels:false,
           ruregions:true,
           legend:true,header:true,scale:true},
+  // Мова назв на карті: 'uk' або 'en'. Це не переклад інтерфейсу — це
+  // підписи міст і областей у кадрі, тобто дані підкладки, тож мова їде
+  // разом із файлом карти.
+  lang:'uk',
   objs:[], sel:null, selMore:[], draft:null, ghosts:[], redo:[], marquee:null, clip:null,
   hover:null,                   // обʼєкт під курсором у списку — підсвічуємо на карті
   clean:false,                  // чиста карта: інтерфейс схований
@@ -1107,7 +1111,10 @@ function strokeSegs(c,segs){
 // одну, а на кадрі району вже нічого не пояснюють, бо межа за краєм.
 function drawRegionLabels(c,taken){
   const B=window.BASE;
-  if(!B.regionLabels||S.view.k<0.28||S.view.k>3.2) return;
+  // Нижня межа 0.28 лишала шар порожнім на стартовому кадрі (k≈0.14):
+  // тумблер «назви областей» стояв увімкненим і не давав нічого, що
+  // читається як зламане. Тепер межа нижча за стартовий масштаб.
+  if(!B.regionLabels||S.view.k<0.13||S.view.k>3.2) return;
   const fits=r=>!taken.some(t=>!(r.x+r.w<t.x||t.x+t.w<r.x||r.y+r.h<t.y||t.y+t.h<r.y));
   const alpha=Math.min(.44,Math.max(.24,S.view.k*0.34));
   for(const r of B.regionLabels){
@@ -1119,13 +1126,19 @@ function drawRegionLabels(c,taken){
     c.save();
     c.font=`500 ${size}px "MapSans",ui-sans-serif,-apple-system,Arial`;
     c.letterSpacing=(size*0.28).toFixed(1)+'px';
-    const w=c.measureText(r.n).width;
+    const nm=toponym(r);
+    const w=c.measureText(nm).width;
     const box={x:s2[0]-w/2,y:s2[1]-size,w,h:size+4};
     if(!fits(box)){c.restore();continue;}
     taken.push(box);
-    c.textAlign='center';c.fillStyle=`rgba(176,198,220,${alpha})`;
-    shadow(c,'rgba(0,0,0,.8)',6);
-    c.fillText(r.n,s2[0],s2[1]);
+    // Колір і ореол — ті самі, що в підписів міст. Вшите блакитне
+    // `rgba(176,198,220)` з чорною тінню збігалося з темною підкладкою
+    // випадково: на світлій схемі назва області виходила блідою плямою з
+    // брудною тінню, тобто гірше, ніж її відсутність.
+    c.textAlign='center';
+    c.fillStyle=hexa(S.style.base.inkDim||'#c6d8ea',alpha);
+    shadow(c, isLight()?`rgba(255,255,255,${.9})`:'rgba(0,0,0,.8)',6);
+    c.fillText(nm,s2[0],s2[1]);
     c.restore();
   }
 }
@@ -1340,6 +1353,12 @@ function reticle(c,x,y,col,r){
   c.beginPath();c.arc(x,y,1.6,0,7);c.fillStyle=col;c.fill();
   c.restore();
 }
+// Назва обʼєкта підкладки мовою карти. Міняється ЛИШЕ текст: ключем скрізь
+// далі лишається українська назва (`n`) — за нею тримаються перелік
+// прибраних підписів і памʼять розкладки, і перемикання мови їх не губить.
+function toponym(o){
+  return (S.lang==='en'&&o.e) ? o.e : o.n;
+}
 function drawLabels(c){
   const B=window.BASE, taken=TAKEN, ST=S.style;
   // Підписи областей ідуть ПЕРШИМИ: вони найбільші й мають право на місце,
@@ -1402,7 +1421,8 @@ function drawLabels(c){
     const big=ct.p>700000, mid=ct.p>150000;
     const size=big?14:mid?12:10.5;
     c.font=`${big?600:mid?500:400} ${size}px "MapSans",ui-sans-serif,-apple-system,Arial`;
-    const w=c.measureText(ct.n).width, h=size+2;
+    const nm=toponym(ct);
+    const w=c.measureText(nm).width, h=size+2;
     const NEAR=nearCand(w,h);
     const boxOf=f=>f.t==='n'
       ? (NEAR[f.i]?{x:s2[0]+NEAR[f.i][0],y:s2[1]+NEAR[f.i][1]-h+4,w,h}:null)
@@ -1465,7 +1485,7 @@ function drawLabels(c){
     c.fillStyle=big?hexa(ST.base.ink||'#eef4fb',.96*ci)
       :mid?hexa(ST.base.ink||'#eef4fb',.86*ci)
           :hexa(ST.base.inkDim||'#c6d8ea',.72*ci);
-    c.fillText(ct.n,put[0],put[1]);c.restore();
+    c.fillText(nm,put[0],put[1]);c.restore();
   }
 }
 
@@ -3028,6 +3048,7 @@ function restore(){
       // Старі карти цього поля не мають — режим показу лишається вимкненим.
       S.corridors=Object.assign({on:false,km:120},d.corridors||{});
       S.hideCity=Array.isArray(d.hideCity)?d.hideCity.slice():[];
+      S.lang=d.lang==='en'?'en':'uk';   // карти без цього поля — українські
       S.selCity=null; endPass();
       if(d.legend)S.legend=d.legend;
       if(d.brand)S.brand=d.brand;
@@ -4039,7 +4060,7 @@ document.getElementById('fit').onclick=fit;
 function mapPayload(){
   return {title:S.title,sub:S.sub,objs:S.objs,view:S.view,
           frame:S.frame,aspect:S.aspect,types:TYPES,zones:ZONES,
-          corridors:S.corridors, hideCity:S.hideCity,
+          corridors:S.corridors, hideCity:S.hideCity, lang:S.lang,
           style:S.style,legend:S.legend,brand:S.brand,
           footer:S.footer,watermark:S.watermark};
 }
@@ -4102,6 +4123,7 @@ function applyMap(d){
   if(d.style)S.style=fillDefaults(d.style,STYLE_DEFAULT);
   S.corridors=Object.assign({on:false,km:120},d.corridors||{});
   S.hideCity=Array.isArray(d.hideCity)?d.hideCity.slice():[];
+  S.lang=d.lang==='en'?'en':'uk';
   S.selCity=null; endPass();
   if(d.legend)S.legend=d.legend;
   if(d.brand)S.brand=d.brand;
@@ -4539,6 +4561,11 @@ function renderStyle(){
     +n('Кордони країн: товщина','base','countryW','type=number step=0.05 min=0.4 max=3')
     +n('Межі областей РФ','base','borders','type=number step=0.05 min=0 max=1')
     +n('Розсип НП','base','places','type=number step=0.05 min=0 max=1')
+    +'<label>Мова назв на карті</label>'
+    +'<select id="stLang">'
+    +[['uk','українська'],['en','English']].map(([v,t])=>
+       `<option value="${v}" ${S.lang===v?'selected':''}>${t}</option>`).join('')
+    +'</select>'
     +n('Помітність підписів міст','base','cityInk','type=number step=0.05 min=0 max=1')
     +n('Щільність підписів міст','base','labelDens','type=number step=0.1 min=0.2 max=5')
     +n('Максимум підписів у кадрі (0 — без межі)','base','labelMax','type=number step=5 min=0 max=400')
@@ -4582,6 +4609,10 @@ function renderStyle(){
     S.style[k].glyph=b.dataset.sgv;
     touch(); draw(); renderStyle();
   });
+  // Мова живе не в S.style: набір значень підкладки перезаписується при
+  // виборі іншої растрової схеми, і мова карти зникала б разом із ним.
+  const lg=document.getElementById('stLang');
+  if(lg) lg.onchange=()=>{S.lang=lg.value==='en'?'en':'uk';touch();draw();};
   document.getElementById('stReset').onclick=()=>{
     S.style=JSON.parse(JSON.stringify(STYLE_DEFAULT));
     touch();draw();renderStyle();};

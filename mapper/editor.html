@@ -405,6 +405,11 @@ const TYPES_DEFAULT=[
 // TYPES живе у стані; TYPE — покажчик за id, перебудовується при зміні
 let TYPES=JSON.parse(JSON.stringify(TYPES_DEFAULT));
 let STYLE_DEFAULT=null;   // знімок стандартного стилю, робиться на старті
+let LAYERS_DEFAULT=null;  // те саме для шарів: стара карта без них лишається на стандартних
+// Панель шарів малюється у власному блоці; сюди кладеться її перемальовування,
+// бо той самий тумблер тепер є і в налаштуваннях — інакше два місця показували б
+// різне.
+let renderLayers=()=>{};
 let TYPE=Object.fromEntries(TYPES.map(t=>[t.id,t]));
 function retype(){
   TYPE=Object.fromEntries(TYPES.map(t=>[t.id,t]));
@@ -3067,6 +3072,10 @@ function restore(){
       S.corridors=Object.assign({on:false,km:120},d.corridors||{});
       S.hideCity=Array.isArray(d.hideCity)?d.hideCity.slice():[];
       S.lang=d.lang==='en'?'en':'uk';   // карти без цього поля — українські
+      // Прибраний шар має лишатись прибраним і після перезавантаження:
+      // інакше «прибрав назви областей» тримається лише до наступного
+      // відкриття. Старій карті без поля дістаються стандартні шари.
+      if(d.layers) S.layers=Object.assign({},LAYERS_DEFAULT||S.layers,d.layers);
       S.selCity=null; endPass();
       if(d.legend)S.legend=d.legend;
       if(d.brand)S.brand=d.brand;
@@ -4079,6 +4088,7 @@ function mapPayload(){
   return {title:S.title,sub:S.sub,objs:S.objs,view:S.view,
           frame:S.frame,aspect:S.aspect,types:TYPES,zones:ZONES,
           corridors:S.corridors, hideCity:S.hideCity, lang:S.lang,
+          layers:S.layers,
           style:S.style,legend:S.legend,brand:S.brand,
           footer:S.footer,watermark:S.watermark};
 }
@@ -4142,6 +4152,7 @@ function applyMap(d){
   S.corridors=Object.assign({on:false,km:120},d.corridors||{});
   S.hideCity=Array.isArray(d.hideCity)?d.hideCity.slice():[];
   S.lang=d.lang==='en'?'en':'uk';
+  if(d.layers) S.layers=Object.assign({},LAYERS_DEFAULT||S.layers,d.layers);
   S.selCity=null; endPass();
   if(d.legend)S.legend=d.legend;
   if(d.brand)S.brand=d.brand;
@@ -4151,7 +4162,7 @@ function applyMap(d){
   document.getElementById('mSub').value=S.sub;
   S.sel=null;S.selMore=[];
   if(viewBroken()) fit();
-  renderChrome();renderStyle();refresh();
+  renderChrome();renderStyle();renderLayers();refresh();
 }
 document.getElementById('save').onclick=()=>{
   const blob=new Blob([JSON.stringify(mapPayload(),null,1)],
@@ -4441,6 +4452,7 @@ document.getElementById('tSearch').oninput=e=>renderTargets(e.target.value);
     });
   };
   render();
+  renderLayers=render;
 }
 // Усе оформлення карти в одному вікні: оператор міняє написи, стовпчики,
 // водяний знак — і бачить результат одразу.
@@ -4579,6 +4591,11 @@ function renderStyle(){
     +n('Кордони країн: товщина','base','countryW','type=number step=0.05 min=0.4 max=3')
     +n('Межі областей РФ','base','borders','type=number step=0.05 min=0 max=1')
     +n('Розсип НП','base','places','type=number step=0.05 min=0 max=1')
+    +'<label>Назви областей</label>'
+    +'<select id="stRegNames">'
+    +[['1','показувати'],['0','прибрати']].map(([v,t])=>
+       `<option value="${v}" ${(S.layers.regions?'1':'0')===v?'selected':''}>${t}</option>`).join('')
+    +'</select>'
     +'<label>Мова назв на карті</label>'
     +'<select id="stLang">'
     +[['uk','українська'],['en','English']].map(([v,t])=>
@@ -4631,6 +4648,11 @@ function renderStyle(){
   // виборі іншої растрової схеми, і мова карти зникала б разом із ним.
   const lg=document.getElementById('stLang');
   if(lg) lg.onchange=()=>{S.lang=lg.value==='en'?'en':'uk';touch();draw();};
+  // Той самий шар, що в переліку шарів, — не другий прапорець. Тому після
+  // зміни перемальовується і та панель: два незалежні тумблери на одну річ
+  // читаються як несправність.
+  const rn=document.getElementById('stRegNames');
+  if(rn) rn.onchange=()=>{S.layers.regions=rn.value==='1';renderLayers();touch();draw();};
   document.getElementById('stReset').onclick=()=>{
     S.style=JSON.parse(JSON.stringify(STYLE_DEFAULT));
     touch();draw();renderStyle();};
@@ -5548,6 +5570,7 @@ function wireHud(){
 }
 function start(){
 STYLE_DEFAULT=JSON.parse(JSON.stringify(S.style));
+LAYERS_DEFAULT=JSON.parse(JSON.stringify(S.layers));
 resize();fit();S.ready=true;
 if(restore()) console.log('відновлено з автозбереження');
 if(viewBroken()) fit();   // автозбереження могло зберегти нечинний вигляд
@@ -5560,6 +5583,7 @@ wireZones();
 wireImages();
 renderChrome();
 renderStyle();
+renderLayers();          // карта могла принести власні шари
 refresh();
 setTool('select');
 renderTargets('');

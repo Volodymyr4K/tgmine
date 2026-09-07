@@ -70,6 +70,25 @@ button.primary{background:rgba(255,62,165,.16);border-color:rgba(255,62,165,.45)
   border-radius:6px;cursor:pointer;font-size:11.5px;color:var(--dim);background:#0c121a}
 .type.on{border-color:#3a4c60;color:var(--ink);background:#111a24}
 .sw{width:16px;height:3px;border-radius:2px;flex:none}
+/* Колір обʼєкта. Оператор малює одним типом і фарбує КОЖНУ стрілку окремо,
+   тож колір для нього — не налаштування, а щоденна дія: палітра тут
+   одноклікова, а системне вікно вибору лишається для решти відтінків. */
+.cols{display:flex;flex-wrap:wrap;gap:5px;margin:4px 0 2px}
+.cdot{width:22px;height:22px;flex:none;padding:0;border-radius:6px;
+  border:1px solid rgba(0,0,0,.5);cursor:pointer;line-height:1;font-size:11px}
+.cdot:hover{border-color:#fff}
+.cdot.on{outline:2px solid #fff;outline-offset:1px}
+.cdot.base{color:rgba(0,0,0,.75);font-weight:700}
+.cwrap{display:flex;gap:6px;align-items:center;margin-top:6px}
+.cwrap input[type=color]{width:46px;flex:none;padding:2px;height:30px}
+#quick .cdot{width:17px;height:17px;border-radius:5px;font-size:9px}
+#colorpop{position:absolute;z-index:80;display:none;width:196px;
+  transform:translate(-50%,-100%);background:rgba(8,13,20,.96);
+  border:1px solid rgba(120,150,180,.35);border-radius:10px;padding:8px 9px;
+  box-shadow:0 12px 30px rgba(0,0,0,.55)}
+#colorpop .cols{margin:0}
+#colorpop .lbl{font-size:10.5px;color:#5f7386;margin:0 0 5px;letter-spacing:.3px}
+#colorpop button{font-size:11.5px;padding:5px 7px}
 #list{margin-top:6px;max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:6px}
 .item{padding:6px 9px;border-bottom:1px solid #131c26;font-size:11.5px;color:var(--dim);
   cursor:pointer;display:flex;justify-content:space-between;gap:8px}
@@ -192,6 +211,7 @@ button.primary{background:rgba(255,62,165,.16);border-color:rgba(255,62,165,.45)
     <div id="toast"></div>
     <div id="menu"></div>
     <div id="quick"></div>
+    <div id="colorpop"></div>
     <div id="help"><div class="box"></div></div>
     <button id="exitClean" title="Повернути панелі (Esc або \\)">панелі · Esc</button>
   </div>
@@ -605,11 +625,166 @@ addEventListener('unhandledrejection',e=>{
 }
 jinit();
 
+// ---- колір обʼєкта --------------------------------------------------------
+// Оператор малює одним типом («Хорнет») і фарбує КОЖНУ стрілку окремо: колір
+// для нього не налаштування типу, а дія, яку він робить частіше за будь-яку
+// іншу. Тому він є в трьох місцях одразу — палітрою в панелі, рядком кружків
+// просто над обʼєктом і клавішею C, — і всюди це ОДНЕ натискання, а не
+// подорож у системне вікно вибору кольору.
+const PALETTE=['#ff3ea5','#ff5252','#ff8a1f','#ffd166','#a3e635','#4ade80',
+               '#38d4dd','#7fd3ff','#8fa8ff','#c77dff','#ff8ad4','#e8f2fc'];
+const COLKEY='tgmine-cols';   // недавні кольори — у браузері оператора
+function recentCols(){
+  try{
+    const a=JSON.parse(localStorage.getItem(COLKEY)||'[]');
+    return Array.isArray(a)?a.filter(c=>/^#[0-9a-f]{6}$/i.test(c)).slice(0,8):[];
+  }catch(e){ return []; }
+}
+function pushRecent(c){
+  if(!/^#[0-9a-f]{6}$/i.test(c||'')) return;
+  const v=c.toLowerCase();
+  // Уже відомий колір НЕ переставляється наперед: інакше кожне натискання
+  // тасувало б рядок, і наступний кружок опинявся б не там, де щойно був.
+  const old=recentCols();
+  if(PALETTE.includes(v)||old.some(x=>x.toLowerCase()===v)) return;
+  try{ localStorage.setItem(COLKEY,JSON.stringify([v,...old].slice(0,8))); }catch(e){}
+}
+// Кольори типів і зон — теж матеріал палітри: найчастіше стрілку фарбують у
+// колір іншого засобу, а не в довільний відтінок.
+function paletteCols(){
+  const out=[];
+  const add=c=>{ if(/^#[0-9a-f]{6}$/i.test(c||'')&&!out.includes(c.toLowerCase()))
+    out.push(c.toLowerCase()); };
+  recentCols().forEach(add);
+  PALETTE.forEach(add);
+  TYPES.forEach(t=>add(t.col));
+  return out;
+}
+// Тільки ті обʼєкти, чий власний колір справді читається при малюванні.
+// Знак — емодзі, у нього кольору нема; позначки й пускові беруть його з
+// категорії та типу, і власний там нічого б не змінив.
+function colOk(o){ return !!o&&['route','arrow','text','zone'].includes(o.kind); }
+// Колір, який обʼєкт має БЕЗ власного: до нього повертає кружок «як у типу».
+function baseCol(o){
+  if(!o) return '#e8f2fc';
+  if(o.kind==='route') return ((TYPE[o.type]||TYPES[0])||{}).col||'#ff3ea5';
+  if(o.kind==='zone')
+    return ((typeof ZONE!=='undefined'&&(ZONE[o.zone]||ZONE.area))||{}).col||'#ffb01f';
+  if(o.kind==='text') return (S.style&&S.style.base.ink)||'#e8f2fc';
+  return '#e8f2fc';
+}
+function baseWord(o){
+  return o&&o.kind==='route' ? 'як у типу'
+       : o&&o.kind==='zone'  ? 'як у типу зони' : 'стандартний колір';
+}
+function baseLabel(o){
+  return o&&(o.kind==='route'||o.kind==='zone')
+    ? 'Колір '+baseWord(o) : 'Стандартний колір';
+}
+// Фарбується ВСЕ вибране: перефарбувати п’ять стрілок однією дією — те саме
+// очікування, що й видалити п’ять однією клавішею.
+function colSel(){ return [S.sel,...S.selMore].filter(colOk); }
+function applyCol(c){
+  const list=colSel(); if(!list.length) return false;
+  list.forEach(o=>o.col=c); touch(); draw(); return true;
+}
+function resetCol(){
+  const list=colSel(); if(!list.length) return false;
+  snapshot(); list.forEach(o=>{ delete o.col; }); touch(); draw(); return true;
+}
+// Рядок кружків. Перший — «як у типу»: без нього повернення до стандартного
+// кольору вимагало б памʼятати сам колір.
+function colDots(o,max){
+  const cur=(o.col||'').toLowerCase();
+  const list=paletteCols(), use=max?list.slice(0,max):list;
+  return `<button class="cdot base${cur?'':' on'}" data-col="__base"
+     title="Повернути ${baseWord(o)} (${baseCol(o)})" style="background:${baseCol(o)}">↺</button>`
+    +use.map(c=>`<button class="cdot${cur===c?' on':''}" data-col="${c}"
+     title="${c}" style="background:${c}"></button>`).join('');
+}
+// Блок кольору в бічній панелі: палітра + системний вибирач для будь-якого
+// іншого відтінку.
+function colBlock(o){
+  const n=colSel().length;
+  return `<label>Колір${n>1?' · на всі '+n+' вибрані':''}</label>`
+    +`<div class="cols">${colDots(o)}</div>`
+    +`<div class="cwrap"><input type="color" data-colpick value="${o.col||baseCol(o)}">`
+    +`<button data-act="colbase">${baseLabel(o)}</button></div>`;
+}
+// Одна проводка на обидва місця, де стоїть палітра, — панель і віконце.
+// after() дає тому, хто її поставив, перемалювати себе після зміни.
+function wireCols(root,after){
+  root.querySelectorAll('[data-col]').forEach(b=>b.onclick=e=>{
+    e.stopPropagation();
+    const c=b.dataset.col;
+    if(c==='__base'){ resetCol(); }
+    else { snapshot(); applyCol(c); pushRecent(c); }
+    (after||refresh)();
+  });
+  const cb=root.querySelector('[data-act="colbase"]');
+  if(cb) cb.onclick=e=>{ e.stopPropagation(); resetCol(); (after||refresh)(); };
+  const pick=root.querySelector('[data-colpick]');
+  if(pick){
+    // Крок історії робиться ОДИН — на початку тягання по градієнту, а не на
+    // кожен його кадр: інакше одна зміна кольору зʼїдала б усю історію.
+    let held=false;
+    pick.oninput=()=>{ if(!held){ held=true; snapshot(); } applyCol(pick.value); };
+    pick.onchange=()=>{ held=false; pushRecent(pick.value); (after||refresh)(); };
+  }
+}
+// Віконце палітри просто над обʼєктом: фарбувати, не їдучи в панель.
+let POP={x:0,y:0,o:null};
+function colorPop(x,y){
+  const el=document.getElementById('colorpop'); if(!el) return;
+  const o=S.sel;
+  if(!colOk(o)){ el.style.display='none'; return; }
+  if(x!==undefined){ POP.x=x; POP.y=y; }
+  POP.o=o;                       // віконце належить конкретному обʼєкту
+  const n=colSel().length;
+  el.innerHTML=`<div class="lbl">Колір${n>1?' · '+n+' обʼєкти':''}</div>`
+    +`<div class="cols">${colDots(o)}</div>`
+    +`<div class="cwrap"><input type="color" data-colpick value="${o.col||baseCol(o)}">`
+    +`<button data-act="colbase">${baseWord(o)}</button></div>`;
+  el.style.display='block';
+  el.style.left=Math.max(104,Math.min(Wp-104,POP.x))+'px';
+  el.style.top=Math.max(190,Math.min(Hp-8,POP.y))+'px';
+  wireCols(el,()=>{ refresh(); colorPop(); });
+}
+// Місце для віконця: НАД смужкою швидких дій, а не поверх неї.
+function popAtSel(){
+  const o=S.sel, a=selAnchor(o);
+  if(!colOk(o)||!a) return false;
+  const q=document.getElementById('quick');
+  const vis=q&&q.style.display!=='none';
+  // Смужка зсунута вгору на власну висоту (translate -100%), тож видима її
+  // верхівка — це style.top мінус висота.
+  const y=vis ? (parseFloat(q.style.top)||a[1]) - q.offsetHeight - 8 : a[1]-26;
+  colorPop(a[0],y);
+  return true;
+}
+function hidePop(){
+  const el=document.getElementById('colorpop');
+  if(el) el.style.display='none';
+  POP.o=null;
+}
 // Типи засобів — це ДАНІ карти, а не константа коду. Оператор додає свої,
 // перейменовує, міняє колір і значок; набір зберігається у файлі карти.
 // Стартовий список загальний: модель («Шахед», «Гербера») з наших даних не
 // виводиться, і писати її за замовчуванням означало б стверджувати те, чого
 // ми не знаємо. Але вписати руками оператор може будь-що.
+// Стокові кольори, які ми міняли вже після того, як оператор почав малювати.
+// Карта носить свій список типів, тож без цього «Хорнет» лишався б у старому
+// кольорі назавжди. Звіряємось із ТОЧНИМ старим значенням: колір, підібраний
+// оператором вручну, з ним не збігається й лишається недоторканим.
+const TYPE_RECOLOR={hornet:{from:'#ff8ad4',to:'#ff8a1f'}};
+function migrateTypes(list){
+  if(!Array.isArray(list)) return list;
+  for(const t of list){
+    const r=TYPE_RECOLOR[t&&t.id];
+    if(r&&String(t.col||'').toLowerCase()===r.from) t.col=r.to;
+  }
+  return list;
+}
 const TYPES_DEFAULT=[
   // Це карта ударів ПО РФ, тому номенклатура українська. Список не вигаданий
   // і не переписаний із чужої карти (там був російський: «Калібр»,
@@ -624,7 +799,7 @@ const TYPES_DEFAULT=[
   // одразу, і будь-що перебивається вже на самому обʼєкті.
   {id:'uav',     name:'БпЛА (тип не вказано)', col:'#ff3ea5', icon:'arrow',
    width:1.6, count:6, spread:14, arrows:0, dash:false},
-  {id:'hornet',  name:'БпЛА «Хорнет»',         col:'#ff8ad4', icon:'arrow',
+  {id:'hornet',  name:'БпЛА «Хорнет»',         col:'#ff8a1f', icon:'arrow',
    width:1.5, count:8, spread:15, arrows:2, dash:false},
   {id:'darts',   name:'БпЛА «Дартс»',          col:'#c77dff', icon:'arrow',
    width:1.5, count:5, spread:12, arrows:0, dash:false},
@@ -686,7 +861,11 @@ function editType(id){
     +`<input data-k="${key}" value="${t[key]===undefined?'':t[key]}" ${attrs}>`;
   p.innerHTML='<h2 style="margin-top:0">Тип засобу</h2>'
     +`<label>Назва в легенді</label><input data-k="name" value="${t.name}">`
-    +`<label>Колір</label><input type="color" data-k="col" value="${t.col}">`
+    +`<label>Колір</label>`
+    +'<div class="cols">'+PALETTE.map(c=>
+       `<button class="cdot${c===String(t.col).toLowerCase()?' on':''}" data-tcol="${c}"
+          title="${c}" style="background:${c}"></button>`).join('')+'</div>'
+    +`<div class="cwrap"><input type="color" data-k="col" value="${t.col}"></div>`
     +'<label>Значок у легенді</label><select data-k="icon">'
     +['arrow','line','cross','plus','plane','circle'].map(v=>
       `<option value="${v}" ${v===t.icon?'selected':''}>${
@@ -719,6 +898,10 @@ function editType(id){
     touch();retype();draw();
   };
   p.querySelectorAll('[data-k]').forEach(el=>{el.oninput=upd;el.onchange=upd;});
+  // Палітра для кольору типу: те саме одне натискання, що й на обʼєкті.
+  p.querySelectorAll('[data-tcol]').forEach(b=>b.onclick=()=>{
+    t.col=b.dataset.tcol; touch(); retype(); draw(); editType(id);
+  });
   const act={
     dash:()=>{t.dash=!t.dash;},
     up:()=>{const i=TYPES.indexOf(t);
@@ -2416,6 +2599,13 @@ function renderQuick(){
         + `<button data-q="pin" class="${o.pinLabel?'on':''}" title="Підпис завжди"`+
           `>підпис</button>`;
   }
+  // Колір просто тут: між «намалював» і «перефарбував» не має бути дороги в
+  // бічну панель — це та сама дія, зроблена вдруге.
+  if(colOk(o)){
+    html+=colDots(o,6).replace(/data-col="/g,'data-q="col:')
+        + `<button data-q="colmore" title="Уся палітра (C)">…</button>`
+        + '<span class="sep"></span>';
+  }
   if(o.label!==undefined||o.kind==='impact')
     html+=`<button data-q="rename" title="Змінити підпис">✎</button>`;
   html+='<span class="sep"></span>'
@@ -2424,11 +2614,19 @@ function renderQuick(){
   q.innerHTML=html;
   q.style.display='flex';
   const off=(o.size|| (S.style.impact.size||9))*2.2+16;
-  q.style.left=Math.max(70,Math.min(Wp-70,a[0]))+'px';
+  const half=Math.min(200,Math.max(70,q.offsetWidth/2+8));
+  q.style.left=Math.max(half,Math.min(Wp-half,a[0]))+'px';
   q.style.top=Math.max(34,Math.min(Hp-8,a[1]-off))+'px';
   q.querySelectorAll('[data-q]').forEach(b=>b.onclick=e=>{
     e.stopPropagation();
     const act=b.dataset.q;
+    if(act.startsWith('col:')){
+      const c=act.slice(4);
+      if(c==='__base') resetCol();
+      else { snapshot(); applyCol(c); pushRecent(c); }
+      refresh(); return;
+    }
+    if(act==='colmore'){ popAtSel(); return; }
     if(act.startsWith('cat:')){snapshot();S.sel.cat=act.slice(4);refresh();return;}
     if(act==='pin'){snapshot();S.sel.pinLabel=!S.sel.pinLabel;refresh();return;}
     if(act==='rename'){
@@ -3453,7 +3651,7 @@ function restore(){
       S.objs=d.objs;S.title=d.title||S.title;S.sub=d.sub||S.sub;
       if(d.view)S.view=d.view;
       if(d.frame){S.frame=d.frame;S.aspect=d.aspect||0;}
-      if(d.types){TYPES=d.types;retype();}
+      if(d.types){TYPES=migrateTypes(d.types);retype();}
       ZONES=mergeZones(d.zones);rezone();
       if(d.style)S.style=fillDefaults(d.style,STYLE_DEFAULT);
       // Старі карти цього поля не мають — режим показу лишається вимкненим.
@@ -3882,6 +4080,10 @@ cv.addEventListener('contextmenu',e=>{
   showMenu(sx,sy);
 });
 addEventListener('pointerdown',e=>{ if(!menu.contains(e.target)) hideMenu(); },true);
+addEventListener('pointerdown',e=>{
+  const el=document.getElementById('colorpop');
+  if(el&&!el.contains(e.target)&&!(e.target.closest&&e.target.closest('#quick'))) hidePop();
+},true);
 
 // ---- перетягування файла карти на вікно ----------------------------------
 // Класика: файл кидають у вікно, а не шукають кнопку «Відкрити».
@@ -3937,7 +4139,7 @@ addEventListener('keydown',e=>{
     if(S.draft){S.draft=null;toast('скасовано');}
     else if(S.sel||S.selMore.length){S.sel=null;S.selMore=[];}
     else setTool('select');
-    hideMenu();refresh();
+    hideMenu();hidePop();refresh();
   }
   if(e.key==='Delete'||e.key==='Backspace'){delSel();}
   if(e.key==='v'||e.key==='V')setTool('select');
@@ -3949,6 +4151,11 @@ addEventListener('keydown',e=>{
   if(e.key==='a'&&!e.ctrlKey&&!e.metaKey)setTool('arrow');
   if(e.key==='g'||e.key==='G')setTool('glyph');
   if(e.key==='m'||e.key==='M')setTool('ruler');
+  // C — колір вибраного. Клавіша під тим самим пальцем, що й Ctrl+C, але
+  // сама по собі: копіювання лишається на Ctrl.
+  if((e.key==='c'||e.key==='C'||e.key==='с'||e.key==='С')&&!e.ctrlKey&&!e.metaKey){
+    if(!popAtSel()) toast('спершу вибери маршрут, стрілку, підпис або зону');
+  }
   if((e.ctrlKey||e.metaKey)&&e.key==='z'){e.preventDefault();e.shiftKey?redo():undo();}
   if((e.ctrlKey||e.metaKey)&&e.key==='d'){e.preventDefault();duplicate();}
   // Класичний набір: копіювати, вирізати, вставити, вибрати все, зберегти,
@@ -4198,6 +4405,8 @@ function srcBlock(o){
 }
 function refresh(){
   renderCorr();
+  // Вибрали інше — віконце палітри більше не про цей обʼєкт.
+  if(POP.o&&POP.o!==S.sel) hidePop();
   // властивості
   const p=document.getElementById('props'), o=S.sel;
   // Вибрано підпис міста — панель про нього, а не про обʼєкти.
@@ -4245,7 +4454,10 @@ function refresh(){
     +hiddenCityList();
     wireHiddenCities(p);}
   else if(o.kind==='route'){
-    p.innerHTML=field('Кількість ліній у пучку',o.count,'count','type=number min=1 max=40')
+    // Колір — ПЕРШИМ: його міняють на кожній стрілці, а решту стилю майже
+    // ніколи. Раніше він лежав девʼятим полем, під прокруткою.
+    p.innerHTML=colBlock(o)
+      +field('Кількість ліній у пучку',o.count,'count','type=number min=1 max=40')
       +field('Розкид пучка',o.spread,'spread','type=number min=0 max=60')
       +field('Товщина лінії',o.width,'width','type=number step=0.2 min=0.5 max=6')
       +field('Стрілок уздовж лінії',o.arrows||0,'arrows','type=number min=0 max=12')
@@ -4256,8 +4468,6 @@ function refresh(){
       +'<button data-act="time" style="margin-top:8px">'
       +(o.showTime?'Сховати час':'Показати час')+'</button>'
       +'<button data-act="flat" style="margin-top:6px">Випрямити прогини</button>'
-      +'<label>Колір (свій)</label><input type="color" data-k="col" value="'
-      +(o.col||(TYPE[o.type]&&(TYPE[o.type]||TYPES[0]).col)||'#ff3ea5')+'">'
       +field('Прозорість 0..1',o.alpha===undefined?1:o.alpha,'alpha','type=number step=0.1 min=0.1 max=1')
       +'<button data-act="lab" style="margin-top:6px">Скинути положення підпису</button>'
       +`<div class="hint">Вузлів: ${o.pts.length}. Білі кружки — вузли,
@@ -4270,7 +4480,7 @@ function refresh(){
       +field('Головка',o.head,'head','type=number min=4 max=30')
       +field('Прозорість 0..1',o.alpha===undefined?1:o.alpha,'alpha',
              'type=number step=0.1 min=0.1 max=1')
-      +'<label>Колір</label><input type="color" data-k="col" value="'+(o.col||'#e8f2fc')+'">'
+      +colBlock(o)
       +'<div class="row" style="margin-top:8px">'
       +`<button data-act="dash">${o.dash?'Суцільна':'Пунктир'}</button>`
       +`<button data-act="both">${o.both?'Одна головка':'Дві головки'}</button>`
@@ -4313,8 +4523,7 @@ function refresh(){
     p.innerHTML='<label>Тип зони</label><select data-k="zone">'
       +ZONES.map(z=>`<option value="${z.id}" ${z.id===o.zone?'selected':''}>${z.name}</option>`).join('')
       +'</select>'+field('Підпис',o.label||'','label')
-      +'<label>Колір (свій, замість типу)</label>'
-      +`<input type="color" data-k="col" value="${o.col||(ZONE[o.zone]||ZONE.area).col}">`
+      +colBlock(o)
       +`<button data-act="cut" style="margin-top:6px">${
          o.cut===false?'Не підрізати верхніми зонами':'Підрізається верхніми зонами'}</button>`
       +`<button data-act="pin" style="margin-top:6px">${
@@ -4335,7 +4544,7 @@ function refresh(){
       +['left','center','right'].map(a=>`<option value="${a}" ${a===(o.align||'left')?'selected':''}>${
          {left:'ліворуч',center:'по центру',right:'праворуч'}[a]}</option>`).join('')
       +'</select>'
-      +'<label>Колір</label><input type="color" data-k="col" value="'+(o.col||'#e8f2fc')+'">';
+      +colBlock(o);
   }
   const pin=p.querySelector('[data-act="pin"]');
   if(pin) pin.onclick=()=>{snapshot();S.sel.pinLabel=!S.sel.pinLabel;refresh();};
@@ -4371,8 +4580,8 @@ function refresh(){
   });
   const reset=p.querySelector('[data-act="lab"]');
   if(reset) reset.onclick=()=>{snapshot();delete S.sel.lab;draw();};
-  const clr=p.querySelector('[data-k="col"]');
-  if(clr) clr.oninput=()=>{S.sel.col=clr.value;touch();draw();};
+  // Палітра сама робить крок історії й фарбує все вибране.
+  wireCols(p);
   const flat=p.querySelector('[data-act="flat"]');
   if(flat) flat.onclick=()=>{snapshot();S.sel.bows=[];draw();};
   const tm=p.querySelector('[data-act="time"]');
@@ -4383,8 +4592,11 @@ function refresh(){
   p.querySelectorAll('textarea').forEach(t=>{
     t.oninput=()=>{S.sel[t.dataset.k]=t.value;touch();draw();};
   });
-  p.querySelectorAll('input').forEach(inp=>{
+  // Вибирач кольору має власну проводку (крок історії, все вибране) — його
+  // сюди не пускаємо: інакше цей рядок перезаписав би її.
+  p.querySelectorAll('input:not([data-colpick])').forEach(inp=>{
     inp.oninput=()=>{const k=inp.dataset.k;
+      if(!k) return;
       S.sel[k]=inp.type==='number'?parseFloat(inp.value)||0:inp.value;touch();draw();};
   });
   // Заголовки згорток показують, що всередині: скільки обʼєктів, скільки
@@ -4419,8 +4631,13 @@ function refresh(){
     // Фільтр шукає і по типу, і по підпису: у нальоті на сорок обʼєктів
     // прокрутка перестає бути способом щось знайти.
     if(qq&&!((name||'')+' '+(extra||'')).toLowerCase().includes(qq)) return '';
+    // Кружок кольору: коли кожна стрілка своя, список без нього не каже,
+    // який рядок про яку лінію.
+    const cdot=colOk(o)?`<span style="width:9px;height:9px;border-radius:50%;
+      flex:none;display:inline-block;background:${objCol(o)}"></span>`:'';
     return `<div class="item${on?' on':''}" draggable="true" data-i="${i}">
-      <span>${o.hidden?'<s>':''}${name}${o.hidden?'</s>':''}</span>
+      <span style="display:flex;gap:6px;align-items:center">${cdot}
+        <span>${o.hidden?'<s>':''}${name}${o.hidden?'</s>':''}</span></span>
       <span style="color:#5f7386;display:flex;gap:6px;align-items:center">
         ${extra}
         <b data-act="hide" data-i="${i}" title="сховати">${o.hidden?'◻':'👁'}</b>
@@ -4548,7 +4765,7 @@ function applyMap(d){
   if(d.view)S.view=d.view;
   if(d.frame!==undefined){S.frame=d.frame;S.aspect=d.aspect||0;
     const a=document.getElementById('aspect'); if(a) a.value=String(S.aspect||0);}
-  if(d.types){TYPES=d.types;retype();}
+  if(d.types){TYPES=migrateTypes(d.types);retype();}
   ZONES=mergeZones(d.zones);rezone();
   if(d.style)S.style=fillDefaults(d.style,STYLE_DEFAULT);
   S.corridors=Object.assign({on:false,km:120},d.corridors||{});
@@ -5553,6 +5770,7 @@ const HELP=[
     ['G','знак: поставити емодзі будь-де'],
     ['M','лінійка: два кліки — відстань по ортодромії'],
     ['1…8','вибрати тип засобу'],
+    ['C','колір вибраного: палітра одним натисканням'],
   ]],
   ['Миша',[
     ['тягнути по порожньому','панорама'],

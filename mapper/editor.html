@@ -78,7 +78,8 @@ button.primary{background:rgba(255,62,165,.16);border-color:rgba(255,62,165,.45)
   border:1px solid rgba(0,0,0,.5);cursor:pointer;line-height:1;font-size:11px}
 .cdot:hover{border-color:#fff}
 .cdot.on{outline:2px solid #fff;outline-offset:1px}
-.cdot.base{color:rgba(0,0,0,.75);font-weight:700}
+.cdot.base{color:rgba(0,0,0,.8);font-weight:700;
+  text-shadow:0 0 2px rgba(255,255,255,.85)}
 .cwrap{display:flex;gap:6px;align-items:center;margin-top:6px}
 .cwrap input[type=color]{width:46px;flex:none;padding:2px;height:30px}
 #quick .cdot{width:17px;height:17px;border-radius:5px;font-size:9px}
@@ -2786,9 +2787,12 @@ function drawText(o,c,sel){
   const s=P(o.la,o.lo), size=o.size||14, lh=size*1.25;
   const lines=String(o.text||'підпис').split('\n');
   c.save();c.font=`${o.weight||600} ${size}px "MapSans",ui-sans-serif,-apple-system,Arial`;
-  c.fillStyle=o.col||'rgba(232,242,252,.95)';
+  // Колір і ореол — зі схеми, а не вшиті. На темній вони збігались випадково,
+  // а на світлій підкладці підпис без свого кольору виходив майже білим із
+  // чорною плямою під ним. Те саме правило, що для решти написів на карті.
+  c.fillStyle=o.col||hexa(S.style.base.ink||'#eef4fb',.95);
   c.textAlign=o.align||'left';
-  shadow(c,'rgba(0,0,0,.9)',7);
+  shadow(c,hexa(S.style.base.halo||'#04070c',.9),7);
   c.letterSpacing=(o.ls||0)+'px';
   let w=0;
   lines.forEach((ln,i)=>{
@@ -2892,12 +2896,53 @@ function drawObj(o,c,sel){
 }
 
 // легенда збирається з того, що оператор реально поставив
+//
+// Кольори, якими цей вид СПРАВДІ намальований, найужитковіший перший.
+// Оператор фарбує кожну стрілку окремо, тож колір типу може не зустрітись на
+// карті жодного разу — легенда з ним була б неправдою.
+// Джерело — те, що САМЕ ЗАРАЗ малюється (`drawList()`), а не сирий список
+// обʼєктів: схований рядка не лишає, а в режимі коридорів кілька маршрутів
+// зводяться в один, і кольори тих, кого на екрані вже нема, теж.
+function usedCols(kind,key,id){
+  const n=new Map();
+  for(const o of drawList()){
+    if(o.kind!==kind||o[key]!==id||!objVisible(o)) continue;
+    const col=(objCol(o)||'').toLowerCase();
+    if(col) n.set(col,(n.get(col)||0)+1);
+  }
+  // Понад шість кольорів у смужці 26 px не розрізнити; лишаємо найужитковіші.
+  return [...n.entries()].sort((a,b)=>b[1]-a[1]).slice(0,6).map(e=>e[0]);
+}
+function typeCols(id){ return usedCols('route','type',id); }
+function zoneCols(id){ return usedCols('zone','zone',id); }
+// Габарит значка по горизонталі: за ним ріжуться смуги, коли кольорів кілька.
+function iconSpan(k){
+  return k==='arrow' ? [0,32] : k==='line'  ? [0,26]
+       : k==='plane' ? [4,26] : k==='circle'? [10,22] : [6,26];
+}
 // Значок типу в легенді. У зразку кожен клас має свій — стрілка, хрест,
-// смуга: інакше десяток рожевих ліній у списку не розрізнити.
-function legendIcon(c,x,y,t){
+// смуга: інакше десяток рожевих ліній у списку не розрізнити. cols —
+// кольори з карти; кожен малюється своєю смугою значка. Один колір —
+// значок такий самий, як був.
+function legendIcon(c,x,y,t,cols){
+  const list=(cols&&cols.length)?cols:[t.col];
+  if(list.length===1) return legendGlyph(c,x,y,t,list[0]);
+  const [a,b]=iconSpan(t.icon||'arrow'), w=(b-a)/list.length;
+  list.forEach((col,i)=>{
+    c.save();
+    c.beginPath();
+    // Між смугами лишається пікселева щілина: суцільна стрічка читалась би як
+    // градієнт, а не як «цей тип на карті буває цих кольорів».
+    c.rect(x+a+w*i+(i?0.5:0),y-13,w-(i?0.5:0)-(i<list.length-1?0.5:0),26);
+    c.clip();
+    legendGlyph(c,x,y,t,col);
+    c.restore();
+  });
+}
+function legendGlyph(c,x,y,t,col){
   // Значок показує саме те, чим малюється маршрут — товщину й пунктир теж.
   // Інакше в легенді все однакове, а на карті різне.
-  c.save();c.strokeStyle=t.col;c.fillStyle=t.col;
+  c.save();c.strokeStyle=col;c.fillStyle=col;
   c.lineWidth=Math.max(1.6,(t.width||1.6)*1.3);c.lineCap='round';
   if(t.dash) c.setLineDash([(t.width||1.6)*4,(t.width||1.6)*3]);
   const k=t.icon||'arrow';
@@ -2987,18 +3032,31 @@ function drawLegend(c,w,h){
       rows.push({name:LZ.downedName||'Збиття',
                  draw:markIcon((S.style.downed||{}).col||'#ff8a5c')});
     for(const z of ZONES){
-      if(!S.objs.some(o=>o.kind==='zone'&&o.zone===z.id)) continue;
+      // Схована зона рядка не лишає — так само, як позначка й маршрут.
+      if(!drawList().some(o=>o.kind==='zone'&&o.zone===z.id&&objVisible(o))) continue;
+      // Зона теж має власний колір на самому обʼєкті, тож зразок показує
+      // кольори з карти, а не колір типу зони.
+      const zc=zoneCols(z.id), list=zc.length?zc:[z.col];
       rows.push({name:z.name,draw:(c,x,y)=>{
-        c.save();c.beginPath();c.rect(x+4,y-7,24,14);c.clip();
-        c.fillStyle=z.col+'22';c.fillRect(x+4,y-7,24,14);
-        if(z.hatch){
-          c.strokeStyle=z.col+'55';c.lineWidth=1;
-          for(let d=-14;d<26;d+=6){
-            c.beginPath();c.moveTo(x+4+d,y+7);c.lineTo(x+4+d+14,y-7);c.stroke();
+        const chip=col=>{
+          c.save();c.beginPath();c.rect(x+4,y-7,24,14);c.clip();
+          c.fillStyle=col+'22';c.fillRect(x+4,y-7,24,14);
+          if(z.hatch){
+            c.strokeStyle=col+'55';c.lineWidth=1;
+            for(let d=-14;d<26;d+=6){
+              c.beginPath();c.moveTo(x+4+d,y+7);c.lineTo(x+4+d+14,y-7);c.stroke();
+            }
           }
-        }
-        c.restore();
-        c.strokeStyle=z.col+'88';c.lineWidth=1;c.strokeRect(x+4,y-7,24,14);
+          c.restore();
+          c.strokeStyle=col+'88';c.lineWidth=1;c.strokeRect(x+4,y-7,24,14);
+        };
+        if(list.length===1) return chip(list[0]);
+        const w=24/list.length;
+        list.forEach((col,i)=>{
+          c.save();c.beginPath();
+          c.rect(x+4+w*i+(i?0.5:0),y-9,w-(i?0.5:0)-(i<list.length-1?0.5:0),18);
+          c.clip();chip(col);c.restore();
+        });
       }});
     }
     if(rows.length){
@@ -3012,8 +3070,10 @@ function drawLegend(c,w,h){
     }
   }
   if(LR.on){
-    const used=[...new Set(S.objs.filter(o=>o.kind==='route').map(o=>o.type))]
-      .filter(Boolean).map(id=>TYPE[id]).filter(Boolean);
+    // Схований маршрут не лишає рядка в легенді — так само, як позначка:
+    // легенда описує те, що на карті видно.
+    const used=[...new Set(drawList().filter(o=>o.kind==='route'&&objVisible(o))
+      .map(o=>o.type))].filter(Boolean).map(id=>TYPE[id]).filter(Boolean);
     const list=LR.allTypes?TYPES:used;
     if(list.length){
       const cols=LR.cols||1;
@@ -3022,7 +3082,7 @@ function drawLegend(c,w,h){
         return c.measureText(t.name).width+70;}))*(cols>1?cols*0.9:1);
       const H=30+Math.ceil(list.length/cols)*22+14;
       legendBox(c,LR,list.map(t=>({name:t.name,
-        draw:(c,x,y)=>legendIcon(c,x,y,t)})),20,y-H,wd,cols);
+        draw:(c,x,y)=>legendIcon(c,x,y,t,typeCols(t.id))})),20,y-H,wd,cols);
     }
   }
 }
@@ -4007,6 +4067,7 @@ addEventListener('pointerup',()=>{
 });
 cv.addEventListener('wheel',e=>{
   e.preventDefault();
+  hidePop();                 // карта їде з-під віконця палітри, тож і воно зникає
   const r=cv.getBoundingClientRect(), sx=e.clientX-r.left, sy=e.clientY-r.top;
   const before=unscr(sx,sy);
   S.view.k=Math.max(.15,Math.min(6,S.view.k*(e.deltaY<0?1.12:1/1.12)));
@@ -4154,7 +4215,9 @@ addEventListener('keydown',e=>{
   // C — колір вибраного. Клавіша під тим самим пальцем, що й Ctrl+C, але
   // сама по собі: копіювання лишається на Ctrl.
   if((e.key==='c'||e.key==='C'||e.key==='с'||e.key==='С')&&!e.ctrlKey&&!e.metaKey){
-    if(!popAtSel()) toast('спершу вибери маршрут, стрілку, підпис або зону');
+    const el=document.getElementById('colorpop');
+    if(el&&el.style.display==='block') hidePop();          // друге натискання закриває
+    else if(!popAtSel()) toast('спершу вибери маршрут, стрілку, підпис або зону');
   }
   if((e.ctrlKey||e.metaKey)&&e.key==='z'){e.preventDefault();e.shiftKey?redo():undo();}
   if((e.ctrlKey||e.metaKey)&&e.key==='d'){e.preventDefault();duplicate();}

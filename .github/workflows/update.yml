@@ -43,13 +43,77 @@ permissions:
   contents: write             # щоб бот міг комітити оновлені дані
   pages: write
   id-token: write
+  actions: read               # запобіжник дивиться, коли востаннє стріляв Worker
 
 concurrency:
   group: update
   cancel-in-progress: false   # не обривати збір на півдорозі
 
 jobs:
+  # Запобіжник має ПЕРЕВІРЯТИ годинник, а не дублювати його роботу.
+  #
+  # Поки Worker стріляє щогодини, шестигодинний `schedule` — це четвертий
+  # зайвий повний прогін на добу. Заміряно: прогін коштує 3 білінгові хвилини
+  # (медіана 129 с, GitHub округлює вгору), тобто 12 хв/добу = 360 хв/міс із
+  # 2000 безкоштовних витрачались на повторення того, що вже зроблено годину
+  # тому.
+  #
+  # Тепер запобіжник спершу питає GitHub, коли востаннє був
+  # `workflow_dispatch`. Свіжий — виходимо за десяток секунд (1 хвилина
+  # замість 3). Мовчить понад 90 хвилин — Worker мертвий, і повний прогін
+  # відпрацьовує як раніше. Шість годин між перевірками лишились: свіжість при
+  # смерті годинника не просіла.
+  #
+  # Помилка тут ЗАВЖДИ трактується на користь роботи: не відповів API, збився
+  # формат дати, впав крок — далі йде повний прогін. Тихо пропустити
+  # запобіжник страшніше, ніж витратити зайві дві хвилини.
+  clock:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      go: ${{ steps.check.outputs.go }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          row=$(gh api \
+            "/repos/${{ github.repository }}/actions/runs?event=workflow_dispatch&per_page=1" \
+            --jq '.workflow_runs[0] | "\(.created_at) \(.conclusion // "running")"')
+          last=${row%% *}
+          verdict=${row##* }
+          if [ -z "$row" ] || [ -z "$last" ]; then
+            echo "::warning::не вдалось спитати про останній workflow_dispatch — працюємо як повний прогін"
+            echo "go=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          then=$(date -u -d "$last" +%s 2>/dev/null)
+          if [ -z "$then" ]; then
+            echo "::warning::не розібрав дату '$last' — працюємо як повний прогін"
+            echo "go=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          age=$(( $(date -u +%s) - then ))
+          echo "останній тік Worker: $last ($((age / 60)) хв тому), підсумок: $verdict"
+          # Мало щоб годинник стріляв — його прогони мають ЗАКІНЧУВАТИСЬ добре.
+          # Інакше вийшло б навпаки: конвеєр падає щогодини, запобіжник бачить
+          # свіжий тік і мовчки виходить зеленим, а лист про збій розкладу
+          # (єдине, що GitHub шле сам) більше не приходить.
+          if [ "$age" -gt 5400 ]; then
+            echo "::warning::годинник мовчить понад 90 хв — запобіжник бере роботу на себе"
+            echo "go=true" >> "$GITHUB_OUTPUT"
+          elif [ "$verdict" != "success" ] && [ "$verdict" != "running" ]; then
+            echo "::warning::останній прогін годинника завершився як '$verdict' — працюємо повністю"
+            echo "go=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "годинник живий — повний прогін не потрібен"
+            echo "go=false" >> "$GITHUB_OUTPUT"
+          fi
+
   build:
+    needs: [clock]
     runs-on: ubuntu-latest
     # Крок збору ходить у мережу й повторює запити з backoff — єдине місце, що
     # може зависнути надовго. Виміряно локально: тести 7 с, збірка сайту 28 с,
@@ -63,7 +127,17 @@ jobs:
     # замінити токен на PAT чи deploy key (типово — коли вмикають захист гілки),
     # і кожен коміт бота запускав би нову збірку. Явна умова не залежить від
     # цієї неочевидної поведінки.
-    if: github.event_name != 'push' || github.actor != 'github-actions[bot]'
+    #
+    # `always()` тут обовʼязковий: на всіх подіях, крім `schedule`, job `clock`
+    # ВЗАГАЛІ не запускається, а `needs` на пропущений job без нього гасить і
+    # цей. `result != 'success'` — та сама відмова на користь роботи: clock
+    # упав або не стартував, значить перевірки не було, значить працюємо.
+    if: >-
+      always()
+      && (github.event_name != 'push' || github.actor != 'github-actions[bot]')
+      && (github.event_name != 'schedule'
+          || needs.clock.result != 'success'
+          || needs.clock.outputs.go == 'true')
     steps:
       - uses: actions/checkout@v4
 
@@ -134,14 +208,33 @@ jobs:
         if: github.event_name != 'schedule' && github.event.inputs.trigger != 'cron'
         run: python -m unittest discover -s tests -t . -v
 
-      - name: Тести (швидкі, інваріанти розбору)
+      # На клоці лишаються рівно ті тести, які МОЖУТЬ спрацювати.
+      #
+      # Між двома тіками годинника не міняється ні код (він приїжджає лише
+      # пушем, а на пуші ганяється повний набір), ні середовище (версії в
+      # requirements.txt прибиті точно). Міняється саме сховище — тож сенс має
+      # перевіряти його, а не код. Урізаний набір із пʼяти модулів коштував
+      # 17 с щогодини й у 12 з них міг лише повторити відповідь останнього
+      # зеленого пуша.
+      #
+      # Лишились два класи, обидва читають store/events і падають на
+      # зіпсованих подіях: дублі id, порожні дати, привʼязка цілі до
+      # обласного фолбеку. Заміряно локально: 14.7 с -> 5.5 с.
+      - name: Інваріанти сховища
         if: github.event_name == 'schedule' || github.event.inputs.trigger == 'cron'
         run: |
           python -m unittest -v \
-            tests.test_store tests.test_extract tests.test_render \
-            tests.test_merge tests.test_atomic
+            tests.test_store.TestStoreInvariants \
+            tests.test_store.TestNearNeedsARealCoordinate
 
+      # Пости приносить ГОДИННИК, а не пуш. Прогін на пуш збирав їх теж:
+      # 20 с мережі й коміт даних на кожну правку коду. Це не лише хвилини —
+      # це ще й гонка за пуш у main між ботом і людиною, яка вже валила
+      # публікацію (прогін 33765349380, 3 вересня). Сайт від цього не
+      # застаріває: наступний тік годинника через ≤60 хв бере `--since 2d`
+      # і добирає все, що пропущено.
       - name: Зібрати нові пости
+        if: github.event_name != 'push'
         run: python sync.py --since 2d
 
       - name: Дата для ключа кешу
@@ -264,6 +357,7 @@ jobs:
       # а повний провал: крок публікації йде ПІСЛЯ цього, тож сайт не
       # оновлювався зовсім. Тому три спроби з rebase між ними.
       - name: Зберегти дані в репозиторій
+        if: github.event_name != 'push'
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

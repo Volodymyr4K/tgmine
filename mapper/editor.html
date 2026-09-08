@@ -223,6 +223,12 @@ button.primary{background:rgba(255,62,165,.16);border-color:rgba(255,62,165,.45)
       <div class="body">
         <div id="props"><div class="hint">Нічого не вибрано.</div></div>
         <h2 style="font-size:10px;margin:12px 0 4px">Обʼєкти на карті</h2>
+        <div style="display:flex;gap:6px;margin-bottom:6px">
+          <button id="selRoutes" style="flex:1"
+            title="Вибрати всі маршрути й стрілки — далі палітра у «Вибраному» перефарбує їх усі одразу">Вибрати всі стрілки</button>
+          <button id="selMarks" style="flex:1"
+            title="Вибрати всі позначки подій — влучання, ППО, збиття">Усі позначки</button>
+        </div>
         <input id="listSearch" placeholder="фільтр: назва, тип, підпис…">
         <div id="list"></div>
         <div class="hint">Рядок можна перетягнути — це порядок малювання:
@@ -4848,6 +4854,19 @@ function pasteClip(){
   S.sel=copies[0];S.selMore=copies.slice(1);
   toast(`вставлено: ${copies.length}`);refresh();
 }
+// Вибір ЗА ВИДОМ. `selectAll` бере все підряд — разом із зонами, підписами
+// й позначками, — а перефарбувати оператор хоче саме стрілки: «щоб всі
+// стрілочки виділялись і мінявся колір у них у всіх». Палітра вже вміє
+// фарбувати весь вибір (`applyCol`), бракувало рівно способу цей вибір
+// зробити одним рухом.
+function selectKind(pred, what){
+  const got=S.objs.filter(o=>!o.hidden&&!o.locked&&pred(o));
+  if(!got.length){ toast('нема чого вибрати: '+what); return; }
+  S.sel=got[0]; S.selMore=got.slice(1);
+  toast(`вибрано ${what}: ${got.length}`);
+  openSection('props');            // палітра — саме там, і вона має бути видною
+  refresh();
+}
 function selectAll(){
   const got=S.objs.filter(o=>!o.hidden&&!o.locked);
   S.sel=got[0]||null;S.selMore=got.slice(1);
@@ -5901,6 +5920,12 @@ function editZones(){
     rezone();touch();draw();editZones();});
   document.getElementById('zDone').onclick=()=>renderStyle();
 }
+// Кнопки «вибрати за видом». Стрілка тут — і маршрут (пучок із даних), і
+// проста стрілка-розмітка: для оператора це одне й те саме, «стрілочки».
+document.getElementById('selRoutes').onclick=()=>
+  selectKind(o=>o.kind==='route'||o.kind==='arrow','стрілок');
+document.getElementById('selMarks').onclick=()=>
+  selectKind(o=>o.kind==='impact','позначок');
 document.getElementById('ghostMin').onchange=e=>{
   S.ghostMin=+e.target.value;draw();};
 document.getElementById('tGhost').onclick=()=>{S.targetsOn=!S.targetsOn;

@@ -309,7 +309,7 @@ def main(min_pop="12000", out=None):
     # у файлі не було взагалі — не «не влізав у ліміт», а не існував.
     # Дані ті самі, gazetteer/UA.txt, лише вікно ширше.
     BOX = (41.0, 60.5, 22.0, 53.0)
-    seen, res = set(), []
+    seen, res = {}, []
     for path in ("gazetteer/RU.txt", "gazetteer/UA.txt"):
         for line in open(f"{ROOT}/{path}", encoding="utf-8"):
             f = line.split("\t")
@@ -324,14 +324,24 @@ def main(min_pop="12000", out=None):
             if f[1] in DROP:          # район міста, а не місто
                 continue
             name = CITY_UA.get(f[1]) or uk(f[1])
-            if name in seen:
+            # При збігу назв лишається БІЛЬШЕ місто, а не те, що трапилось
+            # першим. RU.txt читається перед UA.txt, і через це український
+            # Донецьк (905 тис.) відкидався як дубль: ім'я вже займав
+            # однойменний райцентр Ростовської області на 50 тисяч. На карті
+            # це виглядало як «Донецьк» посеред Росії, а справжнього не було
+            # взагалі — і жодного попередження ніде.
+            old = seen.get(name)
+            if old is not None and res[old]["p"] >= pop:
                 continue
-            seen.add(name)
+            if old is not None:
+                res[old] = None
             # `e` — той самий пункт англійською. Ключем скрізь лишається `n`:
             # прибрані оператором назви й памʼять розкладки прив'язані до
             # української назви, тож перемикання мови їх не губить.
+            seen[name] = len(res)
             res.append({"n": name, "e": en(f[1]), "la": round(la, 3),
                         "lo": round(lo, 3), "p": pop})
+    res = [c for c in res if c]
     res.sort(key=lambda c: -c["p"])
     open(out, "w", encoding="utf-8").write(
         "window.LABELS=" + json.dumps(res, ensure_ascii=False,

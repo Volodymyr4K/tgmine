@@ -1023,7 +1023,8 @@ const S={
           // державного кордону цих двох
           // кордони країн окремо від меж областей: країна має читатись
           // одразу, область — лише як фон
-          countries:0.72, countryW:1.35, labelDens:1, labelMax:40,
+          countries:0.72, countryW:1.35, labelDens:1, labelMax:14,
+          cityAnchors:6, cityGap:56,
           // Помітність підписів міст. Оператор: «якщо з містами, то забагато
           // літер, накидано, виглядає погано — може, зробити напівпрозорим,
           // щоб було на фоні». Це саме ручка, а не нове число в коді: на
@@ -1689,8 +1690,8 @@ function borderObstacles(){
     // Жирна біла лінія РФ–Україна дорога, тонкий державний кордон дешевий.
     // Межі областей РФ у заваду не йдуть узагалі: вони по всій країні, і
     // будь-яка їхня вага просто вигнала б назви на виноски.
-    if(uw>0) segs(BORDERS.uaru, Math.max(3,uw/2+2), 4, 18);
-    segs(BORDERS.outer, 2.5, 7, 8);
+    if(uw>0) segs(BORDERS.uaru, Math.max(3,uw/2+2), 4, 26);
+    segs(BORDERS.outer, 2.5, 7, 12);
   }
   BORDCACHE={sig,O,vx:S.view.x,vy:S.view.y};
   return O;
@@ -1699,11 +1700,17 @@ function borderObstacles(){
 // екранний контекст означало б рахувати ширину чужим масштабом.
 function objObstacles(c){
   const O=Obstacles();
-  const dot=(s,r)=>O.add(s[0]-r,s[1]-r,2*r,2*r);
+  const dot=(s,r,pen)=>O.add(s[0]-r,s[1]-r,2*r,2*r,pen);
+  // Позначка події — найдорожча завада на карті (46 проти 40 у маршруту й
+  // 26 у решти). Вона й є те, про що карта: назва, яка лягла на спалах
+  // влучання, ховає саме подію. Видно це було відразу, щойно підписуватись
+  // почали міста подій — «Кубінка» й «Домодєдово» сіли просто на кружки
+  // своїх же позначок.
+  const PEN_MARK=46;
   // Крива вкривається квадратиками вздовж себе. Крок дорівнює половині
   // тому сусідні квадрати перекриваються: рідка вибірка лишає між ними
   // дірки, у які підпис пролазить і сідає просто на лінію.
-  const line=(pts,bows,tension,pad)=>{
+  const line=(pts,bows,tension,pad,pen)=>{
     if(!pts||pts.length<2) return;
     const A=pts.map(p=>P(p[0],p[1]));
     if(A.some(p=>!isFinite(p[0])||!isFinite(p[1]))) return;
@@ -1726,8 +1733,8 @@ function objObstacles(c){
       for(let q=a;q<b-1;q++) len+=Math.hypot(A[q+1][0]-A[q][0],A[q+1][1]-A[q][1]);
       const n=Math.max(2,Math.min(1600,Math.round(len/Math.max(3,pad))));
       const sub=pts.slice(a,b), sb=bows?bows.slice(a,Math.max(a,b-1)):null;
-      for(const q of samplePath(sub,sb,tension,n)) O.add(q.x-pad,q.y-pad,2*pad,2*pad);
-      for(const q of [A[i],A[j]]) O.add(q[0]-pad,q[1]-pad,2*pad,2*pad);
+      for(const q of samplePath(sub,sb,tension,n)) O.add(q.x-pad,q.y-pad,2*pad,2*pad,pen);
+      for(const q of [A[i],A[j]]) O.add(q[0]-pad,q[1]-pad,2*pad,2*pad,pen);
       i=j+1;
     }
   };
@@ -1737,10 +1744,14 @@ function objObstacles(c){
     if(!objVisible(o)) continue;
     if(o.kind==='impact'){
       const ST=S.style[catOf(o)]||{};
-      dot(P(o.la,o.lo),(o.size||ST.size||9)*2.2);
+      // Радіус завади — по САМОМУ знаку з невеликим запасом, а не вдвічі
+      // ширший. Коло у 2.2 розміри накривало всі ближні місця підпису
+      // разом узяті, тож назва міста-цілі виявлялась «на заваді» хоч куди
+      // стань — і ціна переставала щось означати.
+      dot(P(o.la,o.lo),(o.size||ST.size||9)*1.35,PEN_MARK);
     }else if(o.kind==='glyph'){
       const r=(o.size||22)/2, s=P(o.la,o.lo);
-      dot(s,r*1.25);
+      dot(s,r*1.25,PEN_MARK);
       // Знак може мати власний підпис під собою, і він малюється завжди —
       // не тільки при виборі. Це така сама фарба на карті, як сам знак.
       if(o.label){
@@ -1752,9 +1763,9 @@ function objObstacles(c){
         O.add(s[0]-w/2,s[1]+r*1.5-fs,w,fs+4);
       }
     }else if(o.kind==='launch'){
-      const s=P(o.la,o.lo); O.add(s[0]-10,s[1]-18,30,26);
+      const s=P(o.la,o.lo); O.add(s[0]-10,s[1]-18,30,26,PEN_MARK);
     }else if(o.kind==='target'){
-      dot(P(o.la,o.lo),8);
+      dot(P(o.la,o.lo),8,PEN_MARK);
     }else if(o.kind==='image'){
       const b=imgBox(o); O.add(b.x,b.y,b.w,b.h);
     }else if(o.kind==='text'){
@@ -1771,10 +1782,17 @@ function objObstacles(c){
       // Пучок ширший за одну нитку: слід рахується по ореолу, який і є
       // видимою товщиною маршруту.
       const hw=(o.width||1.6)*3.2+(o.spread||0)*0.35;
-      line(o.pts,o.bows,o.tension,Math.max(4,hw/2+2));
+      // Маршрут дорожчий за все інше на карті (40 проти 26 за домовчанням).
+      // Він і найгучніший: помаранчевий пучок поперек назви видно перш за
+      // саму назву. Відколи підписуються міста ПОДІЙ, а не найбільші, назва
+      // й стрілка тягнуться до однієї точки, і заміряно — 14 підписів із 22
+      // лягали просто на маршрут. Ціна 40 дорівнює виносці з лінією (26+14),
+      // тож підпис спершу перебирає вільні місця ПОРУЧ із крапкою і лише
+      // потім обирає між лінією та виноскою — рівною ціною, за відстанню.
+      line(o.pts,o.bows,o.tension,Math.max(4,hw/2+2),40);
     }else if(o.kind==='arrow'){
       const head=o.head||10;
-      line(o.pts,[o.bow],1,Math.max(5,(o.width||2.2)/2+3));
+      line(o.pts,[o.bow],1,Math.max(5,(o.width||2.2)/2+3),40);
       const pa=P(o.pts[0][0],o.pts[0][1]), pb=P(o.pts[1][0],o.pts[1][1]);
       dot(pb,head*0.8);
       if(o.both) dot(pa,head*0.8);
@@ -1877,6 +1895,88 @@ function cityShown(n){
   const c=(window.LABELS||[]).find(x=>x.n===n);
   return (c&&c.e)||n;
 }
+// ЯКІ МІСТА ПІДПИСУВАТИ. Раніше відповідь була одна: найбільші з тих, що
+// влізли. Заміряно на ночі 2026-09-02 (48 маршрутів, 22 позначки): 29 назв
+// із 40 не мали в радіусі 40 км жодної події, а 17 позначок із 22 стояли
+// біля міста, якого на карті НЕ БУЛО. Карта підписувала Чебоксари й
+// Набережні Челни, але мовчала про Орел, Таганрог і Зеленоград, по яких
+// тієї ночі били. Оператор сказав рівно це: «якісь випадкові міста є, а
+// міст, на які відбувався наліт, немає».
+//
+// Тому місто отримує РОЛЬ у нальоті, і роль важить більше за населення:
+//   event  — під позначкою події (влучання, ППО, збиття);
+//   fly    — під вузлом маршруту, тобто там його бачили;
+//   anchor — просто велике місто, щоб читалась географія.
+// Вузол, а не крива: між вузлами лінія — інтерполяція, і підписувати міста
+// по ній означало б стверджувати проліт, якого ніхто не бачив.
+// Скільки подій у позначці. Нові несуть число полем, старі — лише хвостом
+// підпису («Воронеж · збиття ×2»), і карту, збережену до цієї правки,
+// перечитувати оператору ні до чого.
+function impactN(o){
+  if(o.n>0) return o.n;
+  const m=/×\s*(\d+)/.exec(o.label||'');
+  return m?+m[1]:1;
+}
+const R_EVENT=18, R_FLY=25;         // км: як близько подія має бути до міста
+// Сітка міст за градусами: 977 назв проти сотень вузлів — прямий перебір
+// коштує сотні тисяч ортодромій на кожну зміну сцени.
+let CGRID=null;
+function cityGrid(){
+  if(CGRID) return CGRID;
+  CGRID=new Map();
+  for(const c of (window.LABELS||[])){
+    const k=Math.round(c.la*2)+':'+Math.round(c.lo*2);
+    let a=CGRID.get(k); if(!a){a=[];CGRID.set(k,a);}
+    a.push(c);
+  }
+  return CGRID;
+}
+function cityNear(la,lo,km){
+  const G=cityGrid(); let best=null,bd=km;
+  for(let i=-1;i<=1;i++) for(let j=-1;j<=1;j++){
+    const a=G.get((Math.round(la*2)+i)+':'+(Math.round(lo*2)+j));
+    if(!a) continue;
+    for(const c of a){ const d=geoKm([la,lo],[c.la,c.lo]); if(d<bd){bd=d;best=c;} }
+  }
+  return best;
+}
+// Ролі залежать від СЦЕНИ, не від вигляду: панорама й зум їх не міняють.
+// Тому рахуються раз на зміну об'єктів, а не щокадру — інакше кожен кадр
+// коштував би обходу всіх позначок і вузлів.
+let ROLES={key:'',map:new Map()};
+function cityRoles(){
+  const vis=drawList().filter(objVisible);
+  // Підпис сцени: що змінює ролі — склад позначок і вузлів маршрутів.
+  let key=vis.length+'|';
+  for(const o of vis){
+    if(o.kind==='impact') key+='i'+o.la.toFixed(2)+','+o.lo.toFixed(2)+'x'+impactN(o);
+    else if(o.kind==='route'||o.kind==='arrow') key+='r'+o.pts.length+','+o.pts[0][0].toFixed(1);
+  }
+  if(ROLES.key===key) return ROLES.map;
+  const m=new Map();
+  const bump=(c,role)=>{
+    if(!c) return;
+    let r=m.get(c.n);
+    if(!r){ r={role,ev:0,fly:0,c}; m.set(c.n,r); }
+    if(role==='event') r.role='event';
+    return r;
+  };
+  for(const o of vis){
+    if(o.kind==='impact'){
+      const r=bump(cityNear(o.la,o.lo,R_EVENT),'event');
+      // Кратність позначки, а не сама позначка. Старі карти її в даних не
+      // несуть — там вона лишилась тільки в підписі, тож звідти й беремо.
+      if(r) r.ev+=impactN(o);
+    }else if(o.kind==='route'||o.kind==='arrow'){
+      for(const p of (o.pts||[])){
+        const r=bump(cityNear(p[0],p[1],R_FLY),'fly');
+        if(r) r.fly++;
+      }
+    }
+  }
+  ROLES={key,map:m};
+  return m;
+}
 function drawLabels(c){
   const B=window.BASE, taken=TAKEN, ST=S.style;
   // Підписи областей ідуть ПЕРШИМИ: вони найбільші й мають право на місце,
@@ -1884,7 +1984,10 @@ function drawLabels(c){
   // не влізала й зникала — саме вона й потрібна для орієнтування.
   if(S.layers.regions) drawRegionLabels(c,taken);
   const fits=r=>!taken.some(t=>!(r.x+r.w<t.x||t.x+t.w<r.x||r.y+r.h<t.y||t.y+t.h<r.y));
-  if(!S.layers.cities) return;
+  // Шар вимкнено — прямокутники минулого кадру мають зникнути разом із
+  // назвами: інакше клік по порожньому місцю відкриває «прибрати підпис»
+  // для назви, якої на карті нема.
+  if(!S.layers.cities){ if(c===ctx) CITYBOX.length=0; CITYINK.length=0; return; }
   // Скільки підписів показувати. Пороги залежать від масштабу (на карті
   // всього театру сотня назв злипається в кашу), але оператор мусить мати
   // ручку: «не всі міста нанесені» — це саме про них. Більша щільність
@@ -1894,7 +1997,7 @@ function drawLabels(c){
   // поріг міняється плавно з масштабом, а головне обмеження — не населення,
   // а КІЛЬКІСТЬ підписів у кадрі: саме вона й читається як «забагато».
   const dens=Math.max(0.2,Math.min(5,ST.base.labelDens===undefined?1:ST.base.labelDens));
-  const cap=Math.max(0,Math.min(400,ST.base.labelMax===undefined?40:ST.base.labelMax));
+  const cap=Math.max(0,Math.min(400,ST.base.labelMax===undefined?14:ST.base.labelMax));
   const k=Math.max(0.02,S.view.k);
   const minPop=Math.max(3000,Math.min(3e6, 180000*(0.16/k)))/dens;
   // Прибрані НЕ фільтруються зі списку заздалегідь — і це не дрібниця.
@@ -1907,22 +2010,151 @@ function drawLabels(c){
   // свій прямокутник. Не малюється лише вона сама. Розкладка решти від цього
   // не змінюється взагалі — прибрав один підпис, усе інше стоїть як стояло.
   const hid=new Set(S.hideCity||[]);
-  const list=(window.LABELS||B.cities||[]).filter(p=>p.p>=minPop);
+  // Скільки орієнтирів і як тісно можуть стояти назви. Оператор просив
+  // «буквально кілька основних, типу Москва й Київ, плюс міста, на які
+  // били» — це рівно ці дві ручки: скільки великих і який просвіт між
+  // сусідніми підписами.
+  const nAnchor=Math.max(0,Math.min(60,ST.base.cityAnchors===undefined?6:ST.base.cityAnchors));
+  const gap=Math.max(0,Math.min(400,ST.base.cityGap===undefined?56:ST.base.cityGap));
+  const ROLE=cityRoles();
+  const ALL=(window.LABELS||B.cities||[]);
+  const inFrame=q=>{ const s=P(q.la,q.lo);
+    return s[0]>=-40&&s[0]<=Wp+40&&s[1]>=-20&&s[1]<=Hp+20; };
+  // Проріджування по ЕКРАНУ, а не по кілометрах: на оглядовій карті
+  // Підмосков'я — десять цілей в одній жмені пікселів, і підписати всі
+  // означає кашу навколо Москви. Беремо найзначущіші з кожної жмені,
+  // решта лишається позначками без назв — подія на карті видна, назва не
+  // потрібна тричі поспіль.
+  const pick=[], pos=[], prole=new Map();
+  // ЯК ПРОРІДЖУВАТИ ЖМЕНЮ. Перша спроба була «жодної назви ближче за
+  // просвіт» — і вона викидала саме те, заради чого карта малюється:
+  // заміряно на ночі 2026-09-02, Кубінка з десятьма подіями за ніч
+  // відпадала, бо стоїть за 25 px від Москви, а Тула з п'ятьма — бо за
+  // 69 px від Калуги. Найгучніші цілі ночі зникали як «тісні».
+  //
+  // Тому просвіт не забороняє, а ОБМЕЖУЄ ЧИСЛО: у жмені дозволено `quota`
+  // назв свого роду, і беруться найважливіші, бо список уже впорядкований
+  // за вагою. Підмосков'я тієї ночі дає десять цілей — на карті лишаються
+  // три найгучніші, решта стоїть позначками без назв. Оператор просив
+  // саме це: «писати основні, нахуя тобі всі».
+  //
+  // Чужий рід глушить лише впритул (просвіт × 0.2): назва поверх назви
+  // Москви — це не карта, а Одинцово за 9 px від неї саме це й дає.
+  //
+  // Просвіт НЕ множиться на RSCALE, і це навмисно. В експорті збільшення
+  // робить перетворення полотна (`g.setTransform`), а `P()` лишається в
+  // тих самих координатах кадру, що й на екрані. Множення дало б на PNG
+  // інший набір назв, ніж бачив оператор, — а він верстає по екрану.
+  const take=(q,role,quota)=>{
+    if(prole.has(q.n)) return false;
+    const s=P(q.la,q.lo);
+    let near=0;
+    for(let i=0;i<pos.length;i++){
+      // Проліт рахує просвіт до БУДЬ-ЯКОЇ назви, не лише до інших
+      // прольотів. Він найслабший з трьох і має ставати тільки там, де
+      // справді вільно: заміряно, без цього Сергієв Посад і Єлець сідали
+      // рівно в ті жмені, з яких квота щойно вигнала Орел і Рязань, —
+      // тобто проліт витісняв ціль, чого бути не може.
+      const same=role==='fly'||prole.get(pick[i].n)===role;
+      const d=Math.hypot(pos[i][0]-s[0],pos[i][1]-s[1]);
+      if(!same){ if(d<gap*0.2) return false; continue; }
+      if(d<gap&&++near>=quota) return false;
+    }
+    pos.push(s); pick.push(q); prole.set(q.n,role); return true;
+  };
+  // 1. Орієнтири — найбільші міста кадру. Їх мало й вони йдуть першими:
+  // Москва має право на своє місце, а Одинцово поруч — ні.
+  let na=0;
+  for(const q of ALL){
+    if(na>=nAnchor) break;
+    if(q.p<minPop||!inFrame(q)) continue;
+    if(take(q,'anchor',1)) na++;
+  }
+  // 2. Міста подій. Поріг населення на них НЕ поширюється: Кубінка на
+  // 26 тисяч — ціль тієї ночі, і без назви позначка над нею німа.
+  const evs=[...ROLE.values()].filter(r=>r.role==='event')
+    .sort((a,b)=>b.ev-a.ev||b.c.p-a.c.p);
+  // Проріджування жмені стосується ДРІБНИХ цілей, не всіх. Заміряно на
+  // ночі 2026-09-02: під спільною квотою Тула з пʼятьма подіями лишалась
+  // без назви, бо поруч у ту саму жменю вже стали Калуга, Орел і Кубінка.
+  // Місто, куди прилетіло пʼять разів і більше, — це те, ЗАРАДИ ЧОГО
+  // карта малюється, і воно підписується завжди; квота залишається для
+  // хвоста з одиничних згадок, який і робить кашу.
+  const EV_MAJOR=5;
+  for(const r of evs){
+    if(cap&&pick.length>=cap) break;
+    if(inFrame(r.c)) take(r.c,'event',r.ev>=EV_MAJOR?1e9:3);
+  }
+  // 3. Міста прольоту — де маршрут мали за вузол, тобто де його бачили.
+  // Останні в черзі й з власною стелею: без них карта читається, з ними
+  // читається краще, але заміряно — без стелі вони забрали 11 місць із
+  // 23 і витіснили Тулу, Орел і Липецьк, тобто справжні цілі ночі.
+  const flyCap=Math.round((cap||40)*0.25);
+  let nf=0;
+  const fls=[...ROLE.values()].filter(r=>r.role==='fly')
+    .sort((a,b)=>b.c.p-a.c.p||b.fly-a.fly);
+  for(const r of fls){
+    if(nf>=flyCap||(cap&&pick.length>=cap)) break;
+    if(inFrame(r.c)&&take(r.c,'fly',1)) nf++;
+  }
+  // 4. Добір орієнтирів, якщо після подій місце лишилось. Без нього карта,
+  // на якій оператор ще нічого не намалював, показувала шість назв на всю
+  // РФ і читалась як зламана. Стеля `nAnchor` — це скільки великих міст
+  // мають право потіснити події, а не скільки їх узагалі буває на карті.
+  if(cap) for(const q of ALL){
+    if(pick.length>=cap) break;
+    if(q.p<minPop||!inFrame(q)) continue;
+    take(q,'anchor',1);
+  }
+  // Порядок РОЗКЛАДКИ, а не відбору: хто перший, той обирає місце. Великі
+  // назви найширші, тож їм місце потрібніше; далі події, далі прольоти.
+  const RANK={anchor:0,event:1,fly:2};
+  const list=pick.sort((a,b)=>
+    RANK[prole.get(a.n)]-RANK[prole.get(b.n)]||b.p-a.p);
   // Прямокутники підписів запамʼятовуються ЛИШЕ для екрана: клік буває тільки
   // там, а в експорті цей масив був би сміттям, що росте з кожним кадром.
   const rec=(c===ctx);
   if(rec) CITYBOX.length=0;
+  CITYINK.length=0;
   let placed=0;
   // Слід обʼєктів рахується ОДИН раз на кадр і лише тоді, коли підписи міст
   // узагалі малюються.
   const OBST=objObstacles(c), BORD=borderObstacles();
+  // Позначки в екранних координатах — один раз на кадр. Місту події
+  // потрібен розмір знака, що стоїть на ньому, і шукати це обходом усієї
+  // сцени на кожну назву означало б повторити роботу двадцять разів.
+  const MARKS=[];
+  for(const o of drawList()){
+    if(o.kind!=='impact'||!objVisible(o)) continue;
+    const q=P(o.la,o.lo), OS=S.style[catOf(o)]||{};
+    // `r` — скільки місця знак просить (за нього назву відсуваємо), `rh` —
+    // сам знак, який ховати не можна ні за що. Розводити ці два числа
+    // довелось заміром: заборона по повному радіусу 1.35 виганяла назви
+    // геть — «Домодєдово ×6» зникало з карти, бо навколо стояли позначки
+    // сусідів і вільного місця не лишалось зовсім.
+    const r=(o.size||OS.size||9);
+    MARKS.push({x:q[0],y:q[1],r:r*1.35,rh:r});
+  }
+  // Сам знак події — ЗАБОРОНА, а не ціна. Ціна лише вибирає з поганого
+  // меншу біду, і на щільному Підмосковʼї назва раз у раз лягала просто на
+  // чужий кружок: у експорті «Раменське» й «Домодєдово» виходили
+  // перерізаними позначками сусідів. Знак — це подія, тобто те, про що
+  // карта; ховати його назвою не можна за жодну ціну.
+  const markHit=r=>{
+    for(const m of MARKS){
+      const cx=Math.max(r.x,Math.min(m.x,r.x+r.w));
+      const cy=Math.max(r.y,Math.min(m.y,r.y+r.h));
+      if(Math.hypot(m.x-cx,m.y-cy)<m.rh) return true;
+    }
+    return false;
+  };
   // Ціна місця — найдорожча з завад під ним, а не їхня сума: назва, що
   // зачепила і маршрут, і кордон, не має коштувати вдвічі й тікати на виноску.
   const obst=r=>Math.max(OBST.hit(r),BORD.hit(r));
   // Інший ПІДПИС — заборона: дві назви одна на одній не читаються взагалі.
   // Усе інше (маршрут, позначка, кордон) — ціна, а не заборона; скільки саме
   // коштує кожна завада, каже `OBST.hit`.
-  const free=r=>fits(r);
+  const free=r=>fits(r)&&!markHit(r);
   // Ближні позиції — ті самі шість, що були, у тому самому порядку: поки
   // місця вистачає, розкладка не міняється взагалі. Далі чотири діагоналі
   // й строго над/під крапкою.
@@ -1939,9 +2171,13 @@ function drawLabels(c){
   //
   // Нижнє йде перед верхнім і серед рівних: назва під крапкою не сперечається
   // з її ореолом, а верх лишається останнім доводом.
-  const nearCand=(w,h)=>{
-    const R=7, L=-w-9;                    // праворуч / ліворуч від крапки
-    const M=4, D=h+2, U=-10;              // рівень крапки / рядок нижче / вище
+  // `pad` — наскільки відсунути всі ближні місця. Під містом події стоїть
+  // її позначка, і сталий відступ у 7 px клав назву просто на знак: місце
+  // «праворуч від крапки» починається за 7 px, а спалах влучання має
+  // радіус 9-13. Назва мусить стати ПОРУЧ зі знаком, а не на ньому.
+  const nearCand=(w,h,pad)=>{
+    const R=7+pad, L=-w-9-pad;            // праворуч / ліворуч від крапки
+    const M=4, D=h+2+pad, U=-10-pad;      // рівень крапки / рядок нижче / вище
     const D2=D+h+4, U2=U-h-4;             // другий рядок нижче / вище
     // Третє число — надбавка до ціни, тобто перевага виду місця, а не
     // відстані. Без неї «строго під крапкою» виграє в «збоку на рівні»
@@ -1969,12 +2205,24 @@ function drawLabels(c){
     if(cap&&placed>=cap) break;
     const s2=P(ct.la,ct.lo);
     if(s2[0]<-40||s2[0]>Wp+40||s2[1]<-20||s2[1]>Hp+20) continue;
-    const big=ct.p>700000, mid=ct.p>150000;
+    // Кегль каже, наскільки місто важливе НА ЦІЙ КАРТІ, а не скільки в
+    // ньому мешканців. Кубінка на 26 тисяч, куди тієї ночі прилетіло
+    // десять разів, набрана як обласний центр: карта про наліт, і дрібний
+    // сірий підпис під головною позначкою читався як помилка верстки.
+    const role=prole.get(ct.n)||'anchor';
+    const big=ct.p>700000, mid=role==='event'||ct.p>150000;
     const size=big?14:mid?12:10.5;
     c.font=`${big?600:mid?500:400} ${size}px "MapSans",ui-sans-serif,-apple-system,Arial`;
     const nm=toponym(ct);
     const w=c.measureText(nm).width, h=size+2;
-    const NEAR=nearCand(w,h);
+    // Скільки місця під крапкою займає власна позначка міста. Беремо
+    // найбільшу з тих, що стоять просто на ньому: їх може бути кілька.
+    let pad=0;
+    if(role==='event') for(const m of MARKS){
+      if(Math.hypot(m.x-s2[0],m.y-s2[1])>14) continue;
+      pad=Math.max(pad,m.r+3);
+    }
+    const NEAR=nearCand(w,h,pad);
     const boxOf=f=>f.t==='n'
       ? (NEAR[f.i]?{x:s2[0]+NEAR[f.i][0],y:s2[1]+NEAR[f.i][1]-h+4,w,h}:null)
       : farBox(s2,FAR_R[(f.i/FAR_A.length)|0],FAR_A[f.i%FAR_A.length],w,h);
@@ -2046,34 +2294,81 @@ function drawLabels(c){
     // брудною плямою.
     const ci=Math.max(0,Math.min(1,ST.base.cityInk===undefined?0.72:ST.base.cityInk));
     if(ci<=0) continue;
-    c.beginPath();c.arc(s2[0],s2[1],big?2.8:mid?2.1:1.5,0,7);
+    // Фарба назви лягає НЕ тут. Підписи міст малюються в кінці drawBase, а
+    // маршрути й позначки — після нього, тож усе, що намальовано тут,
+    // виявляється ПІД ними: у експорті стрілка перекреслювала «Тулу», а
+    // кружок позначки зʼїдав половину «Раменського». Саме це оператор і
+    // називав «назви накладаються на інші елементи».
+    //
+    // Тому розкладка лишається на місці (їй потрібні завади від обʼєктів,
+    // а вони вже пораховані), а фарба відкладається у CITYINK і кладеться
+    // поверх обʼєктів — drawCityInk() наприкінці кадру. Порядок усередині
+    // самого шару той самий, у якому підписи розкладались.
+    CITYINK.push({nm,x:put[0],y:put[1],dx:s2[0],dy:s2[1],w,h,box,
+                  big,mid,size,ci,far:fit&&fit.t==='f',dirty:obst(box)>=26});
+  }
+}
+
+// Фарба назв міст цього кадру: що малювати й де. Заповнюється розкладкою в
+// drawLabels, кладеться на карту drawCityInk() — уже ПОВЕРХ маршрутів і
+// позначок. Буфер спільний для екрана й експорту, бо кадр малюється
+// синхронно й до кінця: два кадри одночасно не бувають.
+const CITYINK=[];
+function drawCityInk(c){
+  if(!CITYINK.length) return;
+  const ST=S.style, light=isLight();
+  for(const t of CITYINK){
+    const ci=t.ci;
+    // Крапка міста. Малюється тут разом із назвою: інакше вона лишалась би
+    // під маршрутом, а назва йшла поверх — і підпис відривався б від свого
+    // міста.
+    c.beginPath();c.arc(t.dx,t.dy,t.big?2.8:t.mid?2.1:1.5,0,7);
     c.fillStyle=hexa(ST.base.ink||'#eef4fb',.9*ci);c.fill();
     // Виноска — тільки для дальнього виносу. Біля крапки лінія зайва: там
     // і так видно, до чого належить напис. А назва, віднесена на 40 px без
     // лінії, читається як підпис сусіднього обʼєкта.
-    if(fit&&fit.t==='f'){
-      const lx=Math.max(box.x,Math.min(s2[0],box.x+box.w));
-      const ly=Math.max(box.y,Math.min(s2[1],box.y+box.h));
-      const dx=lx-s2[0], dy=ly-s2[1], len=Math.hypot(dx,dy)||1;
+    if(t.far){
+      const b=t.box;
+      const lx=Math.max(b.x,Math.min(t.dx,b.x+b.w));
+      const ly=Math.max(b.y,Math.min(t.dy,b.y+b.h));
+      const dx=lx-t.dx, dy=ly-t.dy, len=Math.hypot(dx,dy)||1;
       c.save();
       c.strokeStyle=hexa(ST.base.inkDim||'#c6d8ea',.5*ci);
       c.lineWidth=1;
       c.beginPath();
-      c.moveTo(s2[0]+dx/len*4, s2[1]+dy/len*4);
+      c.moveTo(t.dx+dx/len*4, t.dy+dy/len*4);
       c.lineTo(lx-dx/len*2, ly-dy/len*2);
       c.stroke();c.restore();
     }
     c.save();c.textAlign='left';
+    c.font=`${t.big?600:t.mid?500:400} ${t.size}px "MapSans",ui-sans-serif,-apple-system,Arial`;
     // Ореол під написом залежить від тла: на світлій підкладці чорна тінь
-    // виглядає як бруд, на темній без неї напис зникає над містом.
-    shadow(c, isLight()?`rgba(255,255,255,${.9*ci})`:`rgba(0,0,0,${.95*ci})`, 7);
-    c.fillStyle=big?hexa(ST.base.ink||'#eef4fb',.96*ci)
-      :mid?hexa(ST.base.ink||'#eef4fb',.86*ci)
-          :hexa(ST.base.inkDim||'#c6d8ea',.72*ci);
-    c.fillText(nm,put[0],put[1]);c.restore();
+    // виглядає як бруд, на темній без неї напис зникає над містом. Колір
+    // береться з теми, а не вшитий: саме на світлій схемі вшите чорне й
+    // видно — на темній воно випадково збігається з тлом.
+    //
+    // Сила ореолу залежить від того, ЩО ПІД НИМ. Заміряно: обвід у 2.8 px
+    // міняв лише 1.7% пікселів у прямокутнику «Тула». Товстий обвід це
+    // закриває, але ставити його всім — зробити жирними й ті назви, під
+    // якими чисте поле. Тому підпис на заваді отримує щільний ореол у два
+    // проходи, а підпис на порожньому місці лишається як був.
+    //
+    // Товщина без RSCALE: обвід малюється, а не кладеться пост-ефектом,
+    // тож перетворення полотна масштабує його само. Тінь нижче — навпаки,
+    // її розмиття рахується в пікселях полотна, і саме тому `shadow()` на
+    // RSCALE множить.
+    const halo=light?`rgba(255,255,255,${.95*ci})`:hexa(ST.base.bg||'#04070c',.95*ci);
+    c.strokeStyle=halo; c.lineJoin='round'; c.miterLimit=2;
+    c.lineWidth=t.dirty?5.2:2.4;
+    c.strokeText(t.nm,t.x,t.y);
+    if(t.dirty){ c.lineWidth=3; c.strokeText(t.nm,t.x,t.y); }
+    shadow(c, light?`rgba(255,255,255,${.9*ci})`:`rgba(0,0,0,${.95*ci})`, 7);
+    c.fillStyle=t.big?hexa(ST.base.ink||'#eef4fb',.96*ci)
+      :t.mid?hexa(ST.base.ink||'#eef4fb',.86*ci)
+            :hexa(ST.base.inkDim||'#c6d8ea',.72*ci);
+    c.fillText(t.nm,t.x,t.y);c.restore();
   }
 }
-
 // Де саме лягли підписи міст цього кадру — заповнюється малюванням екрана.
 // Без цього в назву нема чим влучити: місто це не обʼєкт карти, а частина
 // підкладки.
@@ -3338,6 +3633,7 @@ function draw(){
     const src=o.__src||o;
     drawObj(o,ctx,src===S.sel||S.selMore.includes(src));
   }
+  drawCityInk(ctx);               // назви міст лягають ПОВЕРХ маршрутів і позначок
   // Вибраний підпис міста обводиться — інакше незрозуміло, що саме
   // прибере Delete. Тільки на екрані: в експорт рамка не йде.
   if(S.selCity){
@@ -3543,6 +3839,21 @@ function SvgCtx(w,h){
       const anchor=cur.align==='center'?'middle':cur.align==='right'?'end':'start';
       const ls=parseFloat(cur.ls)||0;
       emit(`<text x="${+x.toFixed(2)}" y="${+y.toFixed(2)}" fill="${paint(cur.fill)}" `+
+           `font-family="${f.family}" font-size="${f.size}" font-weight="${f.weight}" `+
+           `text-anchor="${anchor}"${ls?` letter-spacing="${ls}"`:''} ${common()}>`+
+           `${esc(t)}</text>`);
+    },
+    // Обвід тексту. На полотні це `strokeText`, тут — той самий <text>, але
+    // без заливки й зі штрихом: ореол під назвами міст малюється саме ним,
+    // і без цього методу експорт SVG падав би на першому ж підписі.
+    strokeText(t,x,y){
+      if(t===undefined||t===null||t==='') return;
+      const f=parseFont(cur.font);
+      const anchor=cur.align==='center'?'middle':cur.align==='right'?'end':'start';
+      const ls=parseFloat(cur.ls)||0;
+      emit(`<text x="${+x.toFixed(2)}" y="${+y.toFixed(2)}" fill="none" `+
+           `stroke="${paint(cur.stroke)}" stroke-width="${cur.lw}" `+
+           `stroke-linejoin="${cur.join}" stroke-linecap="round" `+
            `font-family="${f.family}" font-size="${f.size}" font-weight="${f.weight}" `+
            `text-anchor="${anchor}"${ls?` letter-spacing="${ls}"`:''} ${common()}>`+
            `${esc(t)}</text>`);
@@ -4935,6 +5246,7 @@ document.getElementById('export').onclick=async ()=>{
   // SVG — тут їх забули відсіяти, і на PNG вони поверталися
   endPass();                      // експорт — теж окремий прохід
   for(const o of drawList()){ if(objVisible(o)) drawObj(o,g,false); }
+  drawCityInk(g);                 // назви міст лягають ПОВЕРХ маршрутів і позначок
   // легенда, шапка й лінійка кладуться відносно РАМКИ
   g.save();g.translate(f.x,f.y);
   drawWatermark(g,f.w,f.h);
@@ -5046,6 +5358,7 @@ document.getElementById('exportSvg').onclick=async ()=>{
   drawBase(g);
   endPass();                      // експорт — теж окремий прохід
   for(const o of drawList()){ if(objVisible(o)) drawObj(o,g,false); }
+  drawCityInk(g);                 // назви міст лягають ПОВЕРХ маршрутів і позначок
   g.save();g.translate(f.x,f.y);
   drawWatermark(g,f.w,f.h);
   if(S.layers.legend) drawLegend(g,f.w,f.h);
@@ -5288,6 +5601,8 @@ function renderStyle(){
     +n('Помітність підписів міст','base','cityInk','type=number step=0.05 min=0 max=1')
     +n('Щільність підписів міст','base','labelDens','type=number step=0.1 min=0.2 max=5')
     +n('Максимум підписів у кадрі (0 — без межі)','base','labelMax','type=number step=5 min=0 max=400')
+    +n('Скільки великих міст-орієнтирів','base','cityAnchors','type=number step=1 min=0 max=60')
+    +n('Просвіт між назвами, px','base','cityGap','type=number step=5 min=0 max=400')
     +n('Кордон РФ–Україна: товщина','base','uaruW','type=number step=0.2 min=0 max=8')
     +col('Кордон РФ–Україна: колір','base','uaruCol')
     +'<label style="color:#8fa3b8;margin-top:10px">Маршрути</label>'
@@ -5459,6 +5774,13 @@ function putStrikes(){
   for(const s2 of list){
     S.objs.push({kind:'impact',cat:CAT[s2.kind]||'impact',type:'unknown',
       origin:tag,la:s2.la,lo:s2.lo,src:uniqSrc(s2.src),
+      // Скільки подій згорнуто в цю позначку. Раніше кратність жила лише
+      // в підписі («Кубінка ×10») і в розмірі знака, а розмір її втрачає:
+      // він упирається в стелю на чотирьох. Через це відбір міст важив
+      // ПОЗНАЧКИ, а не події, і десять прильотів на Кубінку важили рівно
+      // стільки ж, скільки один — тобто найгучніша ціль ночі лишалась без
+      // назви. Число потрібне саме тут, у даних позначки.
+      n:Math.max(1,s2.n||1),
       size:7+Math.min(6,s2.n*1.5),
       label:(s2.place||CAT_NAME[CAT[s2.kind]||'impact'])+(s2.n>1?' ×'+s2.n:'')});
   }

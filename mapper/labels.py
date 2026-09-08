@@ -36,7 +36,10 @@ CITY_UA = {
     "Rostov-on-Don": "Ростов-на-Дону", "Voronezh": "Воронеж",
     "Volgograd": "Волгоград", "Odesa": "Одеса", "Dnipro": "Дніпро",
     "Donetsk": "Донецьк", "Krasnodar": "Краснодар", "Saratov": "Саратов",
-    "Zaporizhzhya": "Запоріжжя", "Tolyatti": "Тольятті",
+    "Zaporizhzhya": "Запоріжжя",
+    # Правило зʼїдає мʼякий знак: «Lviv» давало «Лвів». Місто, яке оператор
+    # назвав серед пʼяти обовʼязкових, стояло на карті з помилкою в назві.
+    "Lviv": "Львів", "Tolyatti": "Тольятті",
     "Ulyanovsk": "Ульяновськ", "Yaroslavl": "Ярославль",
     "Kryvyy Rih": "Кривий Ріг", "Sevastopol": "Севастополь",
     "Ryazan’": "Рязань", "Astrakhan": "Астрахань", "Penza": "Пенза",
@@ -300,7 +303,12 @@ def uk(name: str) -> str:
 def main(min_pop="12000", out=None):
     out = out or os.path.join(HERE, "labels.js")
     min_pop = int(min_pop)
-    BOX = (41.0, 60.5, 25.0, 53.0)
+    # Західна межа 22.0, а не 25.0. Стояло 25 — і з карти випадав УВЕСЬ
+    # захід України: Львів (717 тис.), Івано-Франківськ, Ужгород. Оператор
+    # назвав Львів серед пʼяти міст, які мають бути на карті завжди, а його
+    # у файлі не було взагалі — не «не влізав у ліміт», а не існував.
+    # Дані ті самі, gazetteer/UA.txt, лише вікно ширше.
+    BOX = (41.0, 60.5, 22.0, 53.0)
     seen, res = set(), []
     for path in ("gazetteer/RU.txt", "gazetteer/UA.txt"):
         for line in open(f"{ROOT}/{path}", encoding="utf-8"):

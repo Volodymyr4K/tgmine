@@ -144,13 +144,8 @@ def voice_coverage(st, threshold=SOLO_SHARE):
 
     Повертає (скільки_регіонів_моно, усього_регіонів, частка_подій_у_моно).
     """
-    days = st.dates()
-    if not days:
-        return (0, 0, 0.0)
-    lo = datetime.fromisoformat(days[0]).replace(tzinfo=MSK)
-    hi = datetime.fromisoformat(days[-1]).replace(tzinfo=MSK) + timedelta(days=2)
     by = collections.defaultdict(collections.Counter)
-    for e in st.window(lo, hi):
+    for e in full_window(st):
         if (e.get("noise") or e.get("dup_of") or not e.get("region")
                 or e.get("scope") != "точка"):
             continue
@@ -174,14 +169,9 @@ def count_share(st):
     числа (`store.drones_of`) стало 4.5%, а сторінка далі показувала старе —
     тому число рахується на кожній збірці. Лише унікальні події, без реклами.
     """
-    days = st.dates()
-    if not days:
-        return 0.0
-    lo = datetime.fromisoformat(days[0]).replace(tzinfo=MSK)
-    hi = datetime.fromisoformat(days[-1]).replace(tzinfo=MSK) + timedelta(days=2)
     rx = re.compile(r"БПЛА|бпла|дрон", re.I)
     men = num = 0
-    for e in st.window(lo, hi):
+    for e in full_window(st):
         if e.get("noise") or e.get("dup_of") or not rx.search(e.get("text") or ""):
             continue
         men += 1
@@ -198,13 +188,8 @@ def confirmed_share(st, window_s=3600):
     на збірці. Це і є число «скільки тут другої думки», і воно має рухатись
     разом із набором каналів, а не з чиєюсь памʼяттю.
     """
-    days = st.dates()
-    if not days:
-        return 0.0
-    lo = datetime.fromisoformat(days[0]).replace(tzinfo=MSK)
-    hi = datetime.fromisoformat(days[-1]).replace(tzinfo=MSK) + timedelta(days=2)
     by = collections.defaultdict(list)
-    for e in st.window(lo, hi):
+    for e in full_window(st):
         if (e.get("noise") or e.get("dup_of") or e.get("scope") != "точка"
                 or not e.get("place")):
             continue
@@ -254,6 +239,56 @@ def day_window(date: str):
     """
     d0 = datetime.fromisoformat(date).replace(tzinfo=MSK, hour=12)
     return d0, d0 + timedelta(days=1)
+
+
+# Одне й те саме вікно за збірку питають по кілька разів, і кожен раз — це
+# перечитування й розбір json з диска. Заміряно профайлером на 143 добах:
+# 1 722 326 розборів json на ~250 тис. подій, тобто кожна подія розбиралась
+# усьоме, і це 14.8 с із 17.3 с усієї збірки. Джерела повторів рівно два:
+# три довідкові числа для прози (`voice_coverage`, `count_share`,
+# `confirmed_share`) роблять ТРИ однакові проходи по всьому архіву, а денні
+# звіти двічі йдуть по всіх добах — спершу за зведеннями, потім за
+# сторінками.
+#
+# Памʼятка тримає розібрані події за ключем вікна. Це безпечно рівно тому, що
+# в site.py події лише ЧИТАЮТЬ: `summarize`, `clean`, `day_page` нічого в них
+# не пишуть. `raid.py`, який дописує подіям `hhmm` і перекладає `region`,
+# працює окремим процесом (`subprocess.run`), тож спільних обʼєктів із ним
+# нема. Хто додасть у site.py запис у подію — має спершу прибрати памʼятку
+# або віддавати копії.
+#
+# Ціна — памʼять: увесь архів лишається розібраним у процесі, ~250 МБ на 143
+# добах. На ранері 7 ГБ, локально теж не проблема; але якщо архів виросте в
+# рази, дешевше буде злити два денні проходи в один, ніж памʼять.
+_WIN = {}
+_FULL = None
+
+
+def win(st, lo, hi):
+    k = (lo.isoformat(), hi.isoformat())
+    if k not in _WIN:
+        _WIN[k] = st.window(lo, hi)
+    return _WIN[k]
+
+
+def full_window(st):
+    """Увесь архів одним проходом — на всі три довідкові числа для прози."""
+    global _FULL
+    if _FULL is None:
+        days = st.dates()
+        if not days:
+            return []
+        lo = datetime.fromisoformat(days[0]).replace(tzinfo=MSK)
+        hi = datetime.fromisoformat(days[-1]).replace(tzinfo=MSK) + timedelta(days=2)
+        _FULL = st.window(lo, hi)
+    return _FULL
+
+
+def forget_full():
+    """Відпустити архів: далі йдуть подобові вікна, і тримати обидва — це
+    зайвих ~600 МБ на ранері, де поруч ще й підпроцеси карт нальотів."""
+    global _FULL
+    _FULL = None
 
 
 def clean(events):
@@ -640,10 +675,22 @@ def main():
 
     copy_mapper()
 
+    # Числа для прози — раз на збірку, з поточного сховища, не з памʼяті.
+    #
+    # Рахуються ПЕРШИМИ навмисно: усі три йдуть одним проходом по всьому
+    # архіву, а далі збірка працює подобово. Порахувати їх посередині означало
+    # б тримати в памʼяті і весь архів, і всі подобові вікна разом — заміряно
+    # 1.47 ГБ проти 0.9 ГБ, і це на ранері, де поруч ще й підпроцеси карт
+    # нальотів.
+    count_pct = count_share(st)
+    conf_pct = confirmed_share(st)
+    n_solo, n_reg, solo_share = voice_coverage(st)
+    forget_full()
+
     rows = []
     for d in dates:
         lo, hi = day_window(d)
-        ev = st.window(lo, hi)
+        ev = win(st, lo, hi)
         if not ev:
             continue
         s = summarize(ev)
@@ -689,15 +736,11 @@ def main():
 
     have = {p.stem for p in (OUT / "raids").glob("*.html")}
 
-    # Числа для прози — раз на збірку, з поточного сховища, не з памʼяті.
-    count_pct = count_share(st)
-    conf_pct = confirmed_share(st)
-
     # ---- денні звіти ------------------------------------------------------
     (OUT / "day").mkdir(exist_ok=True)
     for i, r in enumerate(rows):
         lo, hi = day_window(r["date"])
-        ev = st.window(lo, hi)
+        ev = win(st, lo, hi)
         prev = rows[max(0, i - 7):i]
         (OUT / "day" / f"{r['date']}.html").write_text(
             day_page(r["date"], ev, r, prev, r["date"] in have,
@@ -708,10 +751,10 @@ def main():
 
     # ---- жива сторінка ----------------------------------------------------
     now = datetime.now(timezone.utc).astimezone(MSK)
-    recent = st.window(now - timedelta(hours=6), now + timedelta(minutes=5))
+    recent = win(st, now - timedelta(hours=6), now + timedelta(minutes=5))
     recent = clean(recent)
     last_state = {}
-    for e in clean(st.window(now - timedelta(hours=24), now + timedelta(minutes=5))):
+    for e in clean(win(st, now - timedelta(hours=24), now + timedelta(minutes=5))):
         if e.get("region") and e["scope"] == "область":
             last_state[e["region"]] = e["kind"]
     live = {
@@ -753,7 +796,6 @@ def main():
         for r in reversed(rows))
 
     mxr = max(reg.values()) if reg else 1
-    n_solo, n_reg, solo_share = voice_coverage(st)
     regtab = "\n".join(
         f'<tr><td>{esc(region_label(k))}</td><td class=n>{v}</td><td>{bar(v, mxr, 220)}</td></tr>'
         for k, v in reg.most_common(18))

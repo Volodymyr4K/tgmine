@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import collections
+import hashlib
 import re
 import html
 import json
@@ -609,6 +610,35 @@ def night_index(nights: Path):
     print(f"-> {nights}/index.json  ({len(out)} ночей)")
 
 
+def stamp_assets(dst: Path):
+    """Дописати версію до посилань на власні файли редактора.
+
+    Вони підключені як `labels.js` і `font.css` — без версії, — і браузер
+    тримав їх у кеші після кожного оновлення: оператор відкривав карту й
+    бачив ті самі підписи, які щойно прибрали, а потім питав, чи взагалі
+    задеплоїлось. Версія — короткий хеш ВМІСТУ, тож адреса міняється рівно
+    тоді, коли міняється файл, і не міняється просто так.
+
+    Робиться на збірці, а не в самому editor.html: інакше номер довелося б
+    правити руками щоразу, а це саме та дисципліна, яка одного разу
+    забувається.
+    """
+    html = dst / "editor.html"
+    if not html.exists():
+        return
+    src = html.read_text(encoding="utf-8")
+    for f in sorted(dst.iterdir()):
+        if f.name == "editor.html" or not f.is_file():
+            continue
+        if f.suffix not in (".js", ".css"):
+            continue
+        v = hashlib.md5(f.read_bytes()).hexdigest()[:8]
+        # і чисте посилання, і вже проставлену вручну версію (`?v=4`)
+        src = re.sub(rf'(["\'])({re.escape(f.name)})(\?v=[^"\']*)?\1',
+                     rf'\g<1>\g<2>?v={v}\g<1>', src)
+    html.write_text(src, encoding="utf-8")
+
+
 def copy_mapper():
     src = Path(__file__).resolve().parent / "mapper"
     if not (src / "editor.html").exists():
@@ -622,6 +652,17 @@ def copy_mapper():
         if f.exists():
             shutil.copyfile(f, dst / name)
             n += 1
+    stamp_assets(dst)
+    # HTML не кешується взагалі, решта — назавжди: адреса скриптів уже несе
+    # хеш вмісту, тож змінений файл приходить під новою адресою, а незмінений
+    # береться з кешу. Без цього браузер тримав СТАРИЙ editor.html, і жодна
+    # версія всередині нього не рятувала — оператор бачив попередню карту.
+    (OUT / "_headers").write_text(
+        "/*.html\n  Cache-Control: no-cache\n"
+        "/\n  Cache-Control: no-cache\n"
+        "/mapper/*.js\n  Cache-Control: public, max-age=31536000\n"
+        "/mapper/*.css\n  Cache-Control: public, max-age=31536000\n",
+        encoding="utf-8")
     tiles = src / "tiles"
     if tiles.is_dir():
         shutil.copytree(tiles, dst / "tiles", dirs_exist_ok=True)

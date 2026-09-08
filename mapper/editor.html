@@ -1050,6 +1050,9 @@ const S={
           // жирний кордон між РФ і Україною — окремо від решти
           uaruW:2.8, uaruCol:'#ffffff'},
     route:{halo:0.12, nodes:true},
+    // Зони: сила заливки, штриха й обводу. Числа ті самі, що були зашиті
+    // в малюванні; винесені сюди, щоб зону можна було зробити помітною.
+    zone:{fill:0.08, hatch:0.19, line:0.53},
     impact:{col:'#ffd66e', rays:8, size:9, glow:1.0},
     // Робота ППО і збиття — НЕ влучання. Доти всі три малювались одним
     // помаранчевим спалахом, і карта читалась як суцільна пожежа.
@@ -1073,6 +1076,7 @@ const S={
   // Усе оформлення — дані карти. Оператор міняє написи, кількість стовпчиків,
   // прозорість; набір їде разом із файлом карти.
   legend:{routes:{on:true,title:'Види маршрутів',cols:1,allTypes:false,opacity:.9},
+          // `zones:false` прибирає рядки зон із блоку позначень
           marks:{on:true,title:'Зони та позначення',cols:1,width:300,
                  launchName:'Пускові локації',impactName:'Влучання',
                  ppoName:'Робота ППО',downedName:'Збиття',opacity:.9}},
@@ -3059,26 +3063,43 @@ function drawGlyphObj(o,c,sel){
   if(sel){c.beginPath();c.arc(s[0],s[1],r*1.5,0,7);c.strokeStyle='#fff';
     c.setLineDash([3,3]);c.lineWidth=1;c.stroke();c.setLineDash([]);}
 }
+// Спалах: ореол, промені й розжарене ядро. Винесено з drawImpact, бо форма
+// знака перестала бути власністю однієї категорії — див. `burst` нижче.
+function burstMark(c,s,r,col,rays,glow){
+  const g=c.createRadialGradient(s[0],s[1],0,s[0],s[1],r*2.2);
+  g.addColorStop(0,hexa(col,.95*(glow===undefined?1:glow)));
+  g.addColorStop(.45,hexa(col,.5*(glow===undefined?1:glow)));
+  g.addColorStop(1,hexa(col,0));
+  c.beginPath();c.arc(s[0],s[1],r*2.2,0,7);c.fillStyle=g;c.fill();
+  const RAYS=Math.max(3,rays||8);
+  for(let i=0;i<RAYS;i++){
+    const a=i*2*Math.PI/RAYS, l=r*(i%2?1.5:2.3);
+    c.beginPath();c.moveTo(s[0]+Math.cos(a)*r*.4,s[1]+Math.sin(a)*r*.4);
+    c.lineTo(s[0]+Math.cos(a)*l,s[1]+Math.sin(a)*l);
+    c.strokeStyle=hexa(col,.85);c.lineWidth=1.6;c.stroke();
+  }
+  c.beginPath();c.arc(s[0],s[1],r*.5,0,7);c.fillStyle='#fff6df';c.fill();
+}
 function drawImpact(o,c,sel){
   const k=catOf(o);
-  if(k!=='impact') return drawMark(o,c,sel,S.style[k]||{col:'#9fb3c8'});
+  // Форма знака — така сама настройка, як колір. Досі спалах був намертво
+  // привʼязаний до «влучання», а решта подій малювалась кільцем; на карті,
+  // де ППО й влучання показують однаковим спалахом різного кольору, це
+  // повторити було нічим. Тепер будь-яка категорія може взяти `burst`.
+  if(k!=='impact'){
+    const ST=S.style[k]||{col:'#9fb3c8'};
+    if(!ST.burst) return drawMark(o,c,sel,ST);
+    const s=P(o.la,o.lo), r=o.size||ST.size||9;
+    if(!glyphOf(o,ST)) burstMark(c,s,r,ST.col,ST.rays,ST.glow);
+    markGlyph(o,c,s,r,ST);
+    markLabel(o,c,s,ST.col,r,sel);
+    if(sel){c.beginPath();c.arc(s[0],s[1],r*2.6,0,7);c.strokeStyle='#fff';
+      c.setLineDash([3,3]);c.lineWidth=1;c.stroke();c.setLineDash([]);}
+    return;
+  }
   const IM=S.style.impact;
   const s=P(o.la,o.lo), r=o.size||IM.size||9;
-  if(!glyphOf(o,IM)){                     // знак замість спалаху, не поверх
-    const g=c.createRadialGradient(s[0],s[1],0,s[0],s[1],r*2.2);
-    g.addColorStop(0,hexa(IM.col,.95*IM.glow));
-    g.addColorStop(.45,`rgba(255,120,40,${.55*IM.glow})`);
-    g.addColorStop(1,'rgba(255,80,20,0)');
-    c.beginPath();c.arc(s[0],s[1],r*2.2,0,7);c.fillStyle=g;c.fill();
-    const RAYS=Math.max(3,IM.rays||8);
-    for(let i=0;i<RAYS;i++){
-      const a=i*2*Math.PI/RAYS, l=r*(i%2?1.5:2.3);
-      c.beginPath();c.moveTo(s[0]+Math.cos(a)*r*.4,s[1]+Math.sin(a)*r*.4);
-      c.lineTo(s[0]+Math.cos(a)*l,s[1]+Math.sin(a)*l);
-      c.strokeStyle=hexa(IM.col,.85);c.lineWidth=1.6;c.stroke();
-    }
-    c.beginPath();c.arc(s[0],s[1],r*.5,0,7);c.fillStyle='#fff6df';c.fill();
-  }
+  if(!glyphOf(o,IM)) burstMark(c,s,r,IM.col,IM.rays,IM.glow);
   markGlyph(o,c,s,r,IM);
   markLabel(o,c,s,'#ffb01f',r,sel);
   if(sel){c.beginPath();c.arc(s[0],s[1],r*2.6,0,7);c.strokeStyle='#fff';
@@ -3184,11 +3205,20 @@ function drawZone(o,c,sel){
   ringPath(o.pts,c);
   for(const x of cutters) ringPath(x.pts,c);
   c.clip('evenodd');                                  // мінус верхні зони
-  c.fillStyle=z.col+'14';c.fillRect(bx,by,bw,bh);
+  // Насиченість заливки й штриха — ручки, а не числа в малюванні. Уся
+  // палітра зон була зашита ('14' — 8%, '30' — 19%), і зробити зону
+  // помітною, як на друкованих картах, не було чим: оператор міг змінити
+  // колір, але не силу. Типові значення ті самі, що стояли, тож наявні
+  // карти виглядають як раніше.
+  const ZS=S.style.zone||{};
+  const zf=Math.max(0,Math.min(1,ZS.fill===undefined?0.08:ZS.fill));
+  const zh=Math.max(0,Math.min(1,ZS.hatch===undefined?0.19:ZS.hatch));
+  const zl=Math.max(0,Math.min(1,ZS.line===undefined?0.53:ZS.line));
+  c.fillStyle=hexa(z.col,zf);c.fillRect(bx,by,bw,bh);
   if(z.hatch){
     // Штрих, а не суцільна заливка: зона має читатись як позначка на карті,
     // а не як зафарбований шматок країни.
-    c.strokeStyle=z.col+'30';c.lineWidth=1;
+    c.strokeStyle=hexa(z.col,zh);c.lineWidth=1;
     // Крок штриха рахується від СПІЛЬНОЇ сітки, а не від рамки кожної зони:
     // інакше у сусідніх областей різна фаза, і на їхній межі видно шов, наче
     // одна половина щільніша за другу.
@@ -3204,7 +3234,7 @@ function drawZone(o,c,sel){
   ringPath(o.pts,c);
   for(const x of cutters) ringPath(x.pts,c);
   c.clip('evenodd');
-  ring(o.pts,c);c.strokeStyle=z.col+'88';c.lineWidth=1.4;c.stroke();
+  ring(o.pts,c);c.strokeStyle=hexa(z.col,zl);c.lineWidth=1.4;c.stroke();
   c.restore();
   // Назва зони на карті — лише коли її прикріпили або коли зона вибрана.
   // Автоматичні «Україна», «Крим», «Запоріжжя» поперек півкраїни нікому не
@@ -3376,7 +3406,10 @@ function drawLegend(c,w,h){
     if(shown('downed'))
       rows.push({name:LZ.downedName||'Збиття',
                  draw:markIcon((S.style.downed||{}).col||'#ff8a5c')});
-    for(const z of ZONES){
+    // Зони в легенді — окремий вимикач. На карті, де вся легенда це два
+    // рядки про події, рядки «Україна» й «Окупована територія» лише
+    // подовжують плашку: територія на карті й так підписана заливкою.
+    for(const z of (LZ.zones===false?[]:ZONES)){
       // Схована зона рядка не лишає — так само, як позначка й маршрут.
       if(!drawList().some(o=>o.kind==='zone'&&o.zone===z.id&&objVisible(o))) continue;
       // Зона теж має власний колір на самому обʼєкті, тож зразок показує

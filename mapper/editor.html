@@ -175,6 +175,17 @@ button.primary{background:rgba(255,62,165,.16);border-color:rgba(255,62,165,.45)
 .sec>h2 .cnt{margin-left:auto;font-size:10px;color:#5f7386;letter-spacing:0}
 .sec>.body{display:none}
 .sec.open>.body{display:block}
+/* Гістограма годин: 24 стовпчики, клікабельні. Висота фіксована, щоб
+   секція не стрибала при зміні ночі. */
+.thist{display:flex;gap:1px;align-items:flex-end;height:46px;margin-top:4px}
+.thist button{flex:1;min-width:0;padding:0;border:none;border-radius:2px 2px 0 0;
+  background:#1b2734;height:100%;position:relative;cursor:pointer}
+.thist button i{position:absolute;left:0;right:0;bottom:0;display:block;
+  background:#2f4a63;border-radius:2px 2px 0 0}
+.thist button.on i{background:#ff3ea5}
+.thist button.on{background:#2a1b26}
+.thist button.edge{outline:1px solid #ff3ea5;outline-offset:-1px}
+.thist button:hover i{filter:brightness(1.4)}
 </style></head><body>
 <div id="app">
   <div id="tools">
@@ -269,6 +280,25 @@ button.primary{background:rgba(255,62,165,.16);border-color:rgba(255,62,165,.45)
                  style="width:66px" title="Наскільки близько мають бути кінці двох маршрутів, щоб вважати їх одним коридором. 120 км узято з даних: ближче лежать приблизно 5% пар, далі розподіл стрибає">
         </div>
         <button id="strikes" style="margin-top:6px" title="Позначки тієї ночі; повторний клік замінює попередній шар">Покласти збиття / ППО</button>
+
+        <label style="margin-top:10px">Години нальоту <span id="tfCnt" class="cnt" style="margin-left:4px"></span></label>
+        <div id="thist" class="thist"></div>
+        <div style="display:flex;gap:6px;align-items:center;margin-top:6px">
+          <input id="tfFrom" type="time" step="300" value="20:00" style="flex:1">
+          <span style="color:#8fa3b8">&rarr;</span>
+          <input id="tfTo" type="time" step="300" value="06:00" style="flex:1">
+        </div>
+        <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
+          <button id="tfOff" style="flex:1">Усе</button>
+          <button data-tf="18:00-23:59" style="flex:1">Вечір</button>
+          <button data-tf="00:00-05:59" style="flex:1">Ніч</button>
+          <button data-tf="06:00-11:59" style="flex:1">Ранок</button>
+        </div>
+        <div class="hint">Стовпчик — година, висота — скільки подій. Клік по
+          стовпчику ставить початок вікна, другий клік — кінець; вікно може
+          йти через північ (20:00 &rarr; 06:00). Час такий, як у даних ночі —
+          за Москвою. Обʼєкти без часу (зони, підписи, намальоване руками)
+          фільтр не чіпає.</div>
         <div class="hint">Шляхи, зшиті з наших повідомлень, лягають напівпрозорим
           шаром. Клік по ньому переводить шлях у редагований маршрут, а кнопка
           вище — усі показані разом, кольором обраного типу.</div>
@@ -1004,6 +1034,10 @@ const TPL=[
 
 const S={
   tool:'select', type:'uav', zone:'occupied',
+  // Фільтр за годинами доби нальоту. Ніч іде через північ, тому вікно
+  // 20:00–06:00 — це не помилка, а звичайний випадок: `from>to` означає
+  // «через північ», і перевірка це враховує.
+  tfilter:{on:false, from:'20:00', to:'06:00'},
   frame:null, aspect:0, tpl:null, targetsOn:false, ruler:null, bias:0, ready:false,
   spacePan:false, ghostMin:2,
   // Знак, який ставить інструмент «знак». Окремо від позначок подій: там
@@ -2920,8 +2954,46 @@ const CAT_NAME={impact:'влучання',ppo:'робота ППО',downed:'зб
 const CAT_LIST=['ppo','downed','boom','launch','fix','impact'];
 // Один присуд видимості на всі три приймачі (екран, PNG, SVG): інакше
 // вимкнений шар зникає з екрана, а в експорті лишається.
+// Час у хвилинах від опівночі; '' і сміття дають null.
+function hhmmMin(v){
+  const m=/^(\d{1,2}):(\d{2})$/.exec(String(v||'').trim());
+  if(!m) return null;
+  const h=+m[1], mi=+m[2];
+  return (h<24&&mi<60) ? h*60+mi : null;
+}
+// Чи хвилина потрапляє у вікно. `from>to` — вікно через північ, і це
+// звичайний випадок: наліт починається ввечері, а закінчується вранці.
+function inWindow(t,a,b){
+  if(t===null) return true;
+  return a<=b ? (t>=a&&t<=b) : (t>=a||t<=b);
+}
+// Обʼєкт у часовому вікні. Маршрут проходить, якщо з вікном перетинається
+// хоч частина його відрізка [t0,t1]: стрілка, що летіла з 19:40 до 20:30,
+// на фільтрі «від 20:00» лишається — вона там БУЛА.
+//
+// Обʼєкт БЕЗ часу лишається завжди. Це не поблажка: зони, підписи й усе
+// намальоване руками часу не мають, і ховати підкладку разом із подіями
+// означало б вимикати фільтром саму карту.
+function inTimeWindow(o){
+  const F=S.tfilter;
+  if(!F||!F.on) return true;
+  const a=hhmmMin(F.from), b=hhmmMin(F.to);
+  if(a===null||b===null) return true;
+  if(o.kind==='route'||o.kind==='arrow'){
+    const t0=hhmmMin(o.t0), t1=hhmmMin(o.t1);
+    if(t0===null&&t1===null) return true;
+    if(t0===null||t1===null) return inWindow(t0===null?t1:t0,a,b);
+    // Перетин двох дуг на 24-годинному колі — найпростіше через хвилини:
+    // якщо будь-який кінець у вікні або будь-який край вікна всередині
+    // відрізка, вони перетинаються.
+    return inWindow(t0,a,b)||inWindow(t1,a,b)
+        || inWindow(a,t0,t1)||inWindow(b,t0,t1);
+  }
+  return inWindow(hhmmMin(o.t),a,b);
+}
 function objVisible(o){
   if(o.hidden) return false;
+  if(!inTimeWindow(o)) return false;
   const k=catOf(o);
   return !(k && S.layers[CAT_LAYER[k]]===false);
 }
@@ -4300,6 +4372,7 @@ function restore(){
       if(d.style)S.style=fillDefaults(d.style,STYLE_DEFAULT);
       // Старі карти цього поля не мають — режим показу лишається вимкненим.
       S.corridors=Object.assign({on:false,km:120},d.corridors||{});
+      S.tfilter=Object.assign({on:false,from:'20:00',to:'06:00'},d.tfilter||{});
       S.hideCity=Array.isArray(d.hideCity)?d.hideCity.slice():[];
       S.lang=d.lang==='en'?'en':'uk';   // карти без цього поля — українські
       // Прибраний шар має лишатись прибраним і після перезавантаження:
@@ -5090,6 +5163,7 @@ function srcBlock(o){
 }
 function refresh(){
   renderCorr();
+  renderTime();               // гістограма годин міняється разом зі сценою
   // Вибрали інше — віконце палітри більше не про цей обʼєкт.
   if(POP.o&&POP.o!==S.sel) hidePop();
   // властивості
@@ -5393,6 +5467,10 @@ function mapPayload(){
   return {title:S.title,sub:S.sub,objs:S.objs,view:S.view,
           frame:S.frame,aspect:S.aspect,types:TYPES,zones:ZONES,
           corridors:S.corridors, hideCity:S.hideCity, lang:S.lang,
+          // Фільтр за годинами їде разом із картою: вікно — частина роботи,
+          // а не налаштування вікна редактора. Відкрив збережене — бачиш те
+          // саме, що лишив, а не всю ніч раптом цілком.
+          tfilter:S.tfilter,
           layers:S.layers,
           style:S.style,legend:S.legend,brand:S.brand,
           footer:S.footer,watermark:S.watermark};
@@ -5455,6 +5533,7 @@ function applyMap(d){
   ZONES=mergeZones(d.zones);rezone();
   if(d.style)S.style=fillDefaults(d.style,STYLE_DEFAULT);
   S.corridors=Object.assign({on:false,km:120},d.corridors||{});
+  S.tfilter=Object.assign({on:false,from:'20:00',to:'06:00'},d.tfilter||{});
   S.hideCity=Array.isArray(d.hideCity)?d.hideCity.slice():[];
   S.lang=d.lang==='en'?'en':'uk';
   if(d.layers) S.layers=Object.assign({},LAYERS_DEFAULT||S.layers,d.layers);
@@ -6007,6 +6086,88 @@ document.getElementById('selRoutes').onclick=()=>
   selectKind(o=>o.kind==='route'||o.kind==='arrow','стрілок');
 document.getElementById('selMarks').onclick=()=>
   selectKind(o=>o.kind==='impact','позначок');
+// ── фільтр за годинами ────────────────────────────────────────────────
+// Гістограма рахує ПОДІЇ, а не обʼєкти: маршрут дає одну позначку в годину
+// свого початку, позначка — свою годину з кратністю. Так стовпчики
+// показують, коли наліт справді був, а не скільки ліній намальовано.
+function hourHist(){
+  const h=new Array(24).fill(0);
+  for(const o of S.objs){
+    if(o.hidden) continue;
+    if(o.kind==='route'||o.kind==='arrow'){
+      const t=hhmmMin(o.t0)!==null?hhmmMin(o.t0):hhmmMin(o.t1);
+      if(t!==null) h[Math.floor(t/60)%24]++;
+    }else if(o.kind==='impact'){
+      const t=hhmmMin(o.t);
+      if(t!==null) h[Math.floor(t/60)%24]+=impactN(o);
+    }
+  }
+  return h;
+}
+// Скільки обʼєктів ЧАСУ вікно лишає — тільки ті, що час мають. Рахувати
+// разом із зонами й підписами безглуздо: вони проходять завжди.
+function timedCount(){
+  let vis=0, all=0;
+  for(const o of S.objs){
+    const timed=(o.kind==='route'||o.kind==='arrow')
+      ? (hhmmMin(o.t0)!==null||hhmmMin(o.t1)!==null)
+      : (o.kind==='impact'&&hhmmMin(o.t)!==null);
+    if(!timed) continue;
+    all++; if(inTimeWindow(o)) vis++;
+  }
+  return {vis,all};
+}
+let TFPICK=null;                 // перший клік по стовпчику, чекає другий
+function renderTime(){
+  const box=document.getElementById('thist');
+  if(!box) return;
+  const F=S.tfilter, h=hourHist(), mx=Math.max(1,...h);
+  const a=hhmmMin(F.from), b=hhmmMin(F.to);
+  box.innerHTML='';
+  for(let i=0;i<24;i++){
+    const el=document.createElement('button');
+    const on=F.on&&a!==null&&b!==null&&inWindow(i*60+30,a,b);
+    el.className=(on?'on':'')+(TFPICK===i?' edge':'');
+    el.title=`${String(i).padStart(2,'0')}:00 — подій: ${h[i]}`;
+    // Мінімальна висота 2 px: порожня година має лишатись клікабельною,
+    // інакше вікно неможливо почати з тихої години.
+    el.innerHTML=`<i style="height:${h[i]?Math.max(8,Math.round(h[i]/mx*100))+'%':'2px'}"></i>`;
+    el.onclick=()=>{
+      if(TFPICK===null){ TFPICK=i; renderTime(); return; }
+      const from=TFPICK, to=i;
+      TFPICK=null;
+      S.tfilter.on=true;
+      S.tfilter.from=String(from).padStart(2,'0')+':00';
+      // Кінець години, а не її початок: клік по «05» означає «до кінця
+      // пʼятої», інакше подія о 05:30 випадала з власного стовпчика.
+      S.tfilter.to=String(to).padStart(2,'0')+':59';
+      syncTimeInputs(); endPass(); refresh();
+    };
+    box.appendChild(el);
+  }
+  const c=timedCount(), cnt=document.getElementById('tfCnt');
+  if(cnt) cnt.textContent=F.on?`${c.vis} з ${c.all}`:(c.all?String(c.all):'');
+}
+function syncTimeInputs(){
+  const f=document.getElementById('tfFrom'), t=document.getElementById('tfTo');
+  if(f) f.value=S.tfilter.from;
+  if(t) t.value=S.tfilter.to;
+}
+function setWindow(from,to){
+  S.tfilter.on=true; S.tfilter.from=from; S.tfilter.to=to;
+  TFPICK=null; syncTimeInputs(); endPass(); refresh();
+}
+{
+  const f=document.getElementById('tfFrom'), t=document.getElementById('tfTo');
+  const apply=()=>{ S.tfilter.on=true; S.tfilter.from=f.value; S.tfilter.to=t.value;
+                    TFPICK=null; endPass(); refresh(); };
+  if(f) f.onchange=apply;
+  if(t) t.onchange=apply;
+  document.getElementById('tfOff').onclick=()=>{
+    S.tfilter.on=false; TFPICK=null; endPass(); refresh(); };
+  document.querySelectorAll('[data-tf]').forEach(b=>b.onclick=()=>{
+    const [x,y]=b.dataset.tf.split('-'); setWindow(x,y); });
+}
 document.getElementById('ghostMin').onchange=e=>{
   S.ghostMin=+e.target.value;draw();};
 document.getElementById('tGhost').onclick=()=>{S.targetsOn=!S.targetsOn;
@@ -6100,6 +6261,10 @@ function putStrikes(){
       // стільки ж, скільки один — тобто найгучніша ціль ночі лишалась без
       // назви. Число потрібне саме тут, у даних позначки.
       n:Math.max(1,s2.n||1),
+      // Час події з даних. Без нього позначка випадала з фільтра за
+      // годинами: маршрути час несли (t0/t1), а позначки — ні, і на
+      // «показати лише після 20:00» спалахи лишались усі до одного.
+      t:s2.t||'',
       size:7+Math.min(6,s2.n*1.5),
       label:(s2.place||CAT_NAME[CAT[s2.kind]||'impact'])+(s2.n>1?' ×'+s2.n:'')});
   }

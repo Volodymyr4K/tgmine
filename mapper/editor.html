@@ -1961,14 +1961,31 @@ function uaRing(){
   let x0=1e9,x1=-1e9,y0=1e9,y1=-1e9;
   for(const p of r){ if(p[1]<x0)x0=p[1]; if(p[1]>x1)x1=p[1];
                      if(p[0]<y0)y0=p[0]; if(p[0]>y1)y1=p[0]; }
-  UAREF={r,x0,x1,y0,y1};
+  // Спрощений контур — для перевірок, яких багато. Приналежність МІСТА
+  // рахується раз на місто (і ще й кешується), а от «чи вилазить прямокутник
+  // підпису» питається для кожного з семи десятків кандидатів кожної назви:
+  // на повному контурі в 2400 вузлів це коштувало 100 мс на кадр проти 20.
+  // Для «не вилізти за берег» точність кожного другого десятка вузлів
+  // надлишкова й поготів.
+  const step=Math.max(1,Math.round(r.length/400));
+  const lite=step>1?r.filter((_,i)=>i%step===0):r;
+  UAREF={r,lite,x0,x1,y0,y1};
   return UAREF;
 }
-function inUA(la,lo){
+// Приналежність міста до України не залежить ні від вигляду, ні від сцени —
+// тільки від самої точки. Кеш за назвою: у відборі `inUA` питається для
+// кожного міста списку, а їх 1012.
+const UAMEM=new Map();
+function cityInUA(c){
+  let v=UAMEM.get(c.n);
+  if(v===undefined){ v=inUA(c.la,c.lo); UAMEM.set(c.n,v); }
+  return v;
+}
+function inUA(la,lo,lite){
   const U=uaRing();
   if(!U) return false;
   if(lo<U.x0||lo>U.x1||la<U.y0||la>U.y1) return false;
-  const r=U.r; let inside=false;
+  const r=lite?U.lite:U.r; let inside=false;
   for(let i=0,j=r.length-1;i<r.length;j=i++){
     const xi=r[i][1], yi=r[i][0], xj=r[j][1], yj=r[j][0];
     if((yi>la)!==(yj>la) && lo < (xj-xi)*(la-yi)/(yj-yi)+xi) inside=!inside;
@@ -2130,6 +2147,26 @@ function drawLabels(c){
   const gap=Math.max(0,Math.min(400,ST.base.cityGap===undefined?56:ST.base.cityGap));
   const ROLE=cityRoles();
   const ALL=(window.LABELS||B.cities||[]);
+  // Назва українського міста має лежати В УКРАЇНІ. Оператор: «ці міста не
+  // мають виходити за межі України» — «Одеса» з'їжджала в море, і на карті
+  // із зеленою заливкою це видно найкраще: підпис висить за контуром, наче
+  // належить воді.
+  //
+  // Це ЦІНА, а не заборона. Місто на самому березі буває затиснуте з трьох
+  // боків (в Одеси на південь море, на схід лиман), і заборона просто
+  // прибрала б назву з карти. Штраф у 70 px гарантовано перебиває будь-яку
+  // ближню позицію, тож вихід за контур обирається лише тоді, коли всередині
+  // немає взагалі нічого.
+  //
+  // Перевіряються три точки прямокутника — лівий край, середина, правий, —
+  // на його вертикальній середині: довга назва вилазить саме кінцем.
+  const OUT_PEN=70;
+  const ptInUA=(x,y)=>{ const b=unscr(x,y), g=baseLL(b[0],b[1]); return inUA(g[0],g[1],true); };
+  const outsideOwn=(r,own)=>{
+    if(!own) return false;
+    const my=r.y+r.h/2;
+    return !(ptInUA(r.x+2,my)&&ptInUA(r.x+r.w/2,my)&&ptInUA(r.x+r.w-2,my));
+  };
   const inFrame=q=>{ const s=P(q.la,q.lo);
     if(!(s[0]>=-40&&s[0]<=Wp+40&&s[1]>=-20&&s[1]<=Hp+20)) return false;
     return !onTOT(q);                  // на ТОТ підписів не буває
@@ -2189,7 +2226,7 @@ function drawLabels(c){
   for(const q of ALL){
     if(na>=nUA&&nb>=nRU) break;
     if(q.p<minPop||!inFrame(q)) continue;
-    const ua=inUA(q.la,q.lo);
+    const ua=cityInUA(q);
     if(ua ? na>=nUA : nb>=nRU) continue;
     // Орієнтири просвітом НЕ проріджуються. Їх і так лічені одиниці —
     // стільки, скільки дозволили квоти по країнах, — і кожен обраний
@@ -2251,7 +2288,7 @@ function drawLabels(c){
   if(cap) for(const q of ALL){
     if(pick.length>=cap) break;
     if(q.p<minPop||!inFrame(q)) continue;
-    const ua=inUA(q.la,q.lo);
+    const ua=cityInUA(q);
     if(ua ? na>=nUA : nb>=nRU) continue;
     if(take(q,'anchor',1e9)){ if(ua) na++; else nb++; }
   }
@@ -2406,6 +2443,9 @@ function drawLabels(c){
       // чотирнадцяти виїжджали за поріг виноски, і карта заростала лініями.
       pad=Math.max(pad,m.rh);
     }
+    // Чи це українське місто — рахується РАЗ на назву: перевірка точки в
+    // контурі на 2400 вузлів, а кандидатів у кожної назви до півсотні.
+    const ownUA=cityInUA(ct);
     const NEAR=nearCand(w,h,pad);
     const boxOf=f=>f.t==='n'
       ? (NEAR[f.i]?{x:s2[0]+NEAR[f.i][0],y:s2[1]+NEAR[f.i][1]-h+4,w,h}:null)
@@ -2426,7 +2466,8 @@ function drawLabels(c){
     // лишається тонким розсудом рівних (0.01 px), тобто за інших рівних
     // усе стоїть точно там, де стояло.
     const priceOf=(r,f,far)=>
-      edge(r)+(far?14:((NEAR[f.i]||[])[2]||0))+obst(r)+f.i*0.01;
+      edge(r)+(far?14:((NEAR[f.i]||[])[2]||0))+obst(r)+f.i*0.01
+      +(outsideOwn(r,ownUA)?OUT_PEN:0);
     const consider=(r,f,far)=>{
       if(!r||!free(r)) return;
       const q=priceOf(r,f,far);

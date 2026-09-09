@@ -2459,8 +2459,12 @@ function drawLabels(c){
     // Прибране не малюється й не клікається: у невидиму назву цілитись нема
     // сенсу. Повернути її можна переліком у панелі.
     if(hid.has(ct.n)) continue;
+    // `role` кладеться сюди ж: звіт у панелі має казати, ЧОМУ назва на
+    // карті, а роль із `cityRoles()` для цього не годиться — місто-орієнтир
+    // під маршрутом там значиться «прольотом», хоч у відборі воно пройшло
+    // квотою орієнтирів.
     if(rec) CITYBOX.push({n:ct.n,x:put[0]-3,y:put[1]-h+2,w:w+6,h:h+4,
-                          dx:s2[0],dy:s2[1]});
+                          dx:s2[0],dy:s2[1],role});
     // Помітність тягне за собою ВСЮ групу підпису: крапку, напис і ореол.
     // Гасити лише текст не можна — лишається яскрава крапка з блідою назвою,
     // і на карті це читається як помилка, а не як задум. Ореол теж мусить
@@ -4874,6 +4878,31 @@ function selectAll(){
 }
 // Перелік прибраних підписів. Без нього прибирання незворотне на око:
 // оператор не памʼятає, що саме сховав три кроки тому.
+// Звіт про підписи міст: скільки й ЧОМУ. Оператор питає «де Одеса, у чому
+// логіка підбору» — і поки відповідь жила лише в коді, перевірити її на
+// своїй карті він не міг ніяк. Тепер видно склад просто в панелі: скільки
+// орієнтирів з кожної квоти стало, скільки міст подій і прольотів, і чи не
+// прибрана назва руками — саме це найчастіше й виявляється причиною.
+function labelReport(){
+  if(!S.layers.cities) return '<div class="hint">Підписи міст вимкнено шаром.</div>';
+  let ua=0,ru=0,ev=0,fly=0;
+  for(const b of CITYBOX){
+    const c=(window.LABELS||[]).find(x=>x.n===b.n);
+    if(b.role==='event') ev++;
+    else if(b.role==='fly') fly++;
+    else if(c&&inUA(c.la,c.lo)) ua++;
+    else ru++;
+  }
+  const nUA=S.style.base.cityAnchorsUA===undefined?5:S.style.base.cityAnchorsUA;
+  const nRU=S.style.base.cityAnchorsRU===undefined?8:S.style.base.cityAnchorsRU;
+  const hid=(S.hideCity||[]).length;
+  return '<div class="hint" style="margin-top:8px">'
+    +`Підписи: орієнтири ${ua}/${nUA} по Україні, ${ru}/${nRU} по решті; `
+    +`міста подій ${ev}, прольоту ${fly}. Разом ${CITYBOX.length} `
+    +`зі стелі ${S.style.base.labelMax===undefined?20:S.style.base.labelMax}.`
+    +(hid?` <b>Прибрано руками: ${hid}</b> — перелік нижче.`:'')
+    +'</div>';
+}
 function hiddenCityList(){
   const list=S.hideCity||[];
   if(!list.length) return '';
@@ -5056,6 +5085,7 @@ function refresh(){
     +'Маршрут і зона: клік-клік ставить вузли, або натиснув і повів — '
     +'лінія малюється одним рухом.<br>'
     +'Клік по назві міста вибирає її — Delete прибирає підпис.</div>'
+    +labelReport()
     +hiddenCityList();
     wireHiddenCities(p);}
   else if(o.kind==='route'){

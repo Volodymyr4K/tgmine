@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import time
 from pathlib import Path
@@ -40,12 +41,13 @@ CATEGORIES = {
         'nwr["military"="depot"]', 'nwr["military"="ammunition"]']),
     "naval": ("#4aa3ff", [
         'nwr["military"="naval_base"]', 'nwr["landuse"="port"]["military"]']),
-    # Лише переробка, не видобуток. Запити `petroleum_well` та `industry=oil`
-    # тут стояли, але до 9 вересня 2026 мовчки падали за таймаутом, і в
-    # переліку не було жодного OSM-НПЗ. Коли пройшли — принесли 13 468
-    # обʼєктів, з них 4126 без назви й тисячі свердловин «К2», «К13»: кущі
-    # нафтопромислів ХМАО. Свердловина — не ціль класу «НПЗ»; НПЗ у РФ
-    # ведуться курованим списком (`refineries.py`), OSM дає доповнення за назвою.
+    # Лише переробка, не видобуток. Самі запити живуть у IND_Q нижче (цей
+    # перелік — колір і документація): свердловини `petroleum_well` там
+    # стояли й до 9 вересня 2026 мовчки падали за таймаутом, тож у переліку
+    # не було жодного OSM-НПЗ. Коли пройшли — принесли 13 468 обʼєктів, з
+    # них 4126 без назви й тисячі свердловин «К2», «К13»: кущі нафтопромислів
+    # ХМАО. Свердловина — не ціль класу «НПЗ»; НПЗ у РФ ведуться курованим
+    # списком (`refineries.py`), OSM дає доповнення за назвою (`classify`).
     "refinery": ("#ffd23f", [
         'nwr["man_made"="works"]["name"~"НПЗ|нефтеперераб",i]',
         'nwr["industrial"="refinery"]']),
@@ -93,8 +95,9 @@ MIL_Q = ('nwr["military"~"airfield|base|depot|training_area|naval_base|'
          'nwr["aeroway"="aerodrome"]["military"];'
          'nwr["landuse"="military"];')
 # Промислові — regex по назві дорогий, тому вужчі й окремо.
+# Свердловин (`petroleum_well`) тут більше нема: `classify` їх усе одно
+# відкидає, а на плитках ХМАО це були тисячі вузлів на відповідь.
 IND_Q = ('nwr["industry"~"oil|chemical|military|arms|defence"];'
-         'nwr["man_made"="petroleum_well"];'
          'nwr["man_made"="works"]["name"~"нефт|НПЗ|химич|порох|взрывч|'
          'боеприпас|авиазавод|радиозавод|ракет",i];'
          'nwr["landuse"="industrial"]["name"~"нефтебаз|нефтехран|ГСМ|топлив",i];')
@@ -124,8 +127,18 @@ def fetch(q, log):
     return None
 
 
+NOT_A_TARGET = re.compile(r"мчс|пожарн|спасател|фсин|сизо|полиц|гибдд", re.I)
+
+
 def classify(t):
     """Категорія обʼєкта за його тегами. Порядок = пріоритет."""
+    # Служби, які OSM тегує як military/landuse=military, але які не є
+    # ціллю: рятувальники, пожежні, пенітенціарна служба, поліція. Спіймано
+    # 9 вересня 2026: «МЧС Росії» в Маріуполі забрав 1025 привʼязок подій
+    # Донеччини, бо лежить ближче до центру міста, ніж радіотехнічний
+    # батальйон. Росгвардія лишається — це війська.
+    if NOT_A_TARGET.search(t.get("name", "")):
+        return None
     mil = t.get("military", "")
     if mil == "airfield" or (t.get("aeroway") == "aerodrome"
                              and (mil or t.get("aerodrome:type") == "military")):

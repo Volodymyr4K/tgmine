@@ -431,10 +431,16 @@ def day_page(date, ev, s, prev_stats, have_raid, prev_date=None, next_date=None,
         for k, v in top)
 
     # для «найглибшої» беремо не абсолютний максимум, а найглибшу з тих, що
-    # підтверджені хоча б двома повідомленнями — інакше показуємо помилку
-    place_hits = collections.Counter(e["place"] for e in pts)
-    conf = [e for e in pts if e.get("depth") and place_hits[e["place"]] >= 2]
-    deepest = max(conf or pts, key=lambda e: e.get("depth") or 0, default=None)
+    # підтверджені хоча б двома повідомленнями — інакше показуємо помилку.
+    # Відкат на центр області (centroid/region-snap) — не фіксація в місці,
+    # а «десь у цій області»: такий рядок і глибину бреше, і замість назви
+    # друкував внутрішній ключ («ТОТ_Донецьк · 68 км»), спіймано тестом
+    # 9 вересня 2026.
+    located = [e for e in pts if e.get("depth")
+               and e.get("geo_conf") not in ST.REGIONAL_FALLBACK]
+    place_hits = collections.Counter(e["place"] for e in located)
+    conf = [e for e in located if place_hits[e["place"]] >= 2]
+    deepest = max(conf or located, key=lambda e: e.get("depth") or 0, default=None)
     link = (f'<div class=cards><a class=card href="../raids/{date}.html">'
             f'<h3>→ Карта доби</h3><p>Програвач: рух у часі, треки, '
             f'області під тривогою, клік по точці — джерело.</p></a></div>'
@@ -483,7 +489,7 @@ def day_page(date, ev, s, prev_stats, have_raid, prev_date=None, next_date=None,
 заводи), військові зони й полігони пропущено.</div>
 
 <h2>Найглибша фіксація</h2>
-<div class=lead>{esc(deepest['place']) if deepest else '—'}
+<div class=lead>{esc(region_label(deepest['place'])) if deepest else '—'}
 {f"· {deepest['depth']} км від підконтрольної України · {datetime.fromisoformat(deepest['t']).strftime('%H:%M')}" if deepest else ''}</div>
 
 <h2>Найчастіші точки</h2>

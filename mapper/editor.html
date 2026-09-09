@@ -186,6 +186,10 @@ button.primary{background:rgba(255,62,165,.16);border-color:rgba(255,62,165,.45)
 .thist button.on{background:#2a1b26}
 .thist button.edge{outline:1px solid #ff3ea5;outline-offset:-1px}
 .thist button:hover i{filter:brightness(1.4)}
+/* Північ — межа календарних дат усередині однієї оперативної доби. */
+.thist button.midnight{box-shadow:inset 1px 0 0 #5b7ea8}
+.tscale{display:flex;justify-content:space-between;color:#8fa3b8;
+  font-size:9px;margin-top:2px}
 </style></head><body>
 <div id="app">
   <div id="tools">
@@ -283,6 +287,8 @@ button.primary{background:rgba(255,62,165,.16);border-color:rgba(255,62,165,.45)
 
         <label style="margin-top:10px">Години нальоту <span id="tfCnt" class="cnt" style="margin-left:4px"></span></label>
         <div id="thist" class="thist"></div>
+        <div class="tscale"><span>12:00</span><span>18:00</span>
+          <span>північ</span><span>06:00</span><span>12:00</span></div>
         <div style="display:flex;gap:6px;align-items:center;margin-top:6px">
           <input id="tfFrom" type="time" step="300" value="20:00" style="flex:1">
           <span style="color:#8fa3b8">&rarr;</span>
@@ -294,11 +300,13 @@ button.primary{background:rgba(255,62,165,.16);border-color:rgba(255,62,165,.45)
           <button data-tf="00:00-05:59" style="flex:1">Ніч</button>
           <button data-tf="06:00-11:59" style="flex:1">Ранок</button>
         </div>
-        <div class="hint">Стовпчик — година, висота — скільки подій. Клік по
-          стовпчику ставить початок вікна, другий клік — кінець; вікно може
-          йти через північ (20:00 &rarr; 06:00). Час такий, як у даних ночі —
-          за Москвою. Обʼєкти без часу (зони, підписи, намальоване руками)
-          фільтр не чіпає.</div>
+        <div class="hint">Оперативна доба — з 12:00 до 12:00 за Москвою, і
+          гістограма йде так само: зліва полудень, посередині північ, справа
+          знову полудень. Так рахує <code>raid.py</code> — вікна стикуються
+          без дірок і нічний наліт не розривається межею дати.<br>
+          Стовпчик — година, висота — скільки подій. Клік ставить початок
+          вікна, другий клік — кінець. Обʼєкти без часу (зони, підписи,
+          намальоване руками) фільтр не чіпає.</div>
         <div class="hint">Шляхи, зшиті з наших повідомлень, лягають напівпрозорим
           шаром. Клік по ньому переводить шлях у редагований маршрут, а кнопка
           вище — усі показані разом, кольором обраного типу.</div>
@@ -6117,6 +6125,14 @@ function timedCount(){
   }
   return {vis,all};
 }
+// ОПЕРАТИВНА ДОБА ПОЧИНАЄТЬСЯ О 12:00, а не опівночі. Так її рахує raid.py
+// («вікна стикуються без дірок, нічний наліт не розривається межею»), і
+// гістограма мусить іти в тому ж порядку: 12…23, потім 00…11 уже наступного
+// календарного дня. Доти вона малювалась із нуля, і оператор сказав прямо —
+// «тут інакше пише і збиває з пантелику»: ліва половина стовпчиків була
+// насправді КІНЦЕМ доби, а не її початком.
+const DAY0=12;
+const dayHours=()=>Array.from({length:24},(_,i)=>(DAY0+i)%24);
 let TFPICK=null;                 // перший клік по стовпчику, чекає другий
 function renderTime(){
   const box=document.getElementById('thist');
@@ -6124,17 +6140,18 @@ function renderTime(){
   const F=S.tfilter, h=hourHist(), mx=Math.max(1,...h);
   const a=hhmmMin(F.from), b=hhmmMin(F.to);
   box.innerHTML='';
-  for(let i=0;i<24;i++){
+  for(const hr of dayHours()){
     const el=document.createElement('button');
-    const on=F.on&&a!==null&&b!==null&&inWindow(i*60+30,a,b);
-    el.className=(on?'on':'')+(TFPICK===i?' edge':'');
-    el.title=`${String(i).padStart(2,'0')}:00 — подій: ${h[i]}`;
+    const on=F.on&&a!==null&&b!==null&&inWindow(hr*60+30,a,b);
+    el.className=(on?'on':'')+(TFPICK===hr?' edge':'')+(hr===0?' midnight':'');
+    el.title=`${String(hr).padStart(2,'0')}:00 — подій: ${h[hr]}`
+      +(hr===0?' · північ, далі вже наступна дата':'');
     // Мінімальна висота 2 px: порожня година має лишатись клікабельною,
     // інакше вікно неможливо почати з тихої години.
-    el.innerHTML=`<i style="height:${h[i]?Math.max(8,Math.round(h[i]/mx*100))+'%':'2px'}"></i>`;
+    el.innerHTML=`<i style="height:${h[hr]?Math.max(8,Math.round(h[hr]/mx*100))+'%':'2px'}"></i>`;
     el.onclick=()=>{
-      if(TFPICK===null){ TFPICK=i; renderTime(); return; }
-      const from=TFPICK, to=i;
+      if(TFPICK===null){ TFPICK=hr; renderTime(); return; }
+      const from=TFPICK, to=hr;
       TFPICK=null;
       S.tfilter.on=true;
       S.tfilter.from=String(from).padStart(2,'0')+':00';

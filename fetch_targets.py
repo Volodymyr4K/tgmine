@@ -147,12 +147,11 @@ def classify(t):
         return "chemical"
     # Видобуток (свердловини, кущі, ДНС) не є переробкою — див. коментар
     # до запиту refinery вище. Слово «oil» у назві теж не годиться: ним
-    # підписані нафтопромисли.
+    # підписані нафтопромисли. Свердловина без «НПЗ» у назві проходить далі
+    # до перевірки на нафтобазу і, не збігшись, випадає сама.
     if t.get("industrial") == "refinery" or \
        any(w in name for w in ("нефтеперераб", "нпз", "refinery")):
         return "refinery"
-    if mm == "petroleum_well" or ind == "oil":
-        return None
     if any(w in name for w in ("нефтебаз", "нефтехран", "гсм", "топлив")) or \
        (mm == "storage_tank" and any(w in t.get("content", "").lower()
                                      for w in ("oil", "fuel", "diesel"))):

@@ -35,7 +35,11 @@ class TestRegionCodes(unittest.TestCase):
                           ("Орловська", {("RU", "56")}),
                           ("Костромська", {("RU", "37")}),
                           ("Татарстан", {("RU", "73")}),
-                          ("Ленінградська", {("RU", "42")})]:
+                          ("Ленінградська", {("RU", "42")}),
+                          # округи за Уралом: центроїд стоїть не в столиці,
+                          # і збіг має йти за назвою, не за відстанню
+                          ("ХМАО", {("RU", "32")}),
+                          ("ЯНАО", {("RU", "87")})]:
             with self.subTest(region=reg):
                 self.assertEqual(set(self.codes[reg]), want)
 
@@ -118,6 +122,31 @@ class TestHomonyms(unittest.TestCase):
         """Сибірський тезка за 4000 км — це помилка, не ціль."""
         hit = self.gaz.lookup("Ангарск", near=self.cfg.geo["Крим"], max_km=400)
         self.assertIsNone(hit)
+
+    def test_far_region_unlocks_far_cities(self):
+        """Рамка THEATER діє лише без області. З областю в пості шукається
+        навколо неї: інакше Новий Уренгой (76.6° сх.) не знаходився взагалі,
+        а «Сургут» без області і далі має лишатись самарським селом — так
+        рамка й задумана."""
+        for name, reg, want in [("Новый Уренгой", "ЯНАО", (66.08, 76.63)),
+                                ("Сургут", "ХМАО", (61.26, 73.42)),
+                                ("Нижневартовск", "ХМАО", (60.93, 76.55)),
+                                ("Ноябрьск", "ЯНАО", (63.19, 75.44)),
+                                ("Тюмень", "Тюменська", (57.15, 65.53)),
+                                ("Екатеринбург", "Свердловська", (56.86, 60.62))]:
+            with self.subTest(name=name):
+                hit = self.gaz.lookup(name, near=self.cfg.geo[reg], max_km=400,
+                                      near_a1=self.codes.get(reg))
+                self.assertIsNotNone(hit, f"{name} при {reg} не знайдено")
+                self.assertAlmostEqual(hit["lat"], want[0], delta=0.05)
+                self.assertAlmostEqual(hit["lon"], want[1], delta=0.05)
+                # «Тюмень» — ще й альт-назва області в GeoNames; місто має
+                # перемагати субʼєкт
+                self.assertNotIn(hit["fcode"], ("ADM1", "ADM1H"))
+        # без області рамка лишається: за нею вибирає населення, і воно б
+        # завжди брало сибірського тезку
+        far = self.gaz.lookup("Сургут")
+        self.assertTrue(GC.in_box(far["lat"], far["lon"]))
 
 
 @needs_gazetteer

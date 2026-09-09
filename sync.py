@@ -52,6 +52,8 @@ def main():
     ap.add_argument("--channels", nargs="*", default=CHANNELS)
     ap.add_argument("--rebuild", action="store_true",
                     help="перебудувати похідний шар із сирого, без мережі")
+    ap.add_argument("--all-dates", action="store_true",
+                    help="з --rebuild: не обмежуватись вікном наявного сховища")
     ap.add_argument("--stat", action="store_true")
     ap.add_argument("--quiet", action="store_true")
     a = ap.parse_args()
@@ -98,6 +100,21 @@ def main():
             rows = [json.loads(l) for l in f.read_text(encoding="utf-8").splitlines() if l.strip()]
             posts.extend(rows)
             log(f"  {ch}: {len(rows)} сирих постів")
+        # Вікно сховища, не весь сирий шар. Сире лежить із листопада 2025,
+        # опубліковане сховище починається з 2026-04-18 — і це рішення
+        # оператора (аудит 3 вересня 2026): архів до цієї дати нічого не дає
+        # свіжим даним, а жар цілей від нього зсувається. Без запобіжника
+        # перебудова 9 вересня 2026 мовчки створила 160 діб, яких у
+        # репозиторії нема, і жар порахувався разом із ними.
+        first = st.dates()
+        if first and not a.all_dates:
+            first = first[0]
+            n0 = len(posts)
+            posts = [p for p in posts
+                     if datetime.fromisoformat(p["date"]).astimezone(ST.MSK)
+                     .strftime("%Y-%m-%d") >= first]
+            log(f"  вікно сховища з {first}: {len(posts)} постів "
+                f"(відкинуто {n0 - len(posts)}; --all-dates, щоб узяти всі)")
         n = st.build(posts, cfg, gaz, log=log, targets=targets)
         log(f"\nрозібрано подій: {n}")
         return 0

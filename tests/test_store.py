@@ -302,10 +302,27 @@ class TestStoreInvariants(unittest.TestCase):
         self.assertEqual(missing[:5], [],
                          "сховище зібране конвеєром < v9 — треба --rebuild")
 
-    def test_coordinates_are_inside_the_theater(self):
-        from tgmine.geocode import in_box
-        bad = [(e["id"], e["lat"], e["lon"]) for _, e in self.events
-               if e.get("lat") is not None and not in_box(e["lat"], e["lon"])]
+    def test_coordinates_stay_near_their_region_or_inside_the_theater(self):
+        """Точка події або лежить у 400 км від центру названої області, або
+        (коли області в пості нема) у рамці THEATER.
+
+        До 9 вересня 2026 тут вимагалась рамка для всіх, і Урал із Західним
+        Сибіром були заборонені як клас. Тепер далека точка законна рівно
+        тоді, коли пост сам назвав далеку область: санітарну межу тримає
+        store._event, а тут — перевірка, що вона справді тримається.
+        """
+        from tgmine import extract as E
+        from tgmine.geocode import haversine, in_box
+        cfg = E.Config.load(ROOT / "configs" / "ru-monitor.yaml")
+        bad = []
+        for _, e in self.events:
+            if e.get("lat") is None:
+                continue
+            c = cfg.geo.get(e.get("region") or "")
+            ok = (haversine((e["lat"], e["lon"]), c) <= 400 if c
+                  else in_box(e["lat"], e["lon"]))
+            if not ok:
+                bad.append((e["id"], e.get("region"), e["lat"], e["lon"]))
         self.assertEqual(bad[:5], [])
 
     def test_schema_is_uniform(self):

@@ -2,6 +2,7 @@
 
 Кожен тест тут відповідає помилці, яка вже траплялась на реальних даних.
 """
+import json
 import re
 import unittest
 
@@ -181,12 +182,31 @@ class TestConfigIntegrity(unittest.TestCase):
                     with self.subTest(entity=key, pattern=p):
                         re.compile(p)
 
-    def test_centroids_are_inside_the_theater(self):
-        from tgmine.geocode import in_box
+    def test_centroids_are_inside_their_own_region(self):
+        """Центроїд області лежить у її ж полігоні з regions.json.
+
+        Раніше тут стояла рамка THEATER, і вона забороняла Урал узагалі. Рамка
+        тепер діє лише для пошуку без області, а центроїд має інший інваріант:
+        від нього store._event міряє санітарні 400 км, тож центр поза власною
+        областю мовчки відкочував би всі її точки. Для ХМАО і ЯНАО центр
+        навмисно не адмінцентр (Салехард лежить на краю округу) — саме тому
+        перевіряється полігон, а не збіг зі столицею.
+        """
+        from tgmine.geocode import haversine
+        from tgmine.territory import _in_ring_latlon
+        regions = json.loads((ROOT / "regions.json").read_text(encoding="utf-8"))
         for name, (lat, lon) in self.raw["geo"].items():
             with self.subTest(region=name):
-                self.assertTrue(in_box(lat, lon),
-                                f"{name} {lat},{lon} поза THEATER — газетир її не віддасть")
+                rings = regions.get(name)
+                self.assertTrue(rings, f"{name}: нема полігону в regions.json — "
+                                       "додати в MATCH у mkregions.py")
+                inside = any(_in_ring_latlon(lat, lon, r) for r in rings)
+                # Спрощений контур (Дуглас-Пекер) зрізає кути: центроїд
+                # Херсонщини стоїть за 3 км від краю — тому допуск до вершини
+                edge = min(haversine((lat, lon), tuple(v)) for r in rings for v in r)
+                self.assertTrue(inside or edge <= 30,
+                                f"{name} {lat},{lon} поза власним полігоном "
+                                f"({edge:.0f} км до контуру)")
 
 
 if __name__ == "__main__":
@@ -286,9 +306,39 @@ class TestAdjectiveHomonyms(unittest.TestCase):
              "Опасность по БПЛА", "Оренбурзька"),
             ("Дубенский район | Тульская область | Фиксация от 2 БПЛА",
              "Мордовія"),
+            # Уральські області додано 9 вересня 2026; ці тезки на них
+            # спіймано збіркою архіву ще до коміту.
+            ("Матвеево-Курганский район / Ростовская область / Работа ПВО",
+             "Курганська"),
+            ("Курганский район Краснодарский край - БПЛА противника",
+             "Курганська"),
+            ("Березники, Рыльский район / Опасность по БПЛА Дартс",
+             "Пермський"),
+            ("Красный Луч, Ровеньки ЛНР, Свердловск и близлежащие",
+             "Свердловська"),
         ]:
             with self.subTest(text=text[:40]):
                 self.assertNotEqual(self.first_region(text), wrong)
+
+    def test_ural_regions_are_recognised(self):
+        """До 9 вересня 2026 постів про Урал і Західний Сибір область не
+        отримувала жодна: субʼєктів не було в конфізі, і «Новый Уренгой»
+        лишався без координат, а «Сургут» ставав селом у Самарській."""
+        for text, want in [
+            ("Новый Уренгой / Ямало-Ненецкий автономный округ / Фиксации БПЛА",
+             "ЯНАО"),
+            ("Тюменская область и ХМАО Опасность по БПЛА", "Тюменська"),
+            ("Сургут / Ханты-Мансийск", "ХМАО"),
+            ("Свердловская область / Пермский край", "Свердловська"),
+            ("г.Екатеринбург - меры предосторожности при БПЛА", "Свердловська"),
+            ("Матвеево-Курганский район / Ростовская область", "Ростовська"),
+            ("Курганская область - опасность по БПЛА от Тюменской области",
+             "Курганська"),
+            ("Омская область", "Омська"),
+            ("Челябинская область / Отбой опасности по БПЛА", "Челябінська"),
+        ]:
+            with self.subTest(text=text[:40]):
+                self.assertEqual(self.first_region(text), want)
 
     def test_luhanske_village_is_not_luhansk(self):
         """«Луганское» — село під Джанкоєм або під Дебальцевим, не Луганщина."""

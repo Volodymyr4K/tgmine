@@ -750,27 +750,42 @@ def main():
         nights = OUT / "mapper" / "nights"
         nights.mkdir(parents=True, exist_ok=True)
         have_night = {p.stem for p in nights.glob("*.js")}
+        # Пороги РІЗНІ, і це не дрібниця. Сторінка нальоту — публічна, тиха
+        # доба на ній читається як порожня новина, тому там лишається 40
+        # точок. А ніч для редактора — інструмент оператора: він відкриває
+        # поточну добу, коли вона тільки почалась і подій за неї ще п'ять.
+        # Спільний поріг давав рівно те, на що він і поскаржився: «а чому
+        # немає за 9 число? це ж з 12 дня мало вже бути 9 число» — доба йшла
+        # п'яту годину, у зведенні стояло 15 спостережень, а в списку дат
+        # редактора її не було взагалі.
+        PAGE_MIN, NIGHT_MIN = 40, 3
         for r in rows:
-            if r["points"] < 40:          # тихі ночі не варті окремої сторінки
-                continue
             d = r["date"]
+            want_page = r["points"] >= PAGE_MIN
+            want_night = r["points"] >= NIGHT_MIN
+            if not want_page and not want_night:
+                continue
             fresh = rebuild is not None and d in rebuild
-            if not fresh and d in built and d in have_night:
+            done_page = (not want_page) or d in built
+            done_night = (not want_night) or d in have_night
+            if not fresh and done_page and done_night:
                 continue
             try:
                 subprocess.run([sys.executable, "raid.py", d], check=True,
                                capture_output=True, timeout=900)
-                subprocess.run([sys.executable, "makeraid.py", f"raid_{d}.json"],
-                               check=True, capture_output=True, timeout=900)
-                shutil.move(f"raid_{d}.html", OUT / "raids" / f"{d}.html")
-                try:
-                    subprocess.run([sys.executable, "mapper/mknight.py",
-                                    f"raid_{d}.json", str(nights / f"{d}.js")],
+                if want_page:
+                    subprocess.run([sys.executable, "makeraid.py", f"raid_{d}.json"],
                                    check=True, capture_output=True, timeout=900)
-                except Exception as e:
-                    print(f"  ! ніч для редактора {d}: {e}")
+                    shutil.move(f"raid_{d}.html", OUT / "raids" / f"{d}.html")
+                if want_night:
+                    try:
+                        subprocess.run([sys.executable, "mapper/mknight.py",
+                                        f"raid_{d}.json", str(nights / f"{d}.js")],
+                                       check=True, capture_output=True, timeout=900)
+                    except Exception as e:
+                        print(f"  ! ніч для редактора {d}: {e}")
                 Path(f"raid_{d}.json").unlink(missing_ok=True)
-                print(f"  наліт {d} ok")
+                print(f"  наліт {d} ok" if want_page else f"  ніч {d} ok (тиха доба)")
             except Exception as e:
                 print(f"  ! наліт {d}: {e}")
         night_index(nights)

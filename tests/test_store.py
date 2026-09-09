@@ -304,23 +304,38 @@ class TestStoreInvariants(unittest.TestCase):
 
     def test_coordinates_stay_near_their_region_or_inside_the_theater(self):
         """Точка події або лежить у 400 км від центру названої області, або
-        (коли області в пості нема) у рамці THEATER.
+        (коли області в пості нема) не далі 400 км від рамки THEATER.
 
         До 9 вересня 2026 тут вимагалась рамка для всіх, і Урал із Західним
         Сибіром були заборонені як клас. Тепер далека точка законна рівно
         тоді, коли пост сам назвав далеку область: санітарну межу тримає
         store._event, а тут — перевірка, що вона справді тримається.
+
+        Без області межа — не сама рамка, а рамка плюс радіус пошуку: якір і
+        точка узгодження беруться В рамці, але `lookup` далі шукає навколо них
+        у радіусі `max_km`=400 без рамки. Так Махачкала (42.98°, під нижнім
+        краєм) знаходиться від якоря «Дагестан», і це правильно. Вимагати тут
+        саму рамку означало б класти погодинний прогін CI на першому ж пості
+        про Осетію без області в конфізі.
         """
         from tgmine import extract as E
-        from tgmine.geocode import haversine, in_box
+        from tgmine.geocode import THEATER, haversine
         cfg = E.Config.load(ROOT / "configs" / "ru-monitor.yaml")
+
+        def near_theater(lat, lon):
+            # відстань до найближчої точки рамки: затискаємо координату в
+            # рамку й міряємо гаверсинусом до затиснутої
+            clat = min(max(lat, THEATER[0]), THEATER[1])
+            clon = min(max(lon, THEATER[2]), THEATER[3])
+            return haversine((lat, lon), (clat, clon)) <= 400
+
         bad = []
         for _, e in self.events:
             if e.get("lat") is None:
                 continue
             c = cfg.geo.get(e.get("region") or "")
             ok = (haversine((e["lat"], e["lon"]), c) <= 400 if c
-                  else in_box(e["lat"], e["lon"]))
+                  else near_theater(e["lat"], e["lon"]))
             if not ok:
                 bad.append((e["id"], e.get("region"), e["lat"], e["lon"]))
         self.assertEqual(bad[:5], [])

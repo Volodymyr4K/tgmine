@@ -173,6 +173,9 @@ ALERT_MUTED_HOURS = 12.0
 ALERT_GAP_HOURS = 3.0
 #: Тривога без відбою вважається чинною стільки хвилин — для покриття.
 ALERT_HOLD_MIN = 90
+#: Нагадування про чинну тривогу — не старт.
+ALERT_REMINDER = re.compile(r"напоминаем|сохраняется|продолжается|действует|"
+                            r"остаётся|остается|повторно", re.I)
 
 
 def alerts(raid):
@@ -205,15 +208,43 @@ def alerts(raid):
         h = int(hhmm[:2])
         return (h + 24 if h < 12 else h, hhmm)
 
-    msgs = collections.defaultdict(list)          # регіон -> [(t, kind, url)]
+    from tgmine import store as ST
+    msgs = collections.defaultdict(list)          # регіон -> [(t, kind, url, hhmm, reminder)]
     for e in raid["events"]:
         if e.get("scope") != "область" or e.get("kind") not in ("тривога", "відбій"):
             continue
         t = datetime.fromisoformat(e["t"])
-        regs = list(dict.fromkeys(x["value"] for x in E.entities_of(e.get("text", ""), cfg)
-                                  if x["type"] == "регіон"))
+        text = e.get("text", "")
+        ents = [x for x in E.entities_of(text, cfg) if x["type"] == "регіон"]
+        # «Татарстан — опасность по БПЛА от Ульяновской и Самарской областей»:
+        # область після «от», яка не перша в пості, — джерело, а не місце
+        # тривоги. Те саме правило, що для крапки (store.SRC_BEFORE);
+        # спіймано перевіркою: 145 із 4113 тривог за 10 діб.
+        first = min((x["pos"] for x in ents if x.get("pos") is not None), default=None)
+        # Знайти перше джерело («от Ульяновской») і відрізати все до кінця
+        # речення: «и Самарской областей» — продовження переліку джерел.
+        cut = None
+        for x in ents:
+            pos = x.get("pos") or 0
+            if pos != first and ST.SRC_BEFORE.search(text[max(0, pos - 24):pos]):
+                cut = pos
+                break
+        end = len(text)
+        if cut is not None:
+            for sep in (".", "\n", "/", "📡"):
+                i = text.find(sep, cut)
+                if i != -1:
+                    end = min(end, i)
+        regs = []
+        for x in ents:
+            pos = x.get("pos") or 0
+            if cut is not None and cut <= pos < end:
+                continue
+            if x["value"] not in regs:
+                regs.append(x["value"])
+        reminder = bool(ALERT_REMINDER.search(text))
         for r in regs:
-            msgs[r].append((t, e["kind"], e.get("url", ""), e.get("hhmm", "")))
+            msgs[r].append((t, e["kind"], e.get("url", ""), e.get("hhmm", ""), reminder))
     fixes = collections.Counter(
         e.get("region") for e in raid["events"]
         if e.get("scope") == "точка" and e.get("lat") and e.get("region")
@@ -224,7 +255,7 @@ def alerts(raid):
         lst.sort()
         # покриття: обʼєднання вікон [тривога, відбій або +hold]
         cov, start, last = timedelta(0), None, None
-        for t, k, _, _ in lst:
+        for t, k, _, _, _ in lst:
             if k == "тривога":
                 if start is None:
                     start = t
@@ -239,9 +270,17 @@ def alerts(raid):
         if hours >= ALERT_MUTED_HOURS:
             muted.append(reg)
         prev, seen_otboy = None, False
-        for t, k, url, hhmm in lst:
+        for t, k, url, hhmm, reminder in lst:
             if k == "відбій":
                 seen_otboy = prev is not None
+                continue
+            # Нагадування («тревога сохраняется», «напоминаем») — не старт,
+            # а свідчення, що тривога триває: воно лише продовжує її.
+            # 397 із 4113 тривог за 10 діб; як перше повідомлення області
+            # воно означає, що старт був ще до початку доби.
+            if reminder:
+                if prev is not None:
+                    prev, seen_otboy = t, False
                 continue
             if prev is None or (t - prev) >= gap:
                 onsets.append({"t": hhmm, "reg": reg,

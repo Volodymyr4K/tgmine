@@ -81,6 +81,13 @@ class TestBearings(unittest.TestCase):
             # Курська: тривога з 12:00 щогодини всю ніч — суцільна
             *[al(f"{h % 24:02d}:00", "Курская область / Опасность по БПЛА")
               for h in range(12, 36)],
+            # область після «от» — джерело, не старт: Ульяновська й
+            # Самарська тут не тривожать
+            al("02:00", "Республика Татарстан - опасность по БПЛА от Ульяновской "
+                        "и Самарской областей."),
+            # нагадування як ПЕРШЕ повідомлення області — старт був до доби,
+            # старту нема
+            al("03:30", "Рязанская область - тревога по БПЛА сохраняется"),
             # фіксація в Пензенській — область не німа
             self._ev(53.2, 45.0, None, region="Пензенська", hhmm="01:50")]}
         out = self.mk.alerts(raid)
@@ -89,8 +96,12 @@ class TestBearings(unittest.TestCase):
         self.assertEqual(rows, [("00:19", "Липецька", True, False),
                                 ("00:19", "Тамбовська", True, False),
                                 ("01:38", "Пензенська", False, False),
+                                ("02:00", "Татарстан", True, False),
                                 ("04:30", "Тамбовська", True, False),
                                 ("06:00", "Пензенська", False, True)])
+        self.assertNotIn("Ульяновська", out["cover"])
+        self.assertNotIn("Самарська", out["cover"])
+        self.assertNotIn("Рязанська", [o["reg"] for o in out["onsets"]])
         self.assertEqual(out["muted"], ["Курська"])
         self.assertGreaterEqual(out["cover"]["Курська"], 12)
         self.assertIn("Тамбовська", out["anchors"])

@@ -3940,8 +3940,9 @@ function draw(){
   ctx.clearRect(0,0,Wp,Hp);
   ctx.fillStyle=S.style.base.bg||'#04070c';ctx.fillRect(0,0,Wp,Hp);
   drawBase(ctx);
-  // Штрих німих областей — просто на підкладці, під усім іншим.
-  drawAlertHatch(ctx);
+  // Штрих німих областей — просто на підкладці, під усім іншим. Це
+  // підказка: у чистому вигляді й в експорті її нема.
+  if(!S.clean) drawAlertHatch(ctx); else ALERT_CHIPS=[];
   // Фіксації ночі — під підказками й обʼєктами: це тло зі свідчень, поверх
   // якого оператор малює.
   drawSights(ctx);

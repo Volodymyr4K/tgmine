@@ -22,7 +22,7 @@
 ```bash
 pip3 install -r requirements.txt
 
-python3 sync.py --rebuild        # зібрати сховище з наявного кешу
+python3 sync.py --rebuild        # зібрати сховище з наявного кешу (у вікні сховища; --all-dates — усе сире)
 python3 site.py --raids          # згенерувати сайт
 python3 -m http.server -d site 8000
 ```

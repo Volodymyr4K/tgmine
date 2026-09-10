@@ -5201,6 +5201,10 @@ function srcBlock(o){
 function refresh(){
   renderCorr();
   renderTime();               // гістограма годин міняється разом зі сценою
+  // Напис кнопки фіксацій — від стану, не від кліку: зміна ночі, «усе
+  // стерти» й undo міняють S.sight повз кнопку, і напис інакше бреше.
+  const sb=document.getElementById('sights');
+  if(sb) sb.textContent=S.sight.length?'Сховати фіксації ночі':'Показати фіксації ночі';
   // Вибрали інше — віконце палітри більше не про цей обʼєкт.
   if(POP.o&&POP.o!==S.sel) hidePop();
   // властивості
@@ -6577,7 +6581,6 @@ function putSights(){
   S.sight=list.map(s=>Object.assign({},s));
   S.sightHover=null;
   const areas=S.sight.filter(s=>s.area).length;
-  document.getElementById('sights').textContent='Сховати фіксації ночі';
   toast(`фіксацій: ${S.sight.length} місць`+(areas?` (з них районів ${areas})`:''));
   jlog('sights',{n:S.sight.length,areas});
   refresh();
@@ -6585,7 +6588,6 @@ function putSights(){
 document.getElementById('sights').onclick=()=>{
   if(S.sight.length){
     snapshot(); S.sight=[]; S.sightHover=null;
-    document.getElementById('sights').textContent='Показати фіксації ночі';
     refresh(); return;
   }
   if(!window.NIGHT){loadNight(ok=>ok?putSights():alert(

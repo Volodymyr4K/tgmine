@@ -7249,7 +7249,12 @@ function applyBasemap(id){
   if(!b) return;
   snapshot();
   jlog('basemap',{id:b.id,bg:b.style.bg});
-  Object.assign(S.layers,b.layers);
+  // Стиль описує лише свої шари, а решта лишалась від попереднього: після
+  // «Темної схеми» «Знімок удень» не згадував `schema`, схема лишалась
+  // увімкненою і лягала поверх знімка — оператор бачив темну схему замість
+  // знімка й казав, що підкладки не перемикаються. Растрові й схемні шари
+  // спершу скидаються: підкладка — це те, що стиль назвав, і нічого поверх.
+  Object.assign(S.layers,{sat:false,night:false,schema:false},b.layers);
   Object.assign(S.style.base,b.style);
   touch();renderStyle();refresh();
   toast('підкладка: '+b.name.toLowerCase());

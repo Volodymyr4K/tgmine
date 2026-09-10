@@ -5255,7 +5255,14 @@ function refresh(){
       +`<button data-act="both">${o.both?'Одна головка':'Дві головки'}</button>`
       +'</div>'
       +`<button data-act="glow" style="margin-top:6px">${o.glow?'Без сяйва':'Зі сяйвом'}</button>`
-      +'<div class="hint">Кружок посередині гне стрілку.</div>';
+      +'<div class="hint">Кружок посередині гне стрілку.</div>'
+      // Стрілка з ночі несе місце, час і посилання на повідомлення — як
+      // маршрут і позначка. Досі стрілки малювались лише рукою, тому блоку
+      // джерела в цій гілці не було, і оператор бачив стрілку без підстави.
+      +(o.bear?`<div class="hint">Напрямок з тексту${o.place?': '+esc(o.place):''}`
+               +`${o.t0?' · '+esc(o.t0):''}${o.n>1?' · повідомлень '+o.n:''}. `
+               +'Довжина 35 км — символ напрямку, не дальність.</div>':'')
+      +srcBlock(o);
   }else if(o.kind==='launch'){
     p.innerHTML=field('Назва',o.label||'','label')+field('Другий рядок',o.sub||'','sub')
       +'<button data-act="lab" style="margin-top:6px">Скинути положення підпису</button>';

@@ -285,6 +285,11 @@ button.primary{background:rgba(255,62,165,.16);border-color:rgba(255,62,165,.45)
         </div>
         <button id="strikes" style="margin-top:6px" title="Позначки тієї ночі; повторний клік замінює попередній шар">Покласти збиття / ППО</button>
         <button id="bearings" style="margin-top:6px" title="Стрілки з курсів, названих у тексті («пролёт на восток», «с юго-запада»): звичайні стрілки, які можна правити й стирати; повторний клік замінює попередній шар">Покласти напрямки з тексту</button>
+        <button id="sights" style="margin-top:6px" title="Кожне місце, де тієї ночі щось бачили: крапка тим більша, чим більше повідомлень; порожнє кільце — центр району, не село. Підказка, не обʼєкт: в експорт не йде, клік робить із неї позначку. Повторний клік ховає шар">Показати фіксації ночі</button>
+        <div style="display:flex;gap:6px;align-items:center;margin-top:6px">
+          <button id="sightAll" style="flex:1" title="Робить позначки з усіх показаних фіксацій, у яких повідомлень не менше за число праворуч">Узяти фіксації в роботу</button>
+          <input id="sightMin" type="number" min="1" max="99" value="3" style="width:52px" title="від скількох повідомлень брати: дві третини місць ночі мають одне-єдине">
+        </div>
 
         <label style="margin-top:10px">Години нальоту <span id="tfCnt" class="cnt" style="margin-left:4px"></span></label>
         <div id="thist" class="thist"></div>
@@ -1142,7 +1147,7 @@ const S={
   layers:{sat:true,night:true,water:true,borders:true,cities:true,
           regions:true,places:true,targets:false,
           schema:false,
-          impacts:true,ppo:true,downed:true,ghosts:true,marklabels:false,
+          impacts:true,ppo:true,downed:true,ghosts:true,sights:true,marklabels:false,
           ruregions:true,
           legend:true,header:true,scale:true},
   // Мова назв на карті: 'uk' або 'en'. Це не переклад інтерфейсу — це
@@ -1150,6 +1155,9 @@ const S={
   // разом із файлом карти.
   lang:'uk',
   objs:[], sel:null, selMore:[], draft:null, ghosts:[], redo:[], marquee:null, clip:null,
+  // Фіксації ночі — шар свідчень: кожне місце, де тієї ночі щось бачили.
+  // Підказка, не обʼєкт: в експорт не йде, клік робить із неї позначку.
+  sight:[], sightHover:null,
   hover:null,                   // обʼєкт під курсором у списку — підсвічуємо на карті
   clean:false,                  // чиста карта: інтерфейс схований
   // k:0 означає «кадр ще не вписано». Це не косметика: якщо fit() на старті
@@ -3927,6 +3935,9 @@ function draw(){
   ctx.clearRect(0,0,Wp,Hp);
   ctx.fillStyle=S.style.base.bg||'#04070c';ctx.fillRect(0,0,Wp,Hp);
   drawBase(ctx);
+  // Фіксації ночі — під підказками й обʼєктами: це тло зі свідчень, поверх
+  // якого оператор малює.
+  drawSights(ctx);
   // Шар-привид: підказки з наших даних. Малюються ПО-РІЗНОМУ за впевненістю,
   // бо вони різні за силою: ланцюг із кількох заявлених ланок — це рух,
   // підтверджений кількома повідомленнями, а одна ланка на 480 км — лише
@@ -4331,13 +4342,13 @@ function imgToData(img){
 // губилось у шумі; з кнопкою «узяти всі» один випадковий клік зносив би
 // всю ніч.
 function snapState(){
-  return JSON.stringify({objs:S.objs, ghosts:S.ghosts, hideCity:S.hideCity});
+  return JSON.stringify({objs:S.objs, ghosts:S.ghosts, sight:S.sight, hideCity:S.hideCity});
 }
 function applyState(j){
   const d=JSON.parse(j);
   // записи, зроблені до цієї правки, — плаский масив обʼєктів
   if(Array.isArray(d)){ S.objs=d; return; }
-  S.objs=d.objs||[]; S.ghosts=d.ghosts||[];
+  S.objs=d.objs||[]; S.ghosts=d.ghosts||[]; S.sight=d.sight||[]; S.sightHover=null;
   // Прибраний підпис міста теж крок історії: інакше Delete по назві був
   // незворотним, а виглядав як звичайне видалення.
   if(d.hideCity) S.hideCity=d.hideCity.slice();
@@ -4596,6 +4607,17 @@ cv.addEventListener('pointerdown',e=>{
       toast('підказку взято в роботу — далі веди сам');
       refresh();return;
     }
+    // Клік по фіксації ночі робить із неї позначку — після підказок, бо
+    // лінія над крапкою читається як те, що зверху.
+    const s=sightAt(sx,sy);
+    if(s){
+      snapshot();
+      const o=sightToMark(s);
+      S.objs.push(o);S.sel=o;S.selMore=[];jadd(o,'з фіксації');
+      S.sight=S.sight.filter(x=>x!==s); S.sightHover=null;
+      toast('фіксацію взято в роботу');
+      refresh();return;
+    }
   }
   // Підпис міста. Перевіряємо ПІСЛЯ обʼєктів і підказок: назва — частина
   // підкладки, і перехоплювати нею клік по намальованому не можна.
@@ -4644,6 +4666,12 @@ cv.addEventListener('pointermove',e=>{
     draw();
   }
   if(pan){S.view.x=pan.vx-(sx-pan.sx)/S.view.k;S.view.y=pan.vy-(sy-pan.sy)/S.view.k;draw();return;}
+  // Наведення на фіксацію ночі: картка з місцем, кількістю й часом.
+  // Перемальовуємо лише коли підсвічена крапка змінилась.
+  if(S.sight.length&&S.tool==='select'){
+    const h=sightAt(sx,sy);
+    if(h!==S.sightHover){S.sightHover=h;draw();}
+  }
   // Тягання з інструментом маршруту чи зони: точки лягають самі, поки
   // ведеш. Поріг у 4 px відрізняє тягання від кліку, крок у 8 px не дає
   // намолотити сотню вузлів на сантиметр лінії.
@@ -5208,7 +5236,7 @@ function refresh(){
     p.innerHTML='<div class="hint"><b style="color:#dbe8f6">З чого почати</b><br>'
       +'1. «Дані ночі» — вибери дату й натисни «Показати маршрути ночі».<br>'
       +'2. Клік по підказці перетворює її на свій маршрут; далі ведеш сам.<br>'
-      +'3. «Покласти збиття / ППО» кладе позначки тієї ночі, «Покласти напрямки з тексту» — стрілки з курсів, які канали назвали словами.<br>'
+      +'3. «Показати фіксації ночі» — кожне місце, де тієї ночі щось бачили; клік по крапці робить позначку. «Покласти збиття / ППО» кладе позначки, «Покласти напрямки з тексту» — стрілки з курсів, які канали назвали словами.<br>'
       +'4. «Кадр і експорт» — рамка, PNG або SVG.<br><br>'
       +'Клавіші й підказки — кнопка <kbd>?</kbd> угорі праворуч.</div>';
   }else if(!o){
@@ -5839,7 +5867,7 @@ document.getElementById('tSearch').oninput=e=>renderTargets(e.target.value);
     ['regions','назви областей'],['places','розсип НП'],
     ['targets','наші цілі'],
     ['impacts','влучання'],['ppo','робота ППО'],['downed','збиття'],
-    ['ghosts','підказки'],['marklabels','підписи позначок'],
+    ['ghosts','підказки'],['sights','фіксації ночі'],['marklabels','підписи позначок'],
     ['legend','легенда'],['header','шапка'],
     ['scale','масштаб'],
   ];
@@ -6108,6 +6136,11 @@ document.getElementById('selMarks').onclick=()=>
 // показують, коли наліт справді був, а не скільки ліній намальовано.
 function hourHist(){
   const h=new Array(24).fill(0);
+  // Поки показані фіксації ночі, стовпчики рахують їх: це профіль ночі з
+  // даних, а не профіль того, що вже намальовано. Узяті в роботу — уже
+  // позначки, тож двічі не рахуються.
+  if(S.layers.sights!==false)
+    for(const s of S.sight) for(const t of sightTimes(s)) h[Math.floor(t/60)%24]++;
   for(const o of S.objs){
     if(o.hidden) continue;
     if(o.kind==='route'||o.kind==='arrow'){
@@ -6264,7 +6297,11 @@ function putStrikes(){
   // мовчки втрачав двадцять сім щойно взятих стрілок.
   S.objs=S.objs.filter(o=>{
     if(o.kind!=='impact') return true;
-    if(fromNight(o)) return false;
+    // Позначки, зроблені з фіксацій ночі (`sight`), — не збиття, і кнопка
+    // збиття їх не зносить: інакше оператор бере десять фіксацій у роботу,
+    // кладе збиття — і фіксації зникають мовчки.
+    if(fromNight(o)&&!o.sight) return false;
+    if(o.sight) return true;
     return !list.some(s2=>near(o,s2));
   });
   const replaced=had-S.objs.length;
@@ -6276,7 +6313,12 @@ function putStrikes(){
   // отримувала знак наслідку. Тепер у кожної свій.
   const CAT={'ППО':'ppo','збиття':'downed','влучання':'impact',
              'вибух':'boom','пуск':'launch','фіксація':'fix'};
+  let dup=0;
   for(const s2 of list){
+    // Там, де оператор уже взяв фіксацію в роботу, знак збиття не кладемо:
+    // узята позначка несе ті самі повідомлення (і збиття серед них), а два
+    // знаки в одному місці читались би як дві події.
+    if(S.objs.some(o=>o.sight&&near(o,s2))){dup++;continue;}
     S.objs.push({kind:'impact',cat:CAT[s2.kind]||'impact',type:'unknown',
       origin:tag,la:s2.la,lo:s2.lo,src:uniqSrc(s2.src),
       // Скільки подій згорнуто в цю позначку. Раніше кратність жила лише
@@ -6313,7 +6355,8 @@ function putStrikes(){
   }
   refresh();
   console.log(replaced?`шар ночі оновлено: ${replaced} -> ${list.length}`
-                     :`покладено ${list.length} позначок`);
+                     :`покладено ${list.length} позначок`
+              +(dup?` (пропущено ${dup}: там уже взяті фіксації)`:''));
 }
 // Ночей у сховищі більше сотні, а редактор бачив рівно одну — ту, що лежала
 // в night.js. Тепер збірка сайту кладе кожну ніч окремим файлом у nights/,
@@ -6345,7 +6388,7 @@ function loadNight(cb){
     const list=await r.json();
     if(!list.length) throw 0;
     sel.innerHTML=list.map(n=>
-      `<option value="${n.date}">${n.date} — підказок ${n.routes}, позначок ${n.strikes}${n.bearings?`, напрямків ${n.bearings}`:''}</option>`
+      `<option value="${n.date}">${n.date} — підказок ${n.routes}, позначок ${n.strikes}${n.bearings?`, напрямків ${n.bearings}`:''}${n.sightings?`, фіксацій ${n.sightings}`:''}</option>`
     ).join('');
     sel.onchange=()=>{
       // ІНША ДОБА — ЧИСТИЙ АРКУШ. Лишається рівно підкладка: Україна й ТОТ.
@@ -6364,7 +6407,7 @@ function loadNight(cb){
       const drop=S.objs.length-keep.length;
       jlog('night',{date:sel.value,drop,keep:keep.length});
       if(drop||S.ghosts.length) snapshot();
-      S.objs=keep; S.ghosts=[]; S.sel=null; S.selMore=[]; endPass();
+      S.objs=keep; S.ghosts=[]; S.sight=[]; S.sightHover=null; S.sel=null; S.selMore=[]; endPass();
       loadNight(ok=>{
         if(!ok){toast('ніч не завантажилась');refresh();return;}
         toast('ніч '+sel.value+(drop?` · прибрано з попередньої: ${drop}`:'')
@@ -6416,6 +6459,152 @@ document.getElementById('bearings').onclick=()=>{
     'Підказок нема. Зроби їх так:\npython3 raid.py <дата>\n'+
     'python3 mapper/mknight.py raid_<дата>.json'));return;}
   putBearings();
+};
+// ==========================================================================
+// ФІКСАЦІЇ НОЧІ — ШАР СВІДЧЕНЬ
+//
+// Досі оператор бачив у редакторі лише те, що алгоритм зшив у маршрути:
+// заміряно, 60–75% місць ночі не торкався жоден маршрут-підказка, тобто
+// на карту йшла наша інтерпретація замість даних. Тут — кожне місце, де
+// тієї ночі щось бачили. Одна крапка на місце, розмір — від кількості
+// повідомлень У ПОТОЧНОМУ ВІКНІ ГОДИН: пересунув вікно — крапки «дихають»,
+// і видно, як ніч розгорталась. Дві третини місць мають одне повідомлення,
+// тому одиночні дуже тьмяні.
+//
+// Порожнє кільце замість крапки — місце, яке насправді є центром району
+// («Рыльский район», третина всіх точок) або здогадом за населенням:
+// крапка там брехала б так само, як на центрі області.
+//
+// Підказка, не обʼєкт: в експорт не йде, у список обʼєктів не потрапляє.
+// Клік робить із неї звичайну позначку «фіксація» з підписом, кількістю
+// й джерелами. Ліній, хмар і «зон» із цих крапок не будується — це була б
+// вигадана геометрія.
+function sightTimes(s){ return (s.ts||[]).map(hhmmMin).filter(t=>t!==null); }
+// Скільки повідомлень цього місця лежить у вікні годин (усі, якщо вікна нема).
+function sightCount(s){
+  const F=S.tfilter;
+  if(!F||!F.on) return s.n||1;
+  const a=hhmmMin(F.from), b=hhmmMin(F.to);
+  if(a===null||b===null) return s.n||1;
+  const ts=sightTimes(s);
+  if(!ts.length) return s.n||1;
+  return ts.filter(t=>inWindow(t,a,b)).length;
+}
+function sightVisible(s){
+  if(S.layers.sights===false) return false;
+  return sightCount(s)>0;
+}
+function sightR(cnt){ return Math.min(8, 2.4+1.5*Math.log2(cnt+1)); }
+// Позначка з ночі стоїть на тому самому місці — крапка під нею гасне, щоб
+// знак і крапка не стояли одне на одному.
+function sightCovered(s){
+  for(const o of S.objs){
+    if(o.kind!=='impact'||o.la===undefined||!fromNight(o)) continue;
+    const dla=(o.la-s.la)*111, dlo=(o.lo-s.lo)*111*Math.cos(s.la*Math.PI/180);
+    if(Math.hypot(dla,dlo)<3) return true;
+  }
+  return false;
+}
+function drawSights(c){
+  if(!S.sight.length||S.layers.sights===false) return;
+  c.save();
+  const col='#7fd3ff';
+  for(const s of S.sight){
+    if(!sightVisible(s)||sightCovered(s)) continue;
+    const cnt=sightCount(s), r=sightR(cnt), p=P(s.la,s.lo);
+    const a=cnt>1?.75:.4;
+    if(s.area){
+      // центр району чи здогад — кільце, не крапка
+      c.beginPath();c.arc(p[0],p[1],r,0,7);
+      c.strokeStyle=hexa('#04070c',.7);c.lineWidth=3;c.stroke();
+      c.strokeStyle=hexa(col,a);c.lineWidth=1.4;c.stroke();
+    }else{
+      c.beginPath();c.arc(p[0],p[1],r+1.2,0,7);c.fillStyle=hexa('#04070c',.6);c.fill();
+      c.beginPath();c.arc(p[0],p[1],r,0,7);c.fillStyle=hexa(col,a);c.fill();
+    }
+  }
+  // Наведення: кільце і картка з місцем, кількістю, часом і складом.
+  const h=S.sightHover;
+  if(h&&S.sight.includes(h)&&sightVisible(h)&&!sightCovered(h)){
+    const p=P(h.la,h.lo), cnt=sightCount(h);
+    c.beginPath();c.arc(p[0],p[1],sightR(cnt)+4,0,7);
+    c.strokeStyle='#fff';c.lineWidth=1.2;c.setLineDash([3,3]);c.stroke();c.setLineDash([]);
+    const kinds=Object.entries(h.kinds||{}).sort((x,y)=>y[1]-x[1])
+      .map(([k,n])=>n>1?`${k} ${n}`:k).join(', ');
+    const lines=[(h.place||'без назви')+(h.area?' · '+h.area:''),
+                 `${cnt} повідомл.`+(h.t0?` · ${h.t0}${h.t1&&h.t1!==h.t0?'–'+h.t1:''}`:''),
+                 kinds];
+    c.font='500 12px "MapSans",ui-sans-serif,-apple-system,Arial';
+    const w=Math.max(...lines.map(l=>c.measureText(l).width))+16, lh=16, hh=lines.length*lh+8;
+    let x=p[0]+12, y=p[1]-hh/2;
+    if(x+w>Wp) x=p[0]-12-w;
+    if(y<4) y=4; if(y+hh>Hp) y=Hp-hh-4;
+    c.fillStyle='rgba(6,9,16,.92)';c.fillRect(x,y,w,hh);
+    c.strokeStyle='rgba(127,211,255,.5)';c.lineWidth=1;c.strokeRect(x+.5,y+.5,w-1,hh-1);
+    c.textBaseline='top';
+    lines.forEach((l,i)=>{c.fillStyle=i?'#c7d3df':'#eaf3fb';c.fillText(l,x+8,y+5+i*lh);});
+  }
+  c.restore();
+}
+// Найближча фіксація під курсором.
+function sightAt(sx,sy){
+  if(!S.sight.length||S.layers.sights===false) return null;
+  let best=null,bd=1e9;
+  for(const s of S.sight){
+    if(!sightVisible(s)||sightCovered(s)) continue;
+    const p=P(s.la,s.lo), d=Math.hypot(p[0]-sx,p[1]-sy);
+    if(d<Math.max(9,sightR(sightCount(s))+4)&&d<bd){best=s;bd=d;}
+  }
+  return best;
+}
+// Фіксація -> позначка. Та сама форма, що в putStrikes, категорія — з
+// найчастішого виду повідомлень; `sight` каже кнопці збиття не чіпати її.
+function sightToMark(s){
+  const CAT={'ППО':'ppo','збиття':'downed','влучання':'impact',
+             'вибух':'boom','пуск':'launch','фіксація':'fix'};
+  const top=Object.entries(s.kinds||{}).sort((x,y)=>y[1]-x[1])[0];
+  const kind=top?top[0]:'фіксація';
+  return {kind:'impact',cat:CAT[kind]||'fix',type:'unknown',sight:true,
+          origin:'night:'+((window.NIGHT&&window.NIGHT.date)||''),
+          la:s.la,lo:s.lo,src:uniqSrc(s.src),n:Math.max(1,s.n||1),
+          t:s.t0||'',size:7+Math.min(6,(s.n||1)*1.5),
+          label:(s.place||CAT_NAME[CAT[kind]||'fix'])+(s.n>1?' ×'+s.n:'')};
+}
+function putSights(){
+  const N=window.NIGHT||{}, list=N.sightings||[];
+  if(!list.length){alert('У цій ночі фіксацій у точці нема.');return;}
+  snapshot();
+  S.sight=list.map(s=>Object.assign({},s));
+  S.sightHover=null;
+  const areas=S.sight.filter(s=>s.area).length;
+  document.getElementById('sights').textContent='Сховати фіксації ночі';
+  toast(`фіксацій: ${S.sight.length} місць`+(areas?` (з них районів ${areas})`:''));
+  jlog('sights',{n:S.sight.length,areas});
+  refresh();
+}
+document.getElementById('sights').onclick=()=>{
+  if(S.sight.length){
+    snapshot(); S.sight=[]; S.sightHover=null;
+    document.getElementById('sights').textContent='Показати фіксації ночі';
+    refresh(); return;
+  }
+  if(!window.NIGHT){loadNight(ok=>ok?putSights():alert(
+    'Підказок нема. Зроби їх так:\npython3 raid.py <дата>\n'+
+    'python3 mapper/mknight.py raid_<дата>.json'));return;}
+  putSights();
+};
+document.getElementById('sightAll').onclick=()=>{
+  if(!S.sight.length){toast('фіксацій нема — спершу «Показати фіксації ночі»');return;}
+  const min=Math.max(1,+document.getElementById('sightMin').value||1);
+  const take=S.sight.filter(s=>sightVisible(s)&&!sightCovered(s)&&(s.n||1)>=min);
+  if(!take.length){toast(`фіксацій від ${min} повідомлень у вікні нема`);return;}
+  snapshot();
+  for(const s of take) S.objs.push(sightToMark(s));
+  S.sight=S.sight.filter(s=>!take.includes(s));
+  S.sel=null; S.selMore=[];
+  toast(`узято в роботу: ${take.length} з ${take.length+S.sight.length}`);
+  jlog('sightAll',{n:take.length,min});
+  refresh();
 };
 // ==========================================================================
 // ЗВЕДЕННЯ МАРШРУТІВ У КОРИДОРИ
@@ -6801,7 +6990,7 @@ function wireClear(){
     if(!confirm(`Стерти все намальоване? Обʼєктів: ${S.objs.length}.\n`+
                 'Скасувати можна через Ctrl+Z.')) return;
     snapshot();
-    S.objs=[];S.sel=null;S.selMore=[];S.ghosts=[];S.draft=null;
+    S.objs=[];S.sel=null;S.selMore=[];S.ghosts=[];S.sight=[];S.sightHover=null;S.draft=null;
     refresh();toast('карта порожня');
   };
 }

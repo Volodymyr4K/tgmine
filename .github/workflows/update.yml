@@ -305,6 +305,7 @@ jobs:
       # v13 — крапка не ставиться на джерело («от <області>»). v14 — курс
       # словами («на восток») у подіях і стрілки з нього в ночах редактора. v15 —
       # курс лише з початку тексту й без «на юг от X»: змінені ночі.
+      # v16 — фіксації ночі в ночах редактора (усі місця, де щось бачили).
       #
       # RESTORE І SAVE РОЗНЕСЕНІ НАВМИСНО — це не стилістика. `actions/cache`
       # одним кроком зберігає кеш у post-дії, а вона НЕ зберігає нічого, якщо
@@ -327,8 +328,8 @@ jobs:
           path: |
             site/raids
             site/mapper/nights
-          key: raids-v15-${{ steps.cachekey.outputs.day }}
-          restore-keys: raids-v15-
+          key: raids-v16-${{ steps.cachekey.outputs.day }}
+          restore-keys: raids-v16-
 
       # Без --days: денні сторінки за всі 93 доби коштують 6 секунд, тобто
       # обрізання архіву економило час не там, де він витрачався. --raid-days 2
@@ -347,7 +348,7 @@ jobs:
           path: |
             site/raids
             site/mapper/nights
-          key: raids-v15-${{ steps.cachekey.outputs.day }}
+          key: raids-v16-${{ steps.cachekey.outputs.day }}
 
       - name: Кеш ранжування цілей (зберегти)
         if: always() && hashFiles('.rank/**') != ''

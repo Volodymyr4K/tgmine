@@ -610,7 +610,9 @@ def night_index(nights: Path):
                     "routes": len(d.get("routes") or []),
                     "strikes": len(d.get("strikes") or []),
                     "bearings": len(d.get("bearings") or []),
-                    "sightings": len(d.get("sightings") or [])})
+                    "sightings": len(d.get("sightings") or []),
+                    "alerts": sum(1 for o in (d.get("alerts") or {}).get("onsets", [])
+                                  if o.get("reg") not in ((d.get("alerts") or {}).get("muted") or []))})
     out.sort(key=lambda r: r["date"], reverse=True)
     (nights / "index.json").write_text(
         json.dumps(out, ensure_ascii=False, separators=(",", ":")),

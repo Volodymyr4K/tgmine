@@ -290,6 +290,8 @@ button.primary{background:rgba(255,62,165,.16);border-color:rgba(255,62,165,.45)
           <button id="sightAll" style="flex:1" title="Робить позначки з усіх показаних фіксацій, у яких повідомлень не менше за число праворуч">Узяти фіксації в роботу</button>
           <input id="sightMin" type="number" min="1" max="99" value="3" style="width:52px" title="від скількох повідомлень брати: дві третини місць ночі мають одне-єдине">
         </div>
+        <button id="alerts" style="margin-top:6px" title="Хронологія стартів тривог у тилу: коли яка область почала тривожити. Фронт і ТОТ з добовою тривогою не показуються. Штрихом — області, де тривога була, а фіксацій нема. Клік по рядку — підлетіти, клік по чіпу на карті — підпис із часом">Показати тривоги ночі</button>
+        <div id="alertList" style="margin-top:4px"></div>
 
         <label style="margin-top:10px">Години нальоту <span id="tfCnt" class="cnt" style="margin-left:4px"></span></label>
         <div id="thist" class="thist"></div>
@@ -1147,7 +1149,7 @@ const S={
   layers:{sat:true,night:true,water:true,borders:true,cities:true,
           regions:true,places:true,targets:false,
           schema:false,
-          impacts:true,ppo:true,downed:true,ghosts:true,sights:true,marklabels:false,
+          impacts:true,ppo:true,downed:true,ghosts:true,sights:true,alerts:true,marklabels:false,
           ruregions:true,
           legend:true,header:true,scale:true},
   // Мова назв на карті: 'uk' або 'en'. Це не переклад інтерфейсу — це
@@ -1158,6 +1160,9 @@ const S={
   // Фіксації ночі — шар свідчень: кожне місце, де тієї ночі щось бачили.
   // Підказка, не обʼєкт: в експорт не йде, клік робить із неї позначку.
   sight:[], sightHover:null,
+  // Старти тривог у тилу — хронологія «куди пішли далі». Дані з ночі,
+  // показ вмикається кнопкою; в експорт не йде, клік по чіпу робить підпис.
+  alerts:null, alertsOn:false,
   hover:null,                   // обʼєкт під курсором у списку — підсвічуємо на карті
   clean:false,                  // чиста карта: інтерфейс схований
   // k:0 означає «кадр ще не вписано». Це не косметика: якщо fit() на старті
@@ -3935,6 +3940,8 @@ function draw(){
   ctx.clearRect(0,0,Wp,Hp);
   ctx.fillStyle=S.style.base.bg||'#04070c';ctx.fillRect(0,0,Wp,Hp);
   drawBase(ctx);
+  // Штрих німих областей — просто на підкладці, під усім іншим.
+  drawAlertHatch(ctx);
   // Фіксації ночі — під підказками й обʼєктами: це тло зі свідчень, поверх
   // якого оператор малює.
   drawSights(ctx);
@@ -4080,6 +4087,9 @@ function draw(){
     drawCredit(ctx,f.w,f.h);       // ліцензія CC BY: вимкнути не можна
     ctx.restore();
   }
+  // Чіпи стартів тривог — поверх підписів областей, але це підказка: у
+  // чистому вигляді й в експорті їх нема.
+  if(!S.clean) drawAlertChips(ctx);
   // Рамка експорту — теж інтерфейс: у чистому вигляді її не показуємо,
   // інакше «тільки карта» лишається з рожевим прямокутником поперек.
   if(!S.clean) drawFrame(ctx,Wp,Hp);
@@ -4605,6 +4615,16 @@ cv.addEventListener('pointerdown',e=>{
       S.objs.push(o);S.sel=o;S.selMore=[];jadd(o,'з підказки');
       S.ghosts=S.ghosts.filter(x=>x!==g);
       toast('підказку взято в роботу — далі веди сам');
+      refresh();return;
+    }
+    // Клік по чіпу старту тривоги — підпис із часом. Чіпи лежать поверх
+    // усього, тож питаємо їх перед крапками.
+    const ch=alertChipAt(sx,sy);
+    if(ch){
+      snapshot();
+      const o=alertToText(ch);
+      S.objs.push(o);S.sel=o;S.selMore=[];jadd(o,'з тривоги');
+      toast('підпис із часом тривоги покладено');
       refresh();return;
     }
     // Клік по фіксації ночі робить із неї позначку — після підказок, бо
@@ -5205,6 +5225,9 @@ function refresh(){
   // стерти» й undo міняють S.sight повз кнопку, і напис інакше бреше.
   const sb=document.getElementById('sights');
   if(sb) sb.textContent=S.sight.length?'Сховати фіксації ночі':'Показати фіксації ночі';
+  const ab=document.getElementById('alerts');
+  if(ab) ab.textContent=S.alertsOn?'Сховати тривоги ночі':'Показати тривоги ночі';
+  renderAlerts();
   // Вибрали інше — віконце палітри більше не про цей обʼєкт.
   if(POP.o&&POP.o!==S.sel) hidePop();
   // властивості
@@ -5240,7 +5263,7 @@ function refresh(){
     p.innerHTML='<div class="hint"><b style="color:#dbe8f6">З чого почати</b><br>'
       +'1. «Дані ночі» — вибери дату й натисни «Показати маршрути ночі».<br>'
       +'2. Клік по підказці перетворює її на свій маршрут; далі ведеш сам.<br>'
-      +'3. «Показати фіксації ночі» — кожне місце, де тієї ночі щось бачили; клік по крапці робить позначку. «Покласти збиття / ППО» кладе позначки, «Покласти напрямки з тексту» — стрілки з курсів, які канали назвали словами.<br>'
+      +'3. «Показати фіксації ночі» — кожне місце, де тієї ночі щось бачили; клік по крапці робить позначку. «Показати тривоги ночі» — коли яка область у тилу почала тривожити, тобто куди пішли далі. «Покласти збиття / ППО» кладе позначки, «Покласти напрямки з тексту» — стрілки з курсів, які канали назвали словами.<br>'
       +'4. «Кадр і експорт» — рамка, PNG або SVG.<br><br>'
       +'Клавіші й підказки — кнопка <kbd>?</kbd> угорі праворуч.</div>';
   }else if(!o){
@@ -5871,7 +5894,7 @@ document.getElementById('tSearch').oninput=e=>renderTargets(e.target.value);
     ['regions','назви областей'],['places','розсип НП'],
     ['targets','наші цілі'],
     ['impacts','влучання'],['ppo','робота ППО'],['downed','збиття'],
-    ['ghosts','підказки'],['sights','фіксації ночі'],['marklabels','підписи позначок'],
+    ['ghosts','підказки'],['sights','фіксації ночі'],['alerts','тривоги ночі'],['marklabels','підписи позначок'],
     ['legend','легенда'],['header','шапка'],
     ['scale','масштаб'],
   ];
@@ -6392,7 +6415,7 @@ function loadNight(cb){
     const list=await r.json();
     if(!list.length) throw 0;
     sel.innerHTML=list.map(n=>
-      `<option value="${n.date}">${n.date} — підказок ${n.routes}, позначок ${n.strikes}${n.bearings?`, напрямків ${n.bearings}`:''}${n.sightings?`, фіксацій ${n.sightings}`:''}</option>`
+      `<option value="${n.date}">${n.date} — підказок ${n.routes}, позначок ${n.strikes}${n.bearings?`, напрямків ${n.bearings}`:''}${n.sightings?`, фіксацій ${n.sightings}`:''}${n.alerts?`, тривог ${n.alerts}`:''}</option>`
     ).join('');
     sel.onchange=()=>{
       // ІНША ДОБА — ЧИСТИЙ АРКУШ. Лишається рівно підкладка: Україна й ТОТ.
@@ -6411,7 +6434,7 @@ function loadNight(cb){
       const drop=S.objs.length-keep.length;
       jlog('night',{date:sel.value,drop,keep:keep.length});
       if(drop||S.ghosts.length) snapshot();
-      S.objs=keep; S.ghosts=[]; S.sight=[]; S.sightHover=null; S.sel=null; S.selMore=[]; endPass();
+      S.objs=keep; S.ghosts=[]; S.sight=[]; S.sightHover=null; S.alerts=null; S.alertsOn=false; S.sel=null; S.selMore=[]; endPass();
       loadNight(ok=>{
         if(!ok){toast('ніч не завантажилась');refresh();return;}
         toast('ніч '+sel.value+(drop?` · прибрано з попередньої: ${drop}`:'')
@@ -6594,6 +6617,130 @@ document.getElementById('sights').onclick=()=>{
     'Підказок нема. Зроби їх так:\npython3 raid.py <дата>\n'+
     'python3 mapper/mknight.py raid_<дата>.json'));return;}
   putSights();
+};
+// ==========================================================================
+// СТАРТИ ТРИВОГ У ТИЛУ — «КУДИ ПІШЛИ ДАЛІ»
+//
+// Крапки й підказки кажуть, звідки зайшли. У глибокому тилу фіксацій майже
+// нема, а стрілку треба довести: заміряно на ночі 8 вересня 2026, у тилу 47
+// стартів тривоги, у 20 областях — жодної фіксації, а послідовність стартів
+// (Мордовія 00:04 → Волгоградська 00:14 → … → Башкортостан 04:37 → Перм
+// 06:39 → ХМАО 09:32) і є маршрут нальоту. Це не заливка: показуються лише
+// СТАРТИ (перша тривога після ≥3 год тиші), лише в тилу (фронт і ТОТ із
+// добовою тривогою — `muted`, рахується з даних щоночі), і лише у вікні
+// годин, якщо воно є. Німа область (тривога є, фіксацій нема) — штрихом.
+// Ліній між областями не малюється: це була б вигадана геометрія.
+function alertOnsets(){
+  const A=S.alerts;
+  if(!S.alertsOn||!A||S.layers.alerts===false) return [];
+  const F=S.tfilter, a=F&&F.on?hhmmMin(F.from):null, b=F&&F.on?hhmmMin(F.to):null;
+  return (A.onsets||[]).filter(o=>!A.muted.includes(o.reg)
+    &&(a===null||b===null||inWindow(hhmmMin(o.t),a,b)));
+}
+// Рядки хронології: один рядок на хвилину — тривога на кілька областей іде
+// одним постом, і розбивати її на пʼять рядків означає пʼятикратний список.
+function alertRows(){
+  const rows=[];
+  for(const o of alertOnsets()){
+    const last=rows[rows.length-1];
+    if(last&&last.t===o.t) last.items.push(o); else rows.push({t:o.t,items:[o]});
+  }
+  return rows;
+}
+function regionRings(reg){ return (window.BASE&&BASE.regions&&BASE.regions[reg])||null; }
+function drawAlertHatch(c){
+  const on=alertOnsets(); if(!on.length) return;
+  const silent=new Set(on.filter(o=>o.silent).map(o=>o.reg));
+  if(!silent.size) return;
+  c.save();
+  for(const reg of silent){
+    const rings=regionRings(reg); if(!rings) continue;
+    c.save();
+    c.beginPath(); for(const r of rings) ringPath(r,c); c.clip();
+    // той самий штрих і той самий крок, що в зон: спільна сітка, без швів
+    c.strokeStyle=hexa('#ffb01f',.22);c.lineWidth=1;
+    const step=12;
+    for(let d=-Hp;d<Wp+Hp;d+=step){ c.beginPath();c.moveTo(d,0);c.lineTo(d+Hp,Hp);c.stroke(); }
+    c.restore();
+  }
+  c.restore();
+}
+// Чіп із часом біля назви області: якір — той самий полюс недосяжності, що
+// в підпису, на 16 px нижче. Один чіп на область: найраніший старт у вікні,
+// і «+N», якщо стартів кілька.
+let ALERT_CHIPS=[];
+function drawAlertChips(c){
+  ALERT_CHIPS=[];
+  const on=alertOnsets(); if(!on.length||!S.alerts.anchors) return;
+  const by=new Map();
+  for(const o of on){ if(!by.has(o.reg)) by.set(o.reg,[]); by.get(o.reg).push(o); }
+  c.save();
+  c.font='600 11px "MapSans",ui-sans-serif,-apple-system,Arial';
+  c.textBaseline='middle';
+  for(const [reg,list] of by){
+    const an=S.alerts.anchors[reg]; if(!an) continue;
+    const p=P(an[0],an[1]); if(p[0]<-40||p[0]>Wp+40||p[1]<-40||p[1]>Hp+40) continue;
+    const first=list[0], txt=first.t+(list.length>1?' +'+(list.length-1):'');
+    const w=c.measureText(txt).width+14, h=18, x=p[0]-w/2, y=p[1]+16;
+    c.fillStyle='rgba(6,9,16,.9)';
+    c.beginPath();c.roundRect?c.roundRect(x,y,w,h,4):c.rect(x,y,w,h);c.fill();
+    c.strokeStyle=hexa(first.silent?'#ffb01f':'#7fd3ff',.75);c.lineWidth=1;
+    c.beginPath();c.roundRect?c.roundRect(x+.5,y+.5,w-1,h-1,4):c.rect(x+.5,y+.5,w-1,h-1);c.stroke();
+    c.fillStyle=first.silent?'#ffd37a':'#c7ecff';
+    c.fillText(txt,x+7,y+h/2);
+    ALERT_CHIPS.push({x,y,w,h,reg,o:first,list});
+  }
+  c.restore();
+}
+function alertChipAt(sx,sy){
+  return ALERT_CHIPS.find(ch=>sx>=ch.x&&sx<=ch.x+ch.w&&sy>=ch.y&&sy<=ch.y+ch.h)||null;
+}
+// Клік по чіпу — текстовий підпис із часом: він уже обʼєкт, іде в експорт.
+function alertToText(ch){
+  const an=S.alerts.anchors[ch.reg];
+  const g=baseLL(...unscr(ch.x+ch.w/2,ch.y+ch.h+10));
+  return {kind:'text',type:S.type,la:g[0],lo:g[1],size:12,
+          text:`тривога з ${ch.o.t}`+(ch.o.silent?' · без фіксацій':''),
+          origin:'night:'+((window.NIGHT&&window.NIGHT.date)||''),
+          src:uniqSrc([].concat(...ch.list.map(o=>o.src||[])))};
+}
+function renderAlerts(){
+  const box=document.getElementById('alertList'); if(!box) return;
+  if(!S.alertsOn||!S.alerts){ box.innerHTML=''; return; }
+  const rows=alertRows(), A=S.alerts;
+  const cell=o=>`${esc(o.name)}${o.silent?' <span style="color:#ffd37a">німа</span>':` <span style="color:#7fa5c0">${o.fix}</span>`}${o.otboy?' ↺':''}`;
+  box.innerHTML=(rows.length?rows.map((r,i)=>
+      `<div class="type" data-al="${i}" style="justify-content:flex-start;gap:8px">`
+      +`<b style="color:#c7ecff;font-variant-numeric:tabular-nums">${esc(r.t)}</b>`
+      +`<span style="font-size:11px;line-height:1.35">${r.items.map(cell).join(', ')}</span></div>`).join('')
+    :'<div class="hint">У цьому вікні годин стартів тривоги в тилу нема.</div>')
+    +(A.muted&&A.muted.length?`<div class="hint" style="margin-top:4px">Тривога всю ніч (не показується): ${esc(A.muted.map(r=>REGION_UA_SHORT(r)).join(', '))}</div>`:'')
+    +'<div class="hint">Число — фіксацій у області за ніч, «німа» — жодної; ↺ — після відбою. Клік по рядку підлітає до області.</div>';
+  box.querySelectorAll('[data-al]').forEach(el=>el.onclick=()=>{
+    const r=rows[+el.dataset.al]; const rings=regionRings(r.items[0].reg);
+    if(!rings){toast('полігону області нема в підкладці');return;}
+    zoomTo(rings.map(pts=>({pts})));
+  });
+}
+function REGION_UA_SHORT(reg){
+  const o=(S.alerts&&S.alerts.onsets||[]).find(x=>x.reg===reg);
+  return o?o.name:reg;
+}
+document.getElementById('alerts').onclick=()=>{
+  if(S.alertsOn){ S.alertsOn=false; refresh(); return; }
+  const show=()=>{
+    const A=window.NIGHT&&window.NIGHT.alerts;
+    if(!A||!(A.onsets||[]).length){alert('У цій ночі стартів тривоги нема.');return;}
+    S.alerts=A; S.alertsOn=true;
+    const rear=A.onsets.filter(o=>!A.muted.includes(o.reg));
+    toast(`стартів тривоги в тилу: ${rear.length}, німих областей ${new Set(rear.filter(o=>o.silent).map(o=>o.reg)).size}`);
+    jlog('alerts',{n:rear.length});
+    refresh();
+  };
+  if(!window.NIGHT){loadNight(ok=>ok?show():alert(
+    'Підказок нема. Зроби їх так:\npython3 raid.py <дата>\n'+
+    'python3 mapper/mknight.py raid_<дата>.json'));return;}
+  show();
 };
 document.getElementById('sightAll').onclick=()=>{
   if(!S.sight.length){toast('фіксацій нема — спершу «Показати фіксації ночі»');return;}
@@ -6992,7 +7139,7 @@ function wireClear(){
     if(!confirm(`Стерти все намальоване? Обʼєктів: ${S.objs.length}.\n`+
                 'Скасувати можна через Ctrl+Z.')) return;
     snapshot();
-    S.objs=[];S.sel=null;S.selMore=[];S.ghosts=[];S.sight=[];S.sightHover=null;S.draft=null;
+    S.objs=[];S.sel=null;S.selMore=[];S.ghosts=[];S.sight=[];S.sightHover=null;S.alertsOn=false;S.draft=null;
     refresh();toast('карта порожня');
   };
 }

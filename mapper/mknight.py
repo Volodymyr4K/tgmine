@@ -162,6 +162,103 @@ def sightings(raid):
     return out
 
 
+#: Тривога, що покриває стільки годин ночі, неінформативна: це фронт і ТОТ,
+#: де вона висить з полудня до ранку. Заміряно на 8 ночах: ≥12 год у ≥5 з 8
+#: ночей мають рівно 11 областей (фронт, чотири ТОТ, Орловська); тил — 0–8.
+ALERT_MUTED_HOURS = 12.0
+#: Старт тривоги — перша тривога після такої тиші. Відбій перед ним є лише
+#: у чверті випадків (56 із 223 проміжків ≥3 год), тож відбій — позначка
+#: «після відбою», а не умова. Нагадування «действует тревога» йдуть
+#: щогодини й при меншому порозі давали б хибні старти.
+ALERT_GAP_HOURS = 3.0
+#: Тривога без відбою вважається чинною стільки хвилин — для покриття.
+ALERT_HOLD_MIN = 90
+
+
+def alerts(raid):
+    """Хронологія стартів тривог у тилу — «куди пішли далі» для оператора.
+
+    Навіщо. Крапки й підказки відповідають, звідки зайшли; у глибокому тилу
+    фіксацій майже нема, а стрілку треба довести. Заміряно на ночі 8 вересня
+    2026: у тилу 47 стартів тривоги, у 20 областях з них — жодної фіксації;
+    послідовність стартів (Мордовія 00:04 → Волгоградська 00:14 → …
+    → Башкортостан 04:37 → Перм 06:39 → ХМАО 09:32) і є маршрут нальоту.
+
+    Що рахується. Область — КОЖНА, названа в тексті тривоги, а не лише перша
+    (13% тривог називають 2–6 областей). Старт — перша тривога після
+    ALERT_GAP_HOURS тиші; «після відбою» — якщо між нею й попередньою був
+    відбій. Область із покриттям ≥ ALERT_MUTED_HOURS за ніч іде в `muted`:
+    редактор її не показує, бо там тривога не несе нічого. `silent` — за ніч
+    у області не було жодної фіксації в точці: саме там оператор інакше має
+    порожнє місце. Якір — той самий полюс недосяжності, що в підписів
+    областей, тож чіп стане поруч із назвою.
+    """
+    from datetime import datetime, timedelta
+    sys.path.insert(0, os.path.dirname(HERE))
+    from tgmine import extract as E
+    import mkreglabels as RL
+    root = os.path.dirname(HERE)
+    cfg = E.Config.load(os.path.join(root, "configs", "ru-monitor.yaml"))
+    regions = json.load(open(os.path.join(root, "regions.json"), encoding="utf-8"))
+
+    def night_key(hhmm):
+        h = int(hhmm[:2])
+        return (h + 24 if h < 12 else h, hhmm)
+
+    msgs = collections.defaultdict(list)          # регіон -> [(t, kind, url)]
+    for e in raid["events"]:
+        if e.get("scope") != "область" or e.get("kind") not in ("тривога", "відбій"):
+            continue
+        t = datetime.fromisoformat(e["t"])
+        regs = list(dict.fromkeys(x["value"] for x in E.entities_of(e.get("text", ""), cfg)
+                                  if x["type"] == "регіон"))
+        for r in regs:
+            msgs[r].append((t, e["kind"], e.get("url", ""), e.get("hhmm", "")))
+    fixes = collections.Counter(
+        e.get("region") for e in raid["events"]
+        if e.get("scope") == "точка" and e.get("lat") and e.get("region")
+        and e.get("geo_conf") not in ("centroid", "region-snap"))
+    onsets, cover, muted, anchors = [], {}, [], {}
+    hold, gap = timedelta(minutes=ALERT_HOLD_MIN), timedelta(hours=ALERT_GAP_HOURS)
+    for reg, lst in msgs.items():
+        lst.sort()
+        # покриття: обʼєднання вікон [тривога, відбій або +hold]
+        cov, start, last = timedelta(0), None, None
+        for t, k, _, _ in lst:
+            if k == "тривога":
+                if start is None:
+                    start = t
+                last = t
+            elif start is not None:
+                cov += max(timedelta(0), min(t, last + hold) - start)
+                start = None
+        if start is not None:
+            cov += (last + hold) - start
+        hours = round(cov.total_seconds() / 3600, 1)
+        cover[reg] = hours
+        if hours >= ALERT_MUTED_HOURS:
+            muted.append(reg)
+        prev, seen_otboy = None, False
+        for t, k, url, hhmm in lst:
+            if k == "відбій":
+                seen_otboy = prev is not None
+                continue
+            if prev is None or (t - prev) >= gap:
+                onsets.append({"t": hhmm, "reg": reg,
+                               "name": (RL.NAMES.get(reg) or (reg, reg))[0],
+                               "otboy": bool(seen_otboy and prev is not None),
+                               "fix": fixes.get(reg, 0), "silent": not fixes.get(reg),
+                               "src": [{"u": url, "t": hhmm, "k": k}] if url else []})
+            prev, seen_otboy = t, False
+        rings = regions.get(reg)
+        if rings:
+            pt = RL.anchor(max(rings, key=RL.area))
+            if pt:
+                anchors[reg] = [round(pt[0], 3), round(pt[1], 3)]
+    onsets.sort(key=lambda o: (night_key(o["t"]), o["reg"]))
+    return {"onsets": onsets, "muted": sorted(muted), "cover": cover, "anchors": anchors}
+
+
 def main(src, out=None):
     out = out or os.path.join(os.path.dirname(os.path.abspath(__file__)), "night.js")
     raid = json.load(open(src, encoding="utf-8"))
@@ -169,15 +266,18 @@ def main(src, out=None):
     st = strikes(raid)
     br = bearings(raid)
     sg = sightings(raid)
+    al = alerts(raid)
     dec = sum(l == "declared" for r in rs for l in r["legs"])
     open(out, "w", encoding="utf-8").write(
         "window.NIGHT=" + json.dumps({"date": raid.get("date"), "routes": rs,
                                       "strikes": st, "bearings": br,
-                                      "sightings": sg},
+                                      "sightings": sg, "alerts": al},
                                      ensure_ascii=False, separators=(",", ":")) + ";\n")
+    rear = [o for o in al["onsets"] if o["reg"] not in al["muted"]]
     print(f"{raid.get('date')}: маршрутів {len(rs)}, ланок {meta['in_routes']}, "
           f"з них заявлено текстом {dec}, збиття/ППО у точці {len(st)}, "
-          f"курсів словами {len(br)}, місць із фіксаціями {len(sg)}")
+          f"курсів словами {len(br)}, місць із фіксаціями {len(sg)}, "
+          f"стартів тривоги в тилу {len(rear)} (німих {sum(o['silent'] for o in rear)})")
     print("->", out)
 
 

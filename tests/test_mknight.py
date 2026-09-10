@@ -62,6 +62,42 @@ class TestBearings(unittest.TestCase):
         self.assertEqual(u["place"], "Унеча")
         self.assertEqual(len(u["src"]), 3)
 
+    def test_alerts_onsets_muted_silent(self):
+        """Старти тривог: кожна область із тексту, старт після ≥3 год тиші,
+        «після відбою», німа область без фіксацій, суцільна — у muted."""
+        def al(t, text, kind="тривога", url="https://t.me/a/1"):
+            return {"scope": "область", "kind": kind, "t": f"2026-09-08T{t}:00+03:00",
+                    "hhmm": t, "text": text, "url": url, "region": None}
+        raid = {"events": [
+            # Тамбовська й Липецька одним постом; нагадування через 40 хв
+            # тримає тривогу чинною; 04:30 — через 3.5 год тиші, новий старт
+            al("00:19", "Тамбовская область, Липецкая область - опасность по БПЛА"),
+            al("01:00", "Тамбовская область - напоминаем, действует тревога"),
+            al("04:30", "Тамбовская область - опасность по БПЛА", url="https://t.me/a/2"),
+            # Пензенська: відбій між тривогами
+            al("01:38", "Пензенская область - опасность по БПЛА"),
+            al("03:00", "Пензенская область - отбой опасности", kind="відбій"),
+            al("06:00", "Пензенская область - опасность по БПЛА"),
+            # Курська: тривога з 12:00 щогодини всю ніч — суцільна
+            *[al(f"{h % 24:02d}:00", "Курская область / Опасность по БПЛА")
+              for h in range(12, 36)],
+            # фіксація в Пензенській — область не німа
+            self._ev(53.2, 45.0, None, region="Пензенська", hhmm="01:50")]}
+        out = self.mk.alerts(raid)
+        rows = [(o["t"], o["reg"], o["silent"], o["otboy"]) for o in out["onsets"]
+                if o["reg"] not in out["muted"]]
+        self.assertEqual(rows, [("00:19", "Липецька", True, False),
+                                ("00:19", "Тамбовська", True, False),
+                                ("01:38", "Пензенська", False, False),
+                                ("04:30", "Тамбовська", True, False),
+                                ("06:00", "Пензенська", False, True)])
+        self.assertEqual(out["muted"], ["Курська"])
+        self.assertGreaterEqual(out["cover"]["Курська"], 12)
+        self.assertIn("Тамбовська", out["anchors"])
+        tam = [o for o in out["onsets"] if o["reg"] == "Тамбовська"][1]
+        self.assertEqual(tam["src"][0]["u"], "https://t.me/a/2")
+        self.assertEqual(tam["name"], "Тамбовська обл.")
+
     def test_night_carries_bearings_key(self):
         """Ніч без курсів має порожній список, а не відсутній ключ: редактор
         читає `NIGHT.bearings` і рахує його в списку ночей."""

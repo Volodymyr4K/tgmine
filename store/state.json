@@ -2,20 +2,20 @@
   "version": 16,
   "channels": {
     "vrv_radar": {
-      "last_id": 89050,
-      "last_date": "2026-09-09T18:00:15+00:00"
+      "last_id": 89241,
+      "last_date": "2026-09-10T05:55:09+00:00"
     },
     "kupolrussia": {
-      "last_id": 126261,
-      "last_date": "2026-09-09T18:00:20+00:00"
+      "last_id": 126566,
+      "last_date": "2026-09-10T05:55:42+00:00"
     },
     "lpr1_treugolnik": {
-      "last_id": 274264,
-      "last_date": "2026-09-09T18:00:33+00:00"
+      "last_id": 274619,
+      "last_date": "2026-09-10T05:55:22+00:00"
     },
     "locatorru": {
-      "last_id": 84492,
-      "last_date": "2026-09-09T18:00:09+00:00"
+      "last_id": 84559,
+      "last_date": "2026-09-10T05:08:43+00:00"
     }
   },
   "updated": "2026-09-10T06:26:30.241220+00:00"

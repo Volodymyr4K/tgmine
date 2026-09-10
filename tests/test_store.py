@@ -618,6 +618,52 @@ class TestDirectionTargetIsNotThePlace(unittest.TestCase):
         self.assertEqual(ST.point_entity(p)["match"], "Томаровки")
 
 
+class TestSourceRegionIsNotThePlace(unittest.TestCase):
+    """«От <області>» — звідки летять; «в направлении г.X» — куди.
+
+    Обидва випадки спіймано 9 вересня 2026 на Уралі: «Тобольск, Тюмень …
+    от Свердловской области» ставило крапку в Єкатеринбурзі, а «от
+    Михайловки в направлении г.Мелитополь» — у Мелітополі, бо «г.» рвало
+    збіг прийменника з назвою. Значення сутностей — з газетира
+    (`lookup` при центроїді області), не з памʼяті.
+    """
+
+    def _ent(self, text, etype, match, lat, lon, pop):
+        return {"type": etype, "match": match, "pos": text.index(match),
+                "lat": lat, "lon": lon, "geo_pop": pop,
+                "geo_conf": "city-marker" if etype == "регіон" else "region"}
+
+    def test_from_region_marker_is_a_source(self):
+        t = ("Астраханская область - опасность по БПЛА от Волгоградской "
+             "области.")
+        p = {"text": t, "entities": [
+            self._ent(t, "регіон", "Астраханская", 46.34968, 48.04076, 533925),
+            self._ent(t, "регіон", "Волгоградской", 48.71378, 44.4976, 1013533)]}
+        self.assertEqual(ST.point_entity(p)["match"], "Астраханская")
+
+    def test_city_abbreviation_does_not_break_the_direction(self):
+        t = "Группа БПЛА от Михайловки в направлении г.Мелитополь"
+        p = {"text": t, "entities": [
+            self._ent(t, "нп", "Михайловки", 47.26566, 35.22092, 28150),
+            self._ent(t, "регіон", "Мелитополь", 46.84735, 35.38196, 148851)]}
+        self.assertEqual(ST.point_entity(p)["match"], "Михайловки")
+
+    def test_from_village_is_still_the_place(self):
+        """Село після «от» — місце спостереження, правило на нього не діє."""
+        t = "От Михайловки в сторону Мелитополь группа БПЛА"
+        p = {"text": t, "entities": [
+            self._ent(t, "нп", "Михайловки", 47.26566, 35.22092, 28150),
+            self._ent(t, "регіон", "Мелитополь", 46.84735, 35.38196, 148851)]}
+        self.assertEqual(ST.point_entity(p)["match"], "Михайловки")
+
+    def test_lone_source_region_is_kept(self):
+        """Як більше нічого нема — краще неточна крапка, ніж втрата події."""
+        t = "Опасность по БПЛА от Волгоградской области"
+        p = {"text": t, "entities": [
+            self._ent(t, "регіон", "Волгоградской", 48.71378, 44.4976, 1013533)]}
+        self.assertEqual(ST.point_entity(p)["match"], "Волгоградской")
+
+
 @needs_gazetteer
 class TestDirectionFixtureMatchesGazetteer(unittest.TestCase):
     """Літерали в TestDirectionTargetIsNotThePlace мають бути справжніми.

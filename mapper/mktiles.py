@@ -25,7 +25,10 @@ import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
-BOX = (41.0, 60.5, 25.0, 53.0)          # la0, la1, lo0, lo1
+# З 10 вересня 2026 — до Уралу й Західного Сибіру (Новий Уренгой 76.6°),
+# та сама рамка, що в basemap.js і labels.py. Кадр редактора за
+# замовчуванням лишається європейським (`fit()` в editor.html).
+BOX = (41.0, 70.0, 25.0, 82.0)          # la0, la1, lo0, lo1
 CACHE = os.path.join(HERE, "tiles")
 UA = "tgmine-map/1.0 (OSINT static map; contact via t.me)"
 

@@ -1356,7 +1356,7 @@ Esri World Imagery і Google якісніші, але їхні умови заб
 
 ```sh
 python3 mapper/mktiles.py 8            # тайли супутника й вогнів -> mapper/tiles/
-python3 mapper/mkbase.py 42 62 20 66   # межі, річки, дороги, НП -> basemap.js
+python3 mapper/mkbase.py 41 70 25 82   # межі, річки, дороги, НП -> basemap.json
 python3 mapper/mkcountries.py          # + кордони держав у basemap.js
 python3 mapper/mkreglabels.py          # + місце й назви областей у basemap.js
 python3 mapper/labels.py               # 977 підписів, укр+англ -> labels.js

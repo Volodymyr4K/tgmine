@@ -63,18 +63,52 @@ def strikes(raid):
     return out
 
 
+def bearings(raid):
+    """Курси словами за ніч — заготовки стрілок для оператора.
+
+    «Пролёт БПЛА на северо-восток» — це не гіпотеза зшивання, а те, що
+    канал написав. У ніч ідуть лише фіксації з координатою в місці (не
+    центр області) і з курсом у тексті: 5.6% точкових подій, приблизно
+    16 на добу. Одне місце з одним курсом за ніч згортається в одну стрілку
+    з лічильником, як і позначки збиття.
+    """
+    by = {}
+    for e in raid["events"]:
+        if e.get("bearing") is None or e.get("scope") != "точка" or not e.get("lat"):
+            continue
+        if e.get("geo_conf") in ("centroid", "region-snap"):
+            continue
+        key = (round(e["lat"], 2), round(e["lon"], 2), int(e["bearing"]))
+        b = by.setdefault(key, {"la": key[0], "lo": key[1], "deg": key[2], "n": 0,
+                                "place": e.get("place") or "", "t": e.get("hhmm", ""),
+                                "src": []})
+        b["n"] += 1
+        if e.get("url"):
+            b["src"].append({"u": e["url"], "t": e.get("hhmm", ""),
+                             "k": e.get("kind", "")})
+    out = []
+    for b in by.values():
+        name = CITY_UA.get(b["place"]) or uk(b["place"]) if b["place"] else ""
+        out.append({"la": b["la"], "lo": b["lo"], "deg": b["deg"], "n": b["n"],
+                    "place": name, "t": b["t"], "src": b["src"][:8]})
+    out.sort(key=lambda s: (s["t"], -s["n"]))
+    return out
+
+
 def main(src, out=None):
     out = out or os.path.join(os.path.dirname(os.path.abspath(__file__)), "night.js")
     raid = json.load(open(src, encoding="utf-8"))
     rs, meta = RT.build(raid)
     st = strikes(raid)
+    br = bearings(raid)
     dec = sum(l == "declared" for r in rs for l in r["legs"])
     open(out, "w", encoding="utf-8").write(
         "window.NIGHT=" + json.dumps({"date": raid.get("date"), "routes": rs,
-                                      "strikes": st},
+                                      "strikes": st, "bearings": br},
                                      ensure_ascii=False, separators=(",", ":")) + ";\n")
     print(f"{raid.get('date')}: маршрутів {len(rs)}, ланок {meta['in_routes']}, "
-          f"з них заявлено текстом {dec}, збиття/ППО у точці {len(st)}")
+          f"з них заявлено текстом {dec}, збиття/ППО у точці {len(st)}, "
+          f"курсів словами {len(br)}")
     print("->", out)
 
 

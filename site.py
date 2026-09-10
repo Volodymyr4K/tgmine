@@ -608,7 +608,8 @@ def night_index(nights: Path):
             continue
         out.append({"date": d.get("date") or f.stem,
                     "routes": len(d.get("routes") or []),
-                    "strikes": len(d.get("strikes") or [])})
+                    "strikes": len(d.get("strikes") or []),
+                    "bearings": len(d.get("bearings") or [])})
     out.sort(key=lambda r: r["date"], reverse=True)
     (nights / "index.json").write_text(
         json.dumps(out, ensure_ascii=False, separators=(",", ":")),

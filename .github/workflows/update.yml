@@ -302,6 +302,8 @@ jobs:
       # v12 — Урал, Західний Сибір і Дагестан: 9 нових областей у конфізі,
       # геокод без рамки при відомій області, сховище перезібране (844 події
       # отримали координати, 643 змінили; жодна європейська не втрачена).
+      # v13 — крапка не ставиться на джерело («от <області>»). v14 — курс
+      # словами («на восток») у подіях і стрілки з нього в ночах редактора.
       #
       # RESTORE І SAVE РОЗНЕСЕНІ НАВМИСНО — це не стилістика. `actions/cache`
       # одним кроком зберігає кеш у post-дії, а вона НЕ зберігає нічого, якщо
@@ -324,8 +326,8 @@ jobs:
           path: |
             site/raids
             site/mapper/nights
-          key: raids-v13-${{ steps.cachekey.outputs.day }}
-          restore-keys: raids-v13-
+          key: raids-v14-${{ steps.cachekey.outputs.day }}
+          restore-keys: raids-v14-
 
       # Без --days: денні сторінки за всі 93 доби коштують 6 секунд, тобто
       # обрізання архіву економило час не там, де він витрачався. --raid-days 2
@@ -344,7 +346,7 @@ jobs:
           path: |
             site/raids
             site/mapper/nights
-          key: raids-v13-${{ steps.cachekey.outputs.day }}
+          key: raids-v14-${{ steps.cachekey.outputs.day }}
 
       - name: Кеш ранжування цілей (зберегти)
         if: always() && hashFiles('.rank/**') != ''

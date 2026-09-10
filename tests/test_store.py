@@ -618,6 +618,38 @@ class TestDirectionTargetIsNotThePlace(unittest.TestCase):
         self.assertEqual(ST.point_entity(p)["match"], "Томаровки")
 
 
+class TestBearingFromWords(unittest.TestCase):
+    """Курс словами: «на восток» — курс, «с юго-запада» — звідки, тобто курс
+    протилежний, «на востоке области» — місце, не рух. Тексти дослівні."""
+
+    def test_heading_words(self):
+        for text, want in [
+            ("Ерахтур, Шиловский район - пролёты БПЛА на север, в сторону "
+             "Владимирской области", 0),
+            ("Колыбелка - пролёт от 7 БПЛА на северо-восток примерно Бобров", 45),
+            ("Приазовское и далее на Юг фиксации БПЛА", 180),
+            ("Подгоренский - пролёт БПЛА на восток примерно на Павловск", 90),
+            ("Симферопольский район в направлении Перевальное с "
+             "северо-востока", 225),
+            ("Симферополь и близлежащие / С юго-запада фиксации БПЛА", 45),
+            ("Бердянск с севера ещё фиксации БПЛА", 180),
+            ("пролёты в направлении северо-запада", 315),
+        ]:
+            with self.subTest(text=text[:40]):
+                self.assertEqual(ST.bearing_of(text), want)
+
+    def test_location_and_absence_are_none(self):
+        for text in ["на востоке области фиксации БПЛА",
+                     "Севернее Нижнегорский тревога по БПЛА",
+                     "Курская область / Опасность по БПЛА",
+                     "Западные районы Брянская область"]:
+            with self.subTest(text=text):
+                self.assertIsNone(ST.bearing_of(text))
+
+    def test_first_direction_wins(self):
+        self.assertEqual(ST.bearing_of("пролёты БПЛА на север, северо-восток"), 0)
+
+
 class TestSourceRegionIsNotThePlace(unittest.TestCase):
     """«От <області>» — звідки летять; «в направлении г.X» — куди.
 

@@ -284,6 +284,7 @@ button.primary{background:rgba(255,62,165,.16);border-color:rgba(255,62,165,.45)
                  style="width:66px" title="Наскільки близько мають бути кінці двох маршрутів, щоб вважати їх одним коридором. 120 км узято з даних: ближче лежать приблизно 5% пар, далі розподіл стрибає">
         </div>
         <button id="strikes" style="margin-top:6px" title="Позначки тієї ночі; повторний клік замінює попередній шар">Покласти збиття / ППО</button>
+        <button id="bearings" style="margin-top:6px" title="Стрілки з курсів, названих у тексті («пролёт на восток», «с юго-запада»): звичайні стрілки, які можна правити й стирати; повторний клік замінює попередній шар">Покласти напрямки з тексту</button>
 
         <label style="margin-top:10px">Години нальоту <span id="tfCnt" class="cnt" style="margin-left:4px"></span></label>
         <div id="thist" class="thist"></div>
@@ -5207,7 +5208,7 @@ function refresh(){
     p.innerHTML='<div class="hint"><b style="color:#dbe8f6">З чого почати</b><br>'
       +'1. «Дані ночі» — вибери дату й натисни «Показати маршрути ночі».<br>'
       +'2. Клік по підказці перетворює її на свій маршрут; далі ведеш сам.<br>'
-      +'3. «Покласти збиття / ППО» кладе позначки тієї ночі.<br>'
+      +'3. «Покласти збиття / ППО» кладе позначки тієї ночі, «Покласти напрямки з тексту» — стрілки з курсів, які канали назвали словами.<br>'
       +'4. «Кадр і експорт» — рамка, PNG або SVG.<br><br>'
       +'Клавіші й підказки — кнопка <kbd>?</kbd> угорі праворуч.</div>';
   }else if(!o){
@@ -6337,7 +6338,7 @@ function loadNight(cb){
     const list=await r.json();
     if(!list.length) throw 0;
     sel.innerHTML=list.map(n=>
-      `<option value="${n.date}">${n.date} — підказок ${n.routes}, позначок ${n.strikes}</option>`
+      `<option value="${n.date}">${n.date} — підказок ${n.routes}, позначок ${n.strikes}${n.bearings?`, напрямків ${n.bearings}`:''}</option>`
     ).join('');
     sel.onchange=()=>{
       // ІНША ДОБА — ЧИСТИЙ АРКУШ. Лишається рівно підкладка: Україна й ТОТ.
@@ -6371,6 +6372,43 @@ document.getElementById('strikes').onclick=()=>{
     'Підказок нема. Зроби їх так:\npython3 raid.py <дата>\n'+
     'python3 mapper/mknight.py raid_<дата>.json'));return;}
   putStrikes();
+};
+// Курси, названі словами: «пролёт БПЛА на северо-восток», «с юго-запада
+// фиксации». Це не гіпотеза зшивання, а те, що написав канал, — і досі
+// ці слова нікуди не йшли (5.6% точкових подій, ~16 на добу). Кладуться
+// ЗВИЧАЙНИМИ стрілками: оператор їх править, подовжує чи стирає, як свої.
+// Довжина 35 км — символ напрямку, не дальність: у тексті відстані нема.
+// Джерела (посилання, час) їдуть у `src`, як у позначок.
+function putBearings(){
+  const N=window.NIGHT||{}, list=N.bearings||[];
+  if(!list.length){alert('У цій ночі курсів словами нема.');return;}
+  snapshot();
+  const tag='night:'+(N.date||'');
+  const had=S.objs.length;
+  // Повторний клік замінює попередній шар, як у збиттів; ручні стрілки
+  // оператора не чіпаються — лише ті, що прийшли звідси.
+  S.objs=S.objs.filter(o=>!(o.kind==='arrow'&&o.bear&&fromNight(o)));
+  const replaced=had-S.objs.length;
+  const KM=35;
+  for(const b of list){
+    const r=b.deg*Math.PI/180;
+    const la2=b.la+KM/111*Math.cos(r);
+    const lo2=b.lo+KM/(111*Math.cos(b.la*Math.PI/180))*Math.sin(r);
+    S.objs.push({kind:'arrow',bear:true,origin:tag,
+      pts:[[b.la,b.lo],[la2,lo2]],width:2.2,head:10,bow:0,
+      col:'#e8f2fc',glow:true,src:uniqSrc(b.src),n:Math.max(1,b.n||1),
+      // час — щоб стрілка слухалась фільтра за годинами, як маршрути
+      t0:b.t||'',t1:b.t||'',place:b.place||''});
+  }
+  toast(`напрямків з тексту: ${list.length}`+(replaced?` (замінено ${replaced})`:''));
+  jlog('bearings',{n:list.length,replaced});
+  refresh();
+}
+document.getElementById('bearings').onclick=()=>{
+  if(!window.NIGHT){loadNight(ok=>ok?putBearings():alert(
+    'Підказок нема. Зроби їх так:\npython3 raid.py <дата>\n'+
+    'python3 mapper/mknight.py raid_<дата>.json'));return;}
+  putBearings();
 };
 // ==========================================================================
 // ЗВЕДЕННЯ МАРШРУТІВ У КОРИДОРИ

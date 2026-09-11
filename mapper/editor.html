@@ -3488,10 +3488,16 @@ function drawText(o,c,sel){
     c.fillText(ln,s[0],s[1]+i*lh);
   });
   c.restore();
+  const bx=o.align==='center'?s[0]-w/2:o.align==='right'?s[0]-w:s[0];
+  // Рамка тексту в екранних пікселях — для hit(): доти підпис ловився
+  // лише в 18 px від якоря (ліва точка першого рядка), і «тривога з 04:05 ·
+  // без фіксацій» завширшки 179 px по словах не вибирався взагалі —
+  // оператор не міг його ні посунути, ні стерти. Лише з екранного
+  // контексту: експорт малює тим самим кодом в іншому масштабі.
+  if(c===ctx) o.__box={x:bx-3,y:s[1]-size,w:w+6,h:lh*lines.length+4};
   if(sel){
-    const x=o.align==='center'?s[0]-w/2:o.align==='right'?s[0]-w:s[0];
     c.strokeStyle='#fff';c.setLineDash([3,3]);c.lineWidth=1;
-    c.strokeRect(x-3,s[1]-size,w+6,lh*lines.length+4);c.setLineDash([]);
+    c.strokeRect(bx-3,s[1]-size,w+6,lh*lines.length+4);c.setLineDash([]);
   }
 }
 function drawZone(o,c,sel){
@@ -4528,6 +4534,9 @@ function hit(sx,sy,skipBase){
       const pl=o.__plate;
       if(pl&&sx>=pl.x&&sx<=pl.x+pl.w&&sy>=pl.y&&sy<=pl.y+pl.h)
         return {o,vertex:-1,plate:true};
+      // Текст — по всій його рамці (drawText), не лише біля якоря.
+      const bb=o.kind==='text'&&o.__box;
+      if(bb&&sx>=bb.x&&sx<=bb.x+bb.w&&sy>=bb.y&&sy<=bb.y+bb.h) return {o,vertex:-1};
       if(Math.hypot(s[0]-sx,s[1]-sy)<18) return {o,vertex:-1};
     }
   }
@@ -5070,7 +5079,7 @@ function pasteClip(){
   if(!S.clip) return;
   snapshot();
   const copies=JSON.parse(S.clip).map(o=>{
-    delete o.__plate;
+    delete o.__plate; delete o.__box;
     if(o.pts) o.pts=o.pts.map(p=>[p[0]-0.2,p[1]+0.3]);
     else {o.la-=0.2;o.lo+=0.3;}
     S.objs.push(o);return o;

@@ -280,7 +280,7 @@ def point_tracks(events):
                      "lat": e["lat"], "lon": e["lon"],
                      "place": e.get("place", ""), "kind": e.get("kind", ""),
                      "url": e.get("url", ""), "depth": e.get("depth"),
-                     "hhmm": e.get("hhmm", "")})
+                     "hhmm": e.get("hhmm", ""), "utype": e.get("utype")})
     out = []
     for t in AS.build(dets):
         out.append({
@@ -288,7 +288,7 @@ def point_tracks(events):
             "points": [{"lat": p["lat"], "lon": p["lon"], "hhmm": p["hhmm"],
                         "place": p["place"], "status": p["kind"],
                         "t": p["dt"].isoformat(), "depth": p.get("depth"),
-                        "url": p.get("url", "")}
+                        "url": p.get("url", ""), "utype": p.get("utype")}
                        for p in t["pts"]],
         })
     return out
@@ -389,7 +389,7 @@ def extend_back(route, events):
         route["pts"].insert(0, {"la": round(e["la"], 3), "lo": round(e["lo"], 3),
                                 "hhmm": e["hhmm"], "place": e["place"],
                                 "kind": e["kind"], "depth": e.get("depth"),
-                                "url": e.get("url", ""),
+                                "url": e.get("url", ""), "u": e.get("u"),
                                 "dt": e["dt"], "back": True})
         route["legs"].insert(0, "inferred")
         route["km"] += round(best[0])
@@ -404,6 +404,9 @@ def extend_back(route, events):
 def build(raid):
     region_of = {e.get("url"): e.get("region") for e in raid.get("events", [])
                  if e.get("url")}
+    # Тип засобу вузла заявленого ланцюга — з події, що дала вектор.
+    utype_by_url = {e.get("url"): e.get("utype") for e in raid.get("events", [])
+                    if e.get("url")}
     hops, dropped = _hops(raid["vectors"], region_of, raid.get("region_geo"))
     events = raid["events"]
     routes = []
@@ -418,6 +421,7 @@ def build(raid):
                           "depth": e.get("depth") or depth_of(e["lat"], e["lon"]),
                           "hhmm": e.get("hhmm", ""), "place": e.get("place", ""),
                           "kind": e.get("kind", ""), "url": e.get("url", ""),
+                          "u": e.get("utype"),
                           "dt": datetime.fromisoformat(e["t"])})
 
     # 3.1 треки з фіксацій, ланки позначені declared там, де є вектор
@@ -429,6 +433,7 @@ def build(raid):
             pts.append({"la": round(xy[0], 3), "lo": round(xy[1], 3),
                         "hhmm": p["hhmm"], "place": p["place"],
                         "kind": p["status"], "url": p.get("url", ""),
+                        "u": p.get("utype"),
                         "depth": p.get("depth") or depth_of(xy[0], xy[1]),
                         "dt": datetime.fromisoformat(p["t"])})
             if prev:
@@ -467,7 +472,8 @@ def build(raid):
             "src": "заявлений",
             "pts": [{"la": round(p[0], 3), "lo": round(p[1], 3),
                      "hhmm": t.strftime("%H:%M"), "place": n, "kind": "вектор",
-                     "url": u, "dt": t, "depth": depth_of(p[0], p[1])}
+                     "url": u, "dt": t, "depth": depth_of(p[0], p[1]),
+                     "u": utype_by_url.get(u)}
                     for p, t, n, u in zip(clean, times, names, urls)],
             "legs": ["declared"] * (len(clean) - 1),
             "km": round(km), "hours": round(span, 1),
@@ -481,6 +487,15 @@ def build(raid):
         if extend_back(r, back_pool):
             extended += 1
             r["extended"] = True
+
+    # --- тип засобу маршруту -----------------------------------------------
+    # `k` — клас (БПЛА/ракета/УАБ/РСЗО) і лишається для сумісності; `u` —
+    # найточніша назва зі сховища (store.utype_of): «Фламінго», «крилата
+    # ракета», «Хорнет»… Береться найчастіша по вузлах; вузли без типу не
+    # голосують. Редактор за нею ставить маршруту тип, а не «як у поточного».
+    for r in routes:
+        us = [p.get("u") for p in r["pts"] if p.get("u")]
+        r["u"] = max(set(us), key=us.count) if us else None
 
     # --- впевненість -------------------------------------------------------
     for r in routes:

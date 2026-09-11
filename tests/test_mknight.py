@@ -58,6 +58,7 @@ class TestBearings(unittest.TestCase):
         self.assertEqual(u["ts"], ["23:40", "00:10", "01:15"])
         self.assertEqual((u["t0"], u["t1"]), ("23:40", "01:15"))
         self.assertEqual(u["kinds"], {"фіксація": 2, "ППО": 1})
+        self.assertEqual(u["types"], {})            # без типу — порожньо, не None
         self.assertEqual(u["deg"], 45)
         self.assertEqual(u["place"], "Унеча")
         self.assertEqual(len(u["src"]), 3)
@@ -119,3 +120,48 @@ class TestBearings(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTypes(unittest.TestCase):
+    """Тип засобу (store.utype) доходить до кожного шару ночі: без нього
+    ракета на карті виглядала як дрон. Ніч 10→11 вересня 2026: 12 Фламінго
+    на Ростовську й Волгоградську стояли як «фіксація» й «збиття»."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.mk = load_script("mapper/mknight.py")
+
+    def _ev(self, lat, lon, utype, kind="фіксація", **kw):
+        e = {"lat": lat, "lon": lon, "bearing": None, "scope": "точка",
+             "geo_conf": "city-marker", "place": "Volgograd", "hhmm": "03:35",
+             "url": "https://t.me/locatorru/1", "kind": kind, "utype": utype}
+        e.update(kw)
+        return e
+
+    def test_sightings_count_types_and_sources_carry_them(self):
+        raid = {"events": [self._ev(48.71, 44.50, "Фламінго", url="https://t.me/a/1"),
+                           self._ev(48.71, 44.50, "Фламінго", url="https://t.me/a/2"),
+                           self._ev(48.71, 44.50, "ракета", url="https://t.me/a/3"),
+                           self._ev(48.71, 44.50, None, url="https://t.me/a/4")]}
+        s = self.mk.sightings(raid)[0]
+        self.assertEqual(s["types"], {"Фламінго": 2, "ракета": 1})
+        self.assertEqual([q["ty"] for q in s["src"]], ["Фламінго", "Фламінго", "ракета", None])
+
+    def test_strikes_carry_types(self):
+        raid = {"events": [self._ev(48.71, 44.50, "Фламінго", kind="збиття"),
+                           self._ev(48.71, 44.50, "БпЛА", kind="ППО")]}
+        st = self.mk.strikes(raid)
+        self.assertEqual(len(st), 1)
+        self.assertEqual(st[0]["types"], {"Фламінго": 1, "БпЛА": 1})
+        self.assertEqual(st[0]["src"][0]["ty"], "Фламінго")
+
+    def test_alert_onset_carries_type(self):
+        raid = {"events": [
+            {"scope": "область", "kind": "тривога", "t": "2026-09-11T03:35:00+03:00",
+             "hhmm": "03:35", "utype": "крилата ракета", "region": None,
+             "text": "Волгоградская область - ракетная опасность по крылатым ракетам!",
+             "url": "https://t.me/locatorru/84693"}]}
+        al = self.mk.alerts(raid)
+        self.assertEqual(len(al["onsets"]), 1)
+        self.assertEqual(al["onsets"][0]["ty"], "крилата ракета")
+        self.assertEqual(al["onsets"][0]["src"][0]["ty"], "крилата ракета")

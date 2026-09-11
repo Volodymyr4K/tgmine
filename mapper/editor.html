@@ -1214,12 +1214,42 @@ function ghostVisible(g){
   const lvl={strong:3,ok:2,weak:1}[g.conf||'ok'];
   return lvl>=S.ghostMin;
 }
+// Тип засобу з даних (store.utype_of: «Фламінго», «Нептун», «Хорнет»,
+// «крилата ракета», «ракета», «БпЛА»…) -> тип редактора. Раніше підказка
+// брала «поточний тип» з панелі, і ракета з даних ставала тим, що оператор
+// малював перед тим. Тепер: відома модель — свій тип; ракета без моделі —
+// «Невстановлено» (не дрон!); БпЛА без моделі — «БпЛА (тип не вказано)».
+// Оператор міг перейменувати або видалити тип — тоді відкат на поточний.
+const UTYPE_TO_TYPE={'Фламінго':'flamingo','Нептун':'neptune',
+  'Storm Shadow / SCALP':'storm','Хорнет':'hornet','Дартс':'darts',
+  'Лютий':'lutyi','Рубака':'rubaka','морський дрон':'naval',
+  'БпЛА':'uav','реактивний БпЛА':'uav','ФПВ':'uav',
+  'ракета':'unknown','крилата ракета':'unknown','балістична ракета':'unknown',
+  'ПКР':'unknown'};
+function typeForU(u){
+  const id=u&&UTYPE_TO_TYPE[u];
+  if(id&&TYPE[id]) return TYPE[id];
+  // модель, для якої в карті нема типу, — шукаємо за назвою («Сапсан» у
+  // «ОТРК «Сапсан»»), інакше поточний
+  if(u){ const t=TYPES.find(t=>t&&t.name&&t.name.includes(u)); if(t) return t; }
+  return TYPE[S.type]||TYPES[0];
+}
+// Підпис типу до позначки: генеричний «БпЛА» нічого не додає, решта — так.
+function uLabel(u){ return (u&&u!=='БпЛА')?u:''; }
+// Найчастіший тип у складі позначки/фіксації.
+function topU(types){
+  // За рівного ліку генеричний «БпЛА» програє: «Старобільськ: БпЛА 1,
+  // Фламінго 1» — це Фламінго, бо БпЛА там тло, а не спостереження.
+  const e=Object.entries(types||{})
+    .sort((x,y)=>(y[1]-x[1])||((x[0]==='БпЛА')-(y[0]==='БпЛА')))[0];
+  return e?e[0]:null;
+}
 // Підказка -> редагований маршрут. Одна функція на два виклики: одиночний
 // клік по шляху й кнопка «узяти всі». Якби перетворення жило у двох місцях,
 // поле, додане в одному, тихо не потрапляло б у друге.
 function ghostToRoute(g){
-  const t=TYPE[S.type]||TYPES[0];
-  return {kind:'route',type:t.id,count:Math.max(t.count||1,g.claims||1),
+  const t=typeForU(g.u);
+  return {kind:'route',type:t.id,u:g.u||null,count:Math.max(t.count||1,g.claims||1),
           spread:t.spread||12,width:t.width||1.6,arrows:t.arrows||0,
           dash:!!t.dash,tension:1,
           // Звідки взявся — щоб при зміні дати він пішов разом зі своєю ніччю.
@@ -5189,7 +5219,8 @@ function uniqSrc(list){
   const seen=new Set(), out=[];
   for(const q of (list||[])){
     if(!q||!q.u||seen.has(q.u)) continue;
-    seen.add(q.u); out.push({u:q.u,t:q.t||'',k:q.k||''});
+    // `ty` — тип засобу з даних; без нього блок «Джерело» не каже, що летіло.
+    seen.add(q.u); out.push({u:q.u,t:q.t||'',k:q.k||'',ty:q.ty||null});
   }
   return out;
 }
@@ -5212,7 +5243,7 @@ function srcBlock(o){
   const rows=list.map(q=>
     `<div style="margin:2px 0"><a href="${esc(q.u)}" target="_blank" rel="noopener"
        style="color:#7fd3ff">${esc(srcChan(q.u))}</a>`
-    +`<span style="color:#8fa3b8"> · ${esc(q.t||'')}${q.k?' · '+esc(q.k):''}</span></div>`
+    +`<span style="color:#8fa3b8"> · ${esc(q.t||'')}${q.k?' · '+esc(q.k):''}${q.ty?' · <b style="color:#c7d3df">'+esc(q.ty)+'</b>':''}</span></div>`
   ).join('');
   return `<label style="margin-top:8px">Джерело (${list.length})</label>`
     +`<div style="font-size:12px;line-height:1.5">${rows}</div>`
@@ -6347,8 +6378,9 @@ function putStrikes(){
     // узята позначка несе ті самі повідомлення (і збиття серед них), а два
     // знаки в одному місці читались би як дві події.
     if(S.objs.some(o=>o.sight&&near(o,s2))){dup++;continue;}
-    S.objs.push({kind:'impact',cat:CAT[s2.kind]||'impact',type:'unknown',
-      origin:tag,la:s2.la,lo:s2.lo,src:uniqSrc(s2.src),
+    const u2=topU(s2.types);
+    S.objs.push({kind:'impact',cat:CAT[s2.kind]||'impact',type:typeForU(u2).id,
+      u:u2,origin:tag,la:s2.la,lo:s2.lo,src:uniqSrc(s2.src),
       // Скільки подій згорнуто в цю позначку. Раніше кратність жила лише
       // в підписі («Кубінка ×10») і в розмірі знака, а розмір її втрачає:
       // він упирається в стелю на чотирьох. Через це відбір міст важив
@@ -6361,7 +6393,9 @@ function putStrikes(){
       // «показати лише після 20:00» спалахи лишались усі до одного.
       t:s2.t||'',
       size:7+Math.min(6,s2.n*1.5),
-      label:(s2.place||CAT_NAME[CAT[s2.kind]||'impact'])+(s2.n>1?' ×'+s2.n:'')});
+      // Підпис несе тип, якщо він щось каже: «Волгоград · Фламінго ×2».
+      label:(s2.place||CAT_NAME[CAT[s2.kind]||'impact'])
+            +(uLabel(u2)?' · '+uLabel(u2):'')+(s2.n>1?' ×'+s2.n:'')});
   }
   // Підзаголовок сам стає датою ночі, якщо оператор його ще не міняв:
   // інакше на карті лишається чужа дата з попередньої карти, і це помітно
@@ -6559,9 +6593,13 @@ function drawSights(c){
     c.strokeStyle='#fff';c.lineWidth=1.2;c.setLineDash([3,3]);c.stroke();c.setLineDash([]);
     const kinds=Object.entries(h.kinds||{}).sort((x,y)=>y[1]-x[1])
       .map(([k,n])=>n>1?`${k} ${n}`:k).join(', ');
+    // Чим саме: «Фламінго 2, ракета 1». Без цього рядка ракета й дрон на
+    // картці не відрізнялись нічим.
+    const types=Object.entries(h.types||{}).sort((x,y)=>y[1]-x[1])
+      .map(([k,n])=>n>1?`${k} ${n}`:k).join(', ');
     const lines=[(h.place||'без назви')+(h.area?' · '+h.area:''),
                  `${cnt} повідомл.`+(h.t0?` · ${h.t0}${h.t1&&h.t1!==h.t0?'–'+h.t1:''}`:''),
-                 kinds];
+                 kinds].concat(types?[types]:[]);
     c.font='500 12px "MapSans",ui-sans-serif,-apple-system,Arial';
     const w=Math.max(...lines.map(l=>c.measureText(l).width))+16, lh=16, hh=lines.length*lh+8;
     let x=p[0]+12, y=p[1]-hh/2;
@@ -6592,11 +6630,13 @@ function sightToMark(s){
              'вибух':'boom','пуск':'launch','фіксація':'fix'};
   const top=Object.entries(s.kinds||{}).sort((x,y)=>y[1]-x[1])[0];
   const kind=top?top[0]:'фіксація';
-  return {kind:'impact',cat:CAT[kind]||'fix',type:'unknown',sight:true,
+  const u=topU(s.types);
+  return {kind:'impact',cat:CAT[kind]||'fix',type:typeForU(u).id,u:u,sight:true,
           origin:'night:'+((window.NIGHT&&window.NIGHT.date)||''),
           la:s.la,lo:s.lo,src:uniqSrc(s.src),n:Math.max(1,s.n||1),
           t:s.t0||'',size:7+Math.min(6,(s.n||1)*1.5),
-          label:(s.place||CAT_NAME[CAT[kind]||'fix'])+(s.n>1?' ×'+s.n:'')};
+          label:(s.place||CAT_NAME[CAT[kind]||'fix'])
+                +(uLabel(u)?' · '+uLabel(u):'')+(s.n>1?' ×'+s.n:'')};
 }
 function putSights(){
   const N=window.NIGHT||{}, list=N.sightings||[];
@@ -6701,7 +6741,7 @@ function alertToText(ch){
   const an=S.alerts.anchors[ch.reg];
   const g=baseLL(...unscr(ch.x+ch.w/2,ch.y+ch.h+10));
   return {kind:'text',type:S.type,la:g[0],lo:g[1],size:12,
-          text:`тривога з ${ch.o.t}`+(ch.o.silent?' · без фіксацій':''),
+          text:`тривога з ${ch.o.t}`+(uLabel(ch.o.ty)?' · '+uLabel(ch.o.ty):'')+(ch.o.silent?' · без фіксацій':''),
           origin:'night:'+((window.NIGHT&&window.NIGHT.date)||''),
           src:uniqSrc([].concat(...ch.list.map(o=>o.src||[])))};
 }
@@ -6709,7 +6749,9 @@ function renderAlerts(){
   const box=document.getElementById('alertList'); if(!box) return;
   if(!S.alertsOn||!S.alerts){ box.innerHTML=''; return; }
   const rows=alertRows(), A=S.alerts;
-  const cell=o=>`${esc(o.name)}${o.silent?' <span style="color:#ffd37a">німа</span>':` <span style="color:#7fa5c0">${o.fix}</span>`}${o.otboy?' ↺':''}`;
+  // Тип із тексту тривоги: «Волгоградська обл. · Фламінго». «БпЛА» не
+  // пишеться — це тло; усе інше (ракета, крилата ракета, модель) — так.
+  const cell=o=>`${esc(o.name)}${uLabel(o.ty)?' <span style="color:#c7d3df">'+esc(uLabel(o.ty))+'</span>':''}${o.silent?' <span style="color:#ffd37a">німа</span>':` <span style="color:#7fa5c0">${o.fix}</span>`}${o.otboy?' ↺':''}`;
   box.innerHTML=(rows.length?rows.map((r,i)=>
       `<div class="type" data-al="${i}" style="justify-content:flex-start;gap:8px">`
       +`<b style="color:#c7ecff;font-variant-numeric:tabular-nums">${esc(r.t)}</b>`
@@ -6982,12 +7024,12 @@ document.getElementById('ghost').onclick=()=>{
     return;
   }
   S.ghosts=window.NIGHT.routes.map(r=>({pts:r.pts.map(p=>[p.la,p.lo]),
-    t0:r.t0,t1:r.t1,k:r.k,conf:r.conf||'ok',claims:r.claims||1,
+    t0:r.t0,t1:r.t1,k:r.k,u:r.u||null,conf:r.conf||'ok',claims:r.claims||1,
     legs:r.legs||null,
     // Джерела вузлів: адреса повідомлення, час і що саме там сказано. Без
     // цього намальована стрілка — твердження без підстави, і перевірити її
     // оператор не може нічим, крім памʼяті.
-    srcs:(r.pts||[]).map(q=>({u:q.url||'',t:q.hhmm||'',k:q.kind||''}))
+    srcs:(r.pts||[]).map(q=>({u:q.url||'',t:q.hhmm||'',k:q.kind||'',ty:q.u||null}))
                     .filter(q=>q.u),
     // ланка i зʼєднує pts[i] -> pts[i+1]; добудовані вузли стоять СПЕРЕДУ,
     // тому ознаку беремо з лівого кінця ланки, а не з правого

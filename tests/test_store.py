@@ -848,3 +848,59 @@ class TestDroneCount(unittest.TestCase):
 
     def test_no_number_no_count(self):
         self.assertIsNone(ST.drones_of("Брянская область\nТревога по БПЛА"))
+
+
+class TestUtype(unittest.TestCase):
+    """Тип засобу — найточніше, що назвав текст: модель перед класом, УАБ
+    перед ракетою, генеричний БпЛА — останній. Пастки — з вимірів по 268 565
+    сирих постах (11 вересня 2026)."""
+
+    def u(self, text):
+        return ST.utype_of(text)
+
+    def test_model_beats_class(self):
+        self.assertEqual(self.u("Ракетная тревога связана с ракетами Фламинго"), "Фламінго")
+        self.assertEqual(self.u("Ракетная опасность по ПКР Нептун с севера"), "Нептун")
+        self.assertEqual(self.u("Тревога по БПЛА Хорнет"), "Хорнет")
+        self.assertEqual(self.u("До утра возможны пуски КР «Фламинго», FP-9."), "Фламінго")
+        self.assertEqual(self.u("ЗБИТО/ПОДАВЛЕНО РАКЕТУ Х-59"), "Х-59")
+
+    def test_classes_in_order(self):
+        self.assertEqual(self.u("Ракетная опасность"), "ракета")
+        self.assertEqual(self.u("отбой ракетной опасности"), "ракета")
+        self.assertEqual(self.u("ракетная опасность по крылатым ракетам"), "крилата ракета")
+        self.assertEqual(self.u("Балістика на Київ!"), "балістична ракета")
+        self.assertEqual(self.u("Пуски КАБ на Донеччину"), "УАБ")
+        self.assertEqual(self.u("Работа РСЗО"), "РСЗО")
+        self.assertEqual(self.u("Реактивний БпЛА курсом на Київ"), "реактивний БпЛА")
+        self.assertEqual(self.u("Опасность по БПЛА и ФПВ"), "ФПВ")
+        self.assertEqual(self.u("Тревога по БПЛА"), "БпЛА")
+        self.assertEqual(self.u("Опасность по МРШ со сбросами"), "МРШ")
+
+    def test_guided_bomb_is_not_a_missile(self):
+        """«Авиационная ракетная бомбовая опасность» — УАБ, не ракета: те
+        саме правило, що в routes.CLASSES і tags конфігу."""
+        self.assertEqual(self.u("Авиационная ракетная бомбовая опасность"), "УАБ")
+        self.assertEqual(self.u("Авиационная ракетно бомбовая опасность"), "УАБ")
+
+    def test_place_names_are_not_weapons(self):
+        """«Штормовое» — село в Криму (1173 пости), «Бобров» — місто на
+        Воронежчині, «маршрута» містить «рута»."""
+        self.assertEqual(self.u("Штормовое / Тревога по БПЛА"), "БпЛА")
+        self.assertEqual(self.u("фиксация крылатых ракет «Storm Shadow»"), "Storm Shadow / SCALP")
+        self.assertEqual(self.u("Бобров, Воронежская область - пролёт БПЛА."), "БпЛА")
+        self.assertIsNone(self.u("по маршруту"))
+        self.assertEqual(self.u("реактивной системы залпового огня"), "РСЗО")
+
+    def test_nothing_named_is_none(self):
+        self.assertIsNone(self.u("Взрывы в городе"))
+        self.assertIsNone(self.u("Отработала ПВО"))
+        self.assertIsNone(self.u(""))
+
+    def test_event_carries_utype(self):
+        cfg = ST.E.Config.load("configs/ru-monitor.yaml")
+        st = ST.Store.__new__(ST.Store)
+        post = {"channel": "vrv_radar", "id": 1, "date": "2026-09-11T00:38:00+00:00",
+                "url": "https://t.me/vrv_radar/1", "entities": [],
+                "text": "Старобельск / Ракетная опасность / Фиксации Фламинго"}
+        self.assertEqual(ST.Store._event(st, post, cfg)["utype"], "Фламінго")

@@ -65,6 +65,7 @@ CITY_UA = {
     "Beryozovsky": "Березовський", "Artemovsky": "Артемівський",
     "Kamen’-na-Obi": "Камінь-на-Обі", "Verkhnyaya Salda": "Верхня Салда",
     "Ivanovo": "Іваново", "Luhansk": "Луганськ", "Vladimir": "Владимир",
+    "Starobilsk": "Старобільськ",
     "Belgorod": "Бєлгород", "Kaluga": "Калуга", "Simferopol": "Сімферополь",
     "Smolensk": "Смоленськ", "Sochi": "Сочі", "Saransk": "Саранськ",
     "Orël": "Орел", "Tambov": "Тамбов", "Taganrog": "Таганрог",

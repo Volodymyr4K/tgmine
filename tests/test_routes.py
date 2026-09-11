@@ -302,3 +302,30 @@ class TestWeaponClass(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestRouteType(unittest.TestCase):
+    """`u` — найточніша назва засобу зі сховища (store.utype), найчастіша по
+    вузлах маршруту; вузли без типу не голосують; `k` (клас) лишається."""
+
+    def _events(self, utypes):
+        pts = [(50.0, 36.0), (50.6, 36.7), (51.2, 37.4)]
+        out = []
+        for i, ((la, lo), u) in enumerate(zip(pts, utypes)):
+            t = T0 + timedelta(minutes=30 * i)
+            out.append({"t": t.isoformat(), "scope": "точка", "lat": la, "lon": lo,
+                        "geo_conf": "region", "place": f"Місце {i}", "kind": "фіксація",
+                        "url": f"https://t.me/x/{i}", "depth": 100 + i,
+                        "hhmm": t.strftime("%H:%M"), "utype": u})
+        return out
+
+    def test_majority_type_and_nodes_carry_it(self):
+        rs, _ = RT.build(raid([], self._events(["Фламінго", None, "Фламінго"])))
+        self.assertEqual(len(rs), 1)
+        self.assertEqual(rs[0]["u"], "Фламінго")
+        self.assertEqual([p.get("u") for p in rs[0]["pts"]], ["Фламінго", None, "Фламінго"])
+
+    def test_no_types_gives_none(self):
+        rs, _ = RT.build(raid([], self._events([None, None, None])))
+        self.assertEqual(len(rs), 1)
+        self.assertIsNone(rs[0]["u"])

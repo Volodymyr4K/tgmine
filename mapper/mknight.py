@@ -43,15 +43,20 @@ def strikes(raid):
         key = (round(e["lat"], 2), round(e["lon"], 2))
         b = by.setdefault(key, {"la": key[0], "lo": key[1], "n": 0,
                                 "place": e.get("place") or "", "t": e.get("hhmm", ""),
-                                "kinds": collections.Counter(), "src": []})
+                                "kinds": collections.Counter(),
+                                "types": collections.Counter(), "src": []})
         b["n"] += 1
         b["kinds"][e["kind"]] += 1
+        # Тип засобу (store.utype_of): «Фламінго», «ракета», «Хорнет»… Без
+        # нього збиття ракети на карті виглядало як збиття дрона.
+        if e.get("utype"):
+            b["types"][e["utype"]] += 1
         # Джерело позначки: адреса повідомлення, час і канал. Без цього
         # оператор бачив кружок на карті й не мав чим його перевірити, а
         # позначка без джерела — це твердження без підстави.
         if e.get("url"):
             b["src"].append({"u": e["url"], "t": e.get("hhmm", ""),
-                             "k": e.get("kind", "")})
+                             "k": e.get("kind", ""), "ty": e.get("utype")})
     out = []
     for b in by.values():
         name = CITY_UA.get(b["place"]) or uk(b["place"]) if b["place"] else ""
@@ -59,7 +64,8 @@ def strikes(raid):
         # Більше восьми посилань на одну позначку читати ніхто не буде, а
         # вага файла росте на кожну ніч. Скільки їх насправді — каже `n`.
         out.append({"la": b["la"], "lo": b["lo"], "n": b["n"], "place": name,
-                    "kind": kind, "t": b["t"], "src": b["src"][:8]})
+                    "kind": kind, "types": dict(b["types"]),
+                    "t": b["t"], "src": b["src"][:8]})
     out.sort(key=lambda s: -s["n"])
     return out
 
@@ -86,7 +92,7 @@ def bearings(raid):
         b["n"] += 1
         if e.get("url"):
             b["src"].append({"u": e["url"], "t": e.get("hhmm", ""),
-                             "k": e.get("kind", "")})
+                             "k": e.get("kind", ""), "ty": e.get("utype")})
     out = []
     for b in by.values():
         name = CITY_UA.get(b["place"]) or uk(b["place"]) if b["place"] else ""
@@ -127,17 +133,20 @@ def sightings(raid):
         b = by.setdefault(key, {"la": key[0], "lo": key[1], "n": 0,
                                 "place": e.get("place") or "",
                                 "kinds": collections.Counter(), "ts": [],
+                                "types": collections.Counter(),
                                 "degs": collections.Counter(), "src": [],
                                 "area": ""})
         b["n"] += 1
         b["kinds"][e["kind"]] += 1
+        if e.get("utype"):
+            b["types"][e["utype"]] += 1
         if e.get("hhmm"):
             b["ts"].append(e["hhmm"])
         if e.get("bearing") is not None:
             b["degs"][int(e["bearing"])] += 1
         if e.get("url"):
             b["src"].append({"u": e["url"], "t": e.get("hhmm", ""),
-                             "k": e.get("kind", "")})
+                             "k": e.get("kind", ""), "ty": e.get("utype")})
         if AREA_NAME.search(e.get("place") or ""):
             b["area"] = "район"
         elif e.get("geo_conf") == "global" and not b["area"]:
@@ -154,7 +163,7 @@ def sightings(raid):
         name = CITY_UA.get(b["place"]) or uk(b["place"]) if b["place"] else ""
         ts = sorted(b["ts"], key=night_key)
         out.append({"la": b["la"], "lo": b["lo"], "n": b["n"], "place": name,
-                    "kinds": dict(b["kinds"]), "ts": ts,
+                    "kinds": dict(b["kinds"]), "types": dict(b["types"]), "ts": ts,
                     "t0": ts[0] if ts else "", "t1": ts[-1] if ts else "",
                     "deg": b["degs"].most_common(1)[0][0] if b["degs"] else None,
                     "area": b["area"], "src": b["src"][:8]})
@@ -244,7 +253,8 @@ def alerts(raid):
                 regs.append(x["value"])
         reminder = bool(ALERT_REMINDER.search(text))
         for r in regs:
-            msgs[r].append((t, e["kind"], e.get("url", ""), e.get("hhmm", ""), reminder))
+            msgs[r].append((t, e["kind"], e.get("url", ""), e.get("hhmm", ""),
+                            reminder, e.get("utype")))
     fixes = collections.Counter(
         e.get("region") for e in raid["events"]
         if e.get("scope") == "точка" and e.get("lat") and e.get("region")
@@ -255,7 +265,7 @@ def alerts(raid):
         lst.sort()
         # покриття: обʼєднання вікон [тривога, відбій або +hold]
         cov, start, last = timedelta(0), None, None
-        for t, k, _, _, _ in lst:
+        for t, k, _, _, _, _ in lst:
             if k == "тривога":
                 if start is None:
                     start = t
@@ -270,7 +280,7 @@ def alerts(raid):
         if hours >= ALERT_MUTED_HOURS:
             muted.append(reg)
         prev, seen_otboy = None, False
-        for t, k, url, hhmm, reminder in lst:
+        for t, k, url, hhmm, reminder, ty in lst:
             if k == "відбій":
                 seen_otboy = prev is not None
                 continue
@@ -287,7 +297,11 @@ def alerts(raid):
                                "name": (RL.NAMES.get(reg) or (reg, reg))[0],
                                "otboy": bool(seen_otboy and prev is not None),
                                "fix": fixes.get(reg, 0), "silent": not fixes.get(reg),
-                               "src": [{"u": url, "t": hhmm, "k": k}] if url else []})
+                               # тип із тексту тривоги: «ракета», «Фламінго»,
+                               # «БпЛА» — саме він каже, ЩО пішло далі в тил
+                               "ty": ty,
+                               "src": [{"u": url, "t": hhmm, "k": k, "ty": ty}]
+                                      if url else []})
             prev, seen_otboy = t, False
         rings = regions.get(reg)
         if rings:

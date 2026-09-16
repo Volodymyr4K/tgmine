@@ -403,6 +403,14 @@ button.primary{background:rgba(255,62,165,.16);border-color:rgba(255,62,165,.45)
           <button id="slotOpen" title="Відкрити вибрану карту з браузера">Відкрити</button>
           <button id="slotDel" style="max-width:44px" title="видалити">✕</button>
         </div>
+        <label style="margin-top:10px">Карти на сервері</label>
+        <select id="srvSel"></select>
+        <div class="row" style="margin-top:6px">
+          <button id="srvOpen" title="Відкрити вибрану карту з сервера">Відкрити</button>
+          <button id="srvSave" title="Не чекати автозбереження — покласти на сервер зараз">Зберегти зараз</button>
+          <button id="srvDel" style="max-width:44px" title="прибрати карту з сервера">✕</button>
+        </div>
+        <div class="hint" id="srvHint">Поточна карта лягає на сервер сама.</div>
         <div class="hint" id="tplHint">Рамка тягнеться за кути. Експорт віддає
           рівно її вміст у подвійній щільності.</div>
       </div>
@@ -4431,6 +4439,9 @@ function autosave(){
   SAVED_AT=Date.now(); savedTick();
   try{ localStorage.setItem('tgmine-map',JSON.stringify(mapPayload())); }
   catch(e){}
+  // Серверна копія йде слідом, але з довшим дебаунсом: браузер тримає
+  // поточну секунду, сервер — готову роботу.
+  if(typeof srvQueue==='function') srvQueue();
 }
 function restore(){
   try{
@@ -5641,6 +5652,159 @@ function wireSlots(){
     slotsWrite(all);renderSlots();
   };
 }
+// ---- карти на сервері ----------------------------------------------------
+// localStorage — це страховка на одну карту в одному браузері. Архів живе на
+// сервері: редактор сам кладе туди поточну карту, і вона є на будь-якій машині
+// та переживає «очистити дані сайту». Сервера нема (file://, локальний
+// перегляд, не налаштований секрет) — редактор мовчки лишається на
+// localStorage: малювати це не заважає.
+const SRV={on:null,id:'',sha:'',at:0,busy:false,pend:false,err:'',t:0};
+const SRV_WAIT=20000;             // тиша після останньої правки, потім запис
+const UAMON=['січня','лютого','березня','квітня','травня','червня','липня',
+             'серпня','вересня','жовтня','листопада','грудня'];
+const TRANSLIT={а:'a',б:'b',в:'v',г:'h',ґ:'g',д:'d',е:'e',є:'ie',ж:'zh',з:'z',
+  и:'y',і:'i',ї:'i',й:'i',к:'k',л:'l',м:'m',н:'n',о:'o',п:'p',р:'r',с:'s',
+  т:'t',у:'u',ф:'f',х:'kh',ц:'ts',ч:'ch',ш:'sh',щ:'shch',ь:'',ю:'iu',я:'ia',
+  ы:'y',э:'e',ё:'e',ъ:''};
+function slug(s){
+  return String(s||'').toLowerCase()
+    .replace(/[а-щьюяєіїґыэёъ]/g,c=>TRANSLIT[c]!==undefined?TRANSLIT[c]:c)
+    .replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,40);
+}
+// Дата з підзаголовка: «ніч на 13 вересня 2026» → 2026-09-13. Імʼя файла за
+// датою карти, а не за датою збереження — інакше одна ніч, дороблена назавтра,
+// лягає другим файлом.
+function subDate(sub){
+  const m=String(sub||'').match(/(\d{1,2})\s+([а-яіїєґ]+)\s+(\d{4})/i);
+  if(!m) return '';
+  const mi=UAMON.indexOf(m[2].toLowerCase());
+  if(mi<0) return '';
+  return `${m[3]}-${String(mi+1).padStart(2,'0')}-${m[1].padStart(2,'0')}`;
+}
+function srvId(){
+  const d=subDate(S.sub), t=slug(S.title), x=slug(S.sub);
+  const id=(d?d+'-'+(t||'karta'):(t||'karta')+(x?'-'+x:'')).slice(0,64)
+           .replace(/^-+|-+$/g,'');
+  return /^[a-z0-9][a-z0-9-]{0,63}$/.test(id)?id:'karta';
+}
+function srvHint(text){
+  const el=document.getElementById('srvHint');
+  if(el) el.textContent=text;
+}
+function srvTick(){
+  if(SRV.on===false){ srvHint(SRV.err||'сервера нема — карта лише в браузері'); return; }
+  if(SRV.busy){ srvHint('кладу на сервер…'); return; }
+  if(SRV.err){ srvHint('сервер: '+SRV.err); return; }
+  if(!SRV.at){ srvHint('на сервері ще не збережено'); return; }
+  const s2=Math.round((Date.now()-SRV.at)/1000);
+  srvHint(`на сервері: ${SRV.id} · ${s2<60?'щойно':s2<3600?Math.round(s2/60)+' хв тому':Math.round(s2/3600)+' год тому'}`);
+}
+setInterval(srvTick,5000);
+async function srvFetch(url,opt){
+  const r=await fetch(url,Object.assign({credentials:'same-origin'},opt||{}));
+  let body=null;
+  try{ body=await r.json(); }catch(e){}
+  if(!r.ok){
+    const err=new Error((body&&body.error)||('HTTP '+r.status));
+    err.status=r.status; throw err;
+  }
+  return body;
+}
+async function srvRenderList(quiet){
+  const sel=document.getElementById('srvSel');
+  if(!sel) return;
+  try{
+    const d=await srvFetch('/api/maps');
+    SRV.on=true; SRV.err='';
+    const ms=(d.maps||[]).sort((a,b)=>a.id<b.id?1:-1);   // свіжіші дати вгорі
+    const cur=SRV.id||srvId();
+    sel.innerHTML=ms.length?ms.map(m=>`<option value="${m.id}">${m.id}</option>`).join('')
+                           :'<option value="">(порожньо)</option>';
+    if(ms.some(m=>m.id===cur)) sel.value=cur;
+  }catch(e){
+    SRV.on=false;
+    SRV.err=e.status===503?'сховище не налаштоване (нема GH_TOKEN)':
+            e.status===401?'сесія скінчилась — увійти заново':'';
+    if(!quiet&&e.status) toast('сервер карт: '+(SRV.err||e.message));
+    sel.innerHTML='<option value="">(недоступно)</option>';
+  }
+  srvTick();
+}
+// Запис на сервер. Дебаунс, а не запис на кожну зміну: коміт на кожне тягання
+// вузла засмітив би історію репозиторію й упирався б у ліміти GitHub.
+function srvQueue(){
+  if(SRV.on===false) return;            // сервера нема — не довбати його
+  clearTimeout(SRV.t);
+  SRV.t=setTimeout(()=>srvPush(false),SRV_WAIT);
+}
+async function srvPush(manual){
+  clearTimeout(SRV.t);
+  if(!S.objs.length){ if(manual) toast('порожню карту зберігати нема сенсу'); return; }
+  if(SRV.busy){ SRV.pend=true; return; }
+  const id=srvId();
+  if(id!==SRV.id){ SRV.id=id; SRV.sha=''; }   // нова назва — новий файл
+  SRV.busy=true; srvTick();
+  try{
+    const d=await srvFetch('/api/maps/'+id,{
+      method:'PUT',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({map:mapPayload(),sha:SRV.sha||undefined})});
+    SRV.sha=d.sha; SRV.at=Date.now(); SRV.on=true; SRV.err='';
+    if(manual) toast('на сервері: '+id);
+  }catch(e){
+    if(e.status===503||e.status===401||!e.status){
+      SRV.on=false;
+      SRV.err=e.status===503?'сховище не налаштоване (нема GH_TOKEN)':
+              e.status===401?'сесія скінчилась — увійти заново':
+              'сервер недоступний';
+    } else SRV.err=e.message;
+    if(manual) toast('не поклалось: '+(SRV.err||e.message));
+  }finally{
+    SRV.busy=false; srvTick();
+    if(SRV.pend){ SRV.pend=false; srvQueue(); }
+  }
+}
+// Вкладку закривають — дочекатись дебаунсу вже нема кому. keepalive дає
+// браузеру доправити запит після того, як сторінка пішла.
+function srvFlush(){
+  if(SRV.on===false||!S.objs.length||SRV.busy) return;
+  clearTimeout(SRV.t);
+  const id=srvId();
+  try{
+    fetch('/api/maps/'+id,{method:'PUT',keepalive:true,credentials:'same-origin',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({map:mapPayload(),sha:SRV.sha||undefined})});
+  }catch(e){}
+}
+addEventListener('pagehide',srvFlush);
+addEventListener('visibilitychange',()=>{ if(document.visibilityState==='hidden') srvFlush(); });
+function wireSrv(){
+  const sel=document.getElementById('srvSel');
+  if(!sel) return;
+  SRV.id=srvId();
+  document.getElementById('srvSave').onclick=()=>srvPush(true);
+  document.getElementById('srvOpen').onclick=async ()=>{
+    const id=sel.value;
+    if(!id){ toast('нема чого відкривати'); return; }
+    try{
+      const d=await srvFetch('/api/maps/'+id);
+      snapshot(); applyMap(d.map);
+      SRV.id=id; SRV.sha=d.sha; SRV.at=Date.now(); SRV.err='';
+      toast('відкрито з сервера: '+id); srvTick();
+    }catch(e){ toast('не відкрилось: '+(e.message||e)); }
+  };
+  document.getElementById('srvDel').onclick=async ()=>{
+    const id=sel.value;
+    if(!id) return;
+    if(!confirm(`Прибрати «${id}» з сервера? Файл лишиться в історії репозиторію.`)) return;
+    try{
+      await srvFetch('/api/maps/'+id,{method:'DELETE'});
+      if(SRV.id===id) SRV.sha='';
+      toast('прибрано: '+id); srvRenderList(true);
+    }catch(e){ toast('не прибралось: '+(e.message||e)); }
+  };
+  srvRenderList(true);
+}
 // Один шлях застосування карти: із файла, зі слота, з перетягування.
 function applyMap(d){
   if(!d) return;
@@ -5796,6 +5960,9 @@ document.getElementById('export').onclick=async ()=>{
   a.href=url;a.download=(S.tpl?S.tpl.id:'map')+'.png';a.click();
   setTimeout(()=>URL.revokeObjectURL(url),10000);
   toast(`PNG готовий: ${outW}×${outH}, ${Math.round(blob.size/1024)} КБ`);
+  // Експорт — момент, коли карта готова. Її джерело має бути на сервері одразу,
+  // не через дебаунс: саме цю карту потім шукатимуть за рендером.
+  if(typeof srvPush==='function') srvPush(false);
   }catch(e){
     console.error('експорт PNG:',e);jlog('export-fail',{fmt:'png',msg:String(e)});
     toast('експорт не вдався: '+((e&&e.message)||e));
@@ -7554,6 +7721,7 @@ renderBasemaps();
 wireHud();
 wireClear();
 wireSlots();
+wireSrv();
 wireZones();
 wireImages();
 renderChrome();

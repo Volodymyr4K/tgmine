@@ -181,6 +181,10 @@ export async function onRequest(context) {
     });
   }
 
+  // Хто ввійшов — у контекст: функції /api/* підписують ним коміт карти,
+  // щоб у історії було видно, чия це робота.
+  context.data.user = user;
+
   const res = await context.next();
   // `_headers` ставить `public` на JS/CSS редактора. За логіном це має бути
   // `private`: спільні кеші не повинні тримати закриті файли.

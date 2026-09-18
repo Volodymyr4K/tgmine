@@ -840,11 +840,29 @@ function hidePop(){
 // кольорі назавжди. Звіряємось із ТОЧНИМ старим значенням: колір, підібраний
 // оператором вручну, з ним не збігається й лишається недоторканим.
 const TYPE_RECOLOR={hornet:{from:'#ff8ad4',to:'#ff8a1f'}};
-function migrateTypes(list){
+// Типи, ДОДАНІ у стандартний набір після того, як оператор почав малювати.
+// Карта носить власний список типів, тому новий тип не зʼявився б у жодній
+// збереженій карті: підказка «реактивний БпЛА» тихо падала б у
+// «Невстановлено» — сіру пунктирну лінію. Тому тип доливається у старий
+// список, на своє місце за порядком (after).
+// Долити можна тільки ОДИН раз: у карті лишається слід (tmig), інакше тип,
+// який оператор свідомо видалив, воскресав би при кожному відкритті.
+const TYPE_ADD=[{id:'jet',after:'uav'}];
+let TMIG=new Set(TYPE_ADD.map(a=>a.id));   // нова карта вже має все
+function migrateTypes(list,done){
   if(!Array.isArray(list)) return list;
   for(const t of list){
     const r=TYPE_RECOLOR[t&&t.id];
     if(r&&String(t.col||'').toLowerCase()===r.from) t.col=r.to;
+  }
+  const had=new Set(Array.isArray(done)?done:[]);
+  for(const a of TYPE_ADD){
+    TMIG.add(a.id);
+    if(had.has(a.id)) continue;                        // вже доливали
+    if(list.some(t=>t&&t.id===a.id)) continue;         // вже є
+    const d=TYPES_DEFAULT.find(t=>t.id===a.id); if(!d) continue;
+    const i=list.findIndex(t=>t&&t.id===a.after);
+    list.splice(i<0?list.length:i+1,0,JSON.parse(JSON.stringify(d)));
   }
   return list;
 }
@@ -862,6 +880,16 @@ const TYPES_DEFAULT=[
   // одразу, і будь-що перебивається вже на самому обʼєкті.
   {id:'uav',     name:'БпЛА (тип не вказано)', col:'#ff3ea5', icon:'arrow',
    width:1.6, count:6, spread:14, arrows:0, dash:false},
+  // Реактивний БпЛА — окремий тип, а не відтінок звичайного. У наших даних
+  // за 152 доби (18 квітня — 16 вересня 2026) це 2048 подій, 1.47% усіх і
+  // шостий за частотою обʼєкт — частіше за «Дартс», «Фламінго» й «Нептун»
+  // разом. Летить ~500-600 км/год проти ~180 у поршневого, тож однакова
+  // рожева стрілка читалась як звичайний рій, хоч це інша швидкість і інший
+  // час підльоту. Колір підібрано заміром: у Lab він далі від усіх наявних
+  // (найближчий «Дартс», ΔE 34). Ниток мало й стрілки вздовж — вони ходять
+  // малими групами і по прямій, на відміну від рою.
+  {id:'jet',     name:'Реактивний БпЛА',      col:'#5b8cff', icon:'arrow',
+   width:1.7, count:3, spread:9,  arrows:2, dash:false},
   {id:'hornet',  name:'БпЛА «Хорнет»',         col:'#ff8a1f', icon:'arrow',
    width:1.5, count:8, spread:15, arrows:2, dash:false},
   {id:'darts',   name:'БпЛА «Дартс»',          col:'#c77dff', icon:'arrow',
@@ -1231,7 +1259,7 @@ function ghostVisible(g){
 const UTYPE_TO_TYPE={'Фламінго':'flamingo','Нептун':'neptune',
   'Storm Shadow / SCALP':'storm','Хорнет':'hornet','Дартс':'darts',
   'Лютий':'lutyi','Рубака':'rubaka','морський дрон':'naval',
-  'БпЛА':'uav','реактивний БпЛА':'uav','ФПВ':'uav',
+  'БпЛА':'uav','реактивний БпЛА':'jet','ФПВ':'uav',
   'ракета':'unknown','крилата ракета':'unknown','балістична ракета':'unknown',
   'ПКР':'unknown'};
 // Дрони без свого типу в карті (Мавік, Лелека, МРШ, Гербера, Бабай…) —
@@ -4453,7 +4481,7 @@ function restore(){
       S.objs=d.objs;S.title=d.title||S.title;S.sub=d.sub||S.sub;
       if(d.view)S.view=d.view;
       if(d.frame){S.frame=d.frame;S.aspect=d.aspect||0;}
-      if(d.types){TYPES=migrateTypes(d.types);retype();}
+      if(d.types){TYPES=migrateTypes(d.types,d.tmig);retype();}
       ZONES=mergeZones(d.zones);rezone();
       if(d.style)S.style=fillDefaults(d.style,STYLE_DEFAULT);
       // Старі карти цього поля не мають — режим показу лишається вимкненим.
@@ -5010,13 +5038,23 @@ addEventListener('keydown',e=>{
     e.preventDefault();jincident();}
   if(e.key===']')order(1);
   if(e.key==='[')order(-1);
-  // 1..8 — тип засобу: оператор перемикає його частіше за будь-що інше
-  if(/^[1-8]$/.test(e.key)){
-    const t=TYPES[+e.key-1];
+  // 1..9 і 0 — тип засобу: оператор перемикає його частіше за будь-що інше.
+  // Було 1..8 на десять типів, тобто два останні не мали клавіші взагалі;
+  // з одинадцятим («Реактивний БпЛА») без нуля їх було б три. Цифри
+  // ЗСУНУЛИСЬ на одиницю від «Хорнета» вниз — новий тип стоїть другим,
+  // біля свого («БпЛА»), а не в кінці списку заради сталої розкладки.
+  if(/^[0-9]$/.test(e.key)){
+    const t=TYPES[e.key==='0'?9:+e.key-1];
     if(t){S.type=t.id;
       if(S.sel&&S.sel.kind!=='text'&&S.sel.kind!=='zone'){snapshot();S.sel.type=t.id;}
-      document.querySelectorAll('.type').forEach((x,i)=>
-        x.classList.toggle('on',TYPES[i].id===t.id));
+      // Підсвічування — за data-t, не за НОМЕРОМ у списку. Клас `.type`
+      // носять ще шари, старти тривог і підкладки, тож `.type` по всьому
+      // документу давало 43 елементи на 11 типів, і `TYPES[i].id` кидало
+      // TypeError на дванадцятому: тип перемикався, а `refresh()` після
+      // циклу вже не виконувався — намальоване не перемальовувалось до
+      // наступної дії. Спіймано заміром у живому редакторі.
+      document.querySelectorAll('#types .type[data-t]').forEach(x=>
+        x.classList.toggle('on',x.dataset.t===t.id));
       refresh();}
   }
   // стрілки рухають вибране: точне доведення без миші
@@ -5596,7 +5634,7 @@ document.getElementById('fit').onclick=fit;
 // додане в одному, тихо не потрапляло в решту.
 function mapPayload(){
   return {title:S.title,sub:S.sub,objs:S.objs,view:S.view,
-          frame:S.frame,aspect:S.aspect,types:TYPES,zones:ZONES,
+          frame:S.frame,aspect:S.aspect,types:TYPES,tmig:[...TMIG],zones:ZONES,
           corridors:S.corridors, hideCity:S.hideCity, lang:S.lang,
           // Фільтр за годинами їде разом із картою: вікно — частина роботи,
           // а не налаштування вікна редактора. Відкрив збережене — бачиш те
@@ -5813,7 +5851,7 @@ function applyMap(d){
   if(d.view)S.view=d.view;
   if(d.frame!==undefined){S.frame=d.frame;S.aspect=d.aspect||0;
     const a=document.getElementById('aspect'); if(a) a.value=String(S.aspect||0);}
-  if(d.types){TYPES=migrateTypes(d.types);retype();}
+  if(d.types){TYPES=migrateTypes(d.types,d.tmig);retype();}
   ZONES=mergeZones(d.zones);rezone();
   if(d.style)S.style=fillDefaults(d.style,STYLE_DEFAULT);
   S.corridors=Object.assign({on:false,km:120},d.corridors||{});

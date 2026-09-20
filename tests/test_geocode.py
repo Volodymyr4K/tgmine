@@ -4,7 +4,7 @@ import json
 import unittest
 
 from tests.helpers import GAZ, needs_gazetteer
-from tgmine import extract as E, geocode as GC
+from tgmine import extract as E, geocode as GC, store as ST
 from tests.helpers import ROOT
 
 CFG = ROOT / "configs" / "ru-monitor.yaml"
@@ -469,3 +469,166 @@ class TestDistrictSuffix(unittest.TestCase):
         self.assertEqual(
             self.gaz.by_name.get(GC.norm("Урицкий район")), None,
             "район зʼявився в газетирі — тест більше не про той випадок")
+
+
+@needs_gazetteer
+class TestRegionNameIsNotACityMarker(unittest.TestCase):
+    """Назва області маркером-містом бути не може.
+
+    «Волгоградская область» через стем «волгоград» діставала МІСТО Волгоград
+    (pop 1 013 533), сутність-регіон ставала точкою — і `store.point_entity`,
+    який бере найбільший за населенням топонім, віддавав крапку їй замість
+    розвʼязаного району того самого поста. «Урюпинский район / Волгоградская
+    область» їхало на 301 км.
+
+    Чому це вилізло саме там: `lookup` важить (pop+500)/(1+dist/50), і в решті
+    областей виграє запис ADM1 (fclass A -> conf centroid, а centroid
+    point_entity відкидає). Волгоград стоїть у дальньому кутку витягнутої
+    області, тож центроїд ADM1 за 105 км програє місту за 1 км.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.cfg = E.Config.load(CFG)
+        cls.gaz = GC.Gazetteer.load(GAZ / "RU.txt", GAZ / "UA.txt")
+        cls.a1 = cls.gaz.region_codes(cls.cfg.entities["регіон"], cls.cfg.geo)
+
+    def test_region_name_is_recognised(self):
+        for q, reg in [("Волгоградская", "Волгоградська"),
+                       ("Волгоградской", "Волгоградська"),
+                       ("Воронежской", "Воронезька"),
+                       ("Астраханская", "Астраханська"),
+                       ("Московской", "Московська")]:
+            with self.subTest(q=q):
+                self.assertTrue(
+                    self.gaz.names_the_region(q, self.a1[reg]),
+                    "прикметникова назва області має впізнаватись")
+
+    def test_city_stays_a_marker(self):
+        """Іменник — це місто, і крапку він дає. Тут легко зламати зайвим.
+
+        Обидві сторони порівняння проходять через ту саму основу, тому
+        «Волгоград» і «Волгоградом» маркерами лишаються, хоч корінь у них
+        той самий, що в області.
+        """
+        for q, reg in [("Волгоград", "Волгоградська"),
+                       ("Волгоградом", "Волгоградська"),
+                       # місто Волжский — прикметникове за формою
+                       ("Волжский", "Волгоградська"),
+                       ("Камышин", "Волгоградська"),
+                       ("Москве", "Московська"),
+                       ("Ахтубинск", "Астраханська")]:
+            with self.subTest(q=q):
+                self.assertFalse(self.gaz.names_the_region(q, self.a1[reg]))
+
+    def test_district_adjectives_are_not_region_names(self):
+        """Прикметник сам по собі критерієм НЕ є — і це головна пастка.
+
+        Прикметникових збігів, що давали city-marker, 8644, і більшість із них
+        маркери чесні: центр району і є те саме місто.
+        """
+        for q, reg in [("Стародубский", "Брянська"),
+                       ("Симферопольский", "Крим"),
+                       ("Севастопольской", "Крим"),
+                       ("Дзержинский", "Нижегородська"),
+                       ("Железногорский", "Курська"),
+                       ("Домодедовский", "Московська"),
+                       ("Красноармейский", "Краснодарський"),
+                       # село, а не Крим: основа «крым» коротша за поріг
+                       ("Крымское", "Крим")]:
+            with self.subTest(q=q):
+                self.assertFalse(self.gaz.names_the_region(q, self.a1[reg]))
+
+    def test_short_stems_never_match(self):
+        """Поріг у 5 літер — запобіжник, а не косметика.
+
+        «курская» -> «кур», «омская» -> «ом», «донецкая» -> «доне»: такі основи
+        збігалися б із чужими назвами. Жодна область, де вада справді є,
+        основи коротшої за 6 не має.
+        """
+        for reg in ("Курська", "Омська", "Тульська", "Липецька", "Тверська"):
+            with self.subTest(reg=reg):
+                self.assertEqual(self.gaz.self_roots(self.a1[reg]), set())
+
+    def test_district_wins_over_the_region_city(self):
+        """Вихідна скарга оператора, від тексту поста до крапки."""
+        for text, want, tol in [
+            ("Урюпинский район\nВолгоградская область\nФиксация БПЛА",
+             (50.819, 41.863), 25),
+            ("Кумылженский район\nВолгоградская область\nФиксация БПЛА",
+             (49.833, 42.437), 25),
+            ("Ахтубинский район\nАстраханская область\nОпасность по БПЛА",
+             (48.28, 46.19), 40),
+        ]:
+            with self.subTest(text=text.split("\n")[0]):
+                posts = E.enrich([{"channel": "t", "id": 1, "text": text,
+                                   "date": "2026-07-01T10:00:00+00:00"}], self.cfg)
+                GC.geocode_posts(posts, self.gaz, self.cfg.geo,
+                                 aliases=self.cfg.geo_aliases, region_a1=self.a1)
+                best = ST.point_entity(posts[0])
+                self.assertIsNotNone(best, "крапки нема взагалі")
+                d = GC.haversine((best["lat"], best["lon"]), want)
+                self.assertLess(d, tol,
+                                f"крапка на {best.get('geo_name')} за {d:.0f} км")
+
+    def test_city_over_the_region_still_points_at_the_city(self):
+        """Зворотний бік: пост НАЗВАВ місто — крапка має лишитись на ньому."""
+        posts = E.enrich([{"channel": "t", "id": 1, "date": "2026-07-01T10:00:00+00:00",
+                           "text": "Волгоград\nОпасность по БПЛА"}], self.cfg)
+        GC.geocode_posts(posts, self.gaz, self.cfg.geo,
+                         aliases=self.cfg.geo_aliases, region_a1=self.a1)
+        best = ST.point_entity(posts[0])
+        self.assertIsNotNone(best, "місто має лишатись крапкою")
+        self.assertEqual(best.get("geo_conf"), "city-marker")
+
+
+@needs_gazetteer
+class TestWholeSubjectIsAreaNotPoint(unittest.TestCase):
+    """Цілий субʼєкт має координату, але крапкою події не є.
+
+    Принцип уже діяв під узгодженням; поза ним лишався, і видно це стало, коли
+    назва області перестала бути маркером: у переліку «Астраханская область,
+    Республика Калмыкия, Ставропольский край» Калмикії в конфізі нема, вона
+    падає у freeform як НП, резолвиться в запис ADM1 і забирає крапку за 300 км
+    від названої першою області.
+
+    Відсівати такі розвʼязання геть НЕ можна: 1321 пост у вікні сховища
+    лишився б без координат зовсім («Республика Чувашия — опасность по БПЛА»,
+    «Пуски БПЛА Одесса» — місто лежить у газетирі під записом області).
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.cfg = E.Config.load(CFG)
+        cls.gaz = GC.Gazetteer.load(GAZ / "RU.txt", GAZ / "UA.txt")
+        cls.a1 = cls.gaz.region_codes(cls.cfg.entities["регіон"], cls.cfg.geo)
+
+    def _post(self, text):
+        posts = E.enrich([{"channel": "t", "id": 1, "text": text,
+                           "date": "2026-07-01T10:00:00+00:00"}], self.cfg)
+        GC.geocode_posts(posts, self.gaz, self.cfg.geo,
+                         aliases=self.cfg.geo_aliases, region_a1=self.a1)
+        return posts[0]
+
+    def test_subject_keeps_coordinates(self):
+        p = self._post("Республика Чувашия - опасность по БПЛА")
+        sub = [e for e in p["entities"] if e["type"] == "нп" and "lat" in e]
+        self.assertTrue(sub, "субʼєкт має лишитись із координатою")
+        self.assertEqual(sub[0]["geo_conf"], "centroid", "це площа, не крапка")
+
+    def test_subject_does_not_steal_the_point(self):
+        """Перелік субʼєктів: крапка лишається в названій першою області."""
+        p = self._post("Астраханская область, Республика Калмыкия, "
+                       "Ставропольский край - опасность по БПЛА")
+        self.assertIsNone(ST.point_entity(p),
+                          "цілий субʼєкт не може бути крапкою події")
+
+    def test_adjectival_subject_too(self):
+        """Виняток для прикметникової форми тут НЕ діє — координата й так є.
+
+        З ним крізь фільтр проходили «Чеченская» і «Чувашская», і в переліку
+        республік крапку забирала Чечня на 1.2 млн.
+        """
+        p = self._post("Республика Дагестан, Республика Ингушетия, "
+                       "Чеченская Республика - опасность по БПЛА")
+        self.assertIsNone(ST.point_entity(p))

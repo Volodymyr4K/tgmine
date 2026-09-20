@@ -561,8 +561,7 @@ def point_entity(p):
                      if e.get("pos") is not None and "lat" in e
                      and e.get("type") in ("нп", "регіон")), default=None)
     aim = {id(e) for e in pts if DIR_BEFORE.search(before(e))
-           or (e.get("type") == "регіон" and e.get("pos") != first_pos
-               and SRC_BEFORE.search(before(e)))}
+           or (e.get("pos") != first_pos and SRC_BEFORE.search(before(e)))}
     # Прийменник стоїть лише перед ПЕРШОЮ назвою переліку: «и далее на
     # Жуковку, Брянск», «в направлении Ялта - Алушта - Судак - Феодосия».
     # Без цього кроку правило ловило перший пункт, а крапка переїжджала на
@@ -746,8 +745,15 @@ class Store:
         clean, dropped = strip_promo(p["text"], cfg)
         best = point_entity(p)
         if best is None:
+            # Крапки нема — беремо площу. Спершу область поста, бо саме її
+            # називає `region`; далі будь-яку сутність із координатою, інакше
+            # пост про цілий субʼєкт, якого нема в конфізі («Республика
+            # Чувашия», «Республика Адыгея» — 1321 пост у вікні сховища),
+            # лишився б узагалі без координат.
             best = next((e for e in p.get("entities", [])
                          if e["type"] == "регіон" and "lat" in e), None)
+        if best is None:
+            best = next((e for e in p.get("entities", []) if "lat" in e), None)
         # класифікуємо ОЧИЩЕНИЙ текст: інакше «…ПВН ПВО…» у рекламному рядку
         # робить із оголошення про набір подію типу «збиття»
         k = kind_of(clean)

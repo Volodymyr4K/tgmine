@@ -323,3 +323,34 @@ class TestProseNumbersActuallyCompute(unittest.TestCase):
         # другий голос є, але його мало: 3.1% -> 10.4% після locatorru
         self.assertGreater(v, 0.005)
         self.assertLess(v, 0.50)
+
+
+class TestEditorLegendCoversEveryMarkCategory(unittest.TestCase):
+    """Кожна категорія позначки має рядок у легенді.
+
+    Категорій шість (`CAT_LIST`), а рядки були лише для трьох: вибух, пуск і
+    проста фіксація стояли на карті знаком без жодного пояснення. Найгірше це
+    на пуску — він фіолетовий, кольору більше ні в кого, і на експорті читач
+    бачив знак, якого нема в позначеннях. Перевірено на живому редакторі
+    20 вересня 2026: позначка з cat="launch" не давала жодного рядка, а
+    `legendBox` не викликався взагалі.
+    """
+
+    def _editor(self) -> str:
+        return (ROOT / "mapper" / "editor.html").read_text(encoding="utf-8")
+
+    def test_every_cat_has_a_legend_row(self):
+        src = self._editor()
+        m = re.search(r"const CAT_LIST=\[([^\]]*)\]", src)
+        self.assertIsNotNone(m, "CAT_LIST у редакторі не знайдено")
+        cats = re.findall(r"'([^']+)'", m.group(1))
+        self.assertGreaterEqual(len(cats), 6, "категорій стало менше — перевір")
+        for cat in cats:
+            with self.subTest(cat=cat):
+                self.assertIn(f"shown('{cat}')", src,
+                              f"категорія {cat} не має рядка в легенді")
+
+    def test_detector_would_catch_a_missing_row(self):
+        """Контроль: тест має падати, якщо рядок прибрати."""
+        src = self._editor().replace("shown('launch')", "shown('НЕМА')")
+        self.assertNotIn("shown('launch')", src)

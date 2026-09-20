@@ -1173,7 +1173,12 @@ const S={
           // `zones:false` прибирає рядки зон із блоку позначень
           marks:{on:true,title:'Зони та позначення',cols:1,width:300,
                  launchName:'Пускові локації',impactName:'Влучання',
-                 ppoName:'Робота ППО',downedName:'Збиття',opacity:.9}},
+                 ppoName:'Робота ППО',downedName:'Збиття',
+                 // Позначки, які досі лишались у легенді без рядка: пуск,
+                 // вибух і проста фіксація. На експорті фіолетовий знак
+                 // пуску нічим не пояснювався.
+                 boomName:'Вибух',launchMarkName:'Пуск',fixName:'Фіксація',
+                 opacity:.9}},
   // Шапка — це чужа картка на чужій карті: назва, рядок під нею, заголовок,
   // дата й знак. Усе це має бути власним, зокрема знак картинкою.
   brand:{name:'tgmine',handle:'',logo:true,logoImg:'',logoSize:36,pad:20},
@@ -3770,6 +3775,19 @@ function drawLegend(c,w,h){
     if(shown('downed'))
       rows.push({name:LZ.downedName||'Збиття',
                  draw:markIcon((S.style.downed||{}).col||'#ff8a5c')});
+    // Пуск, вибух і фіксація мали знак на карті й мовчання в легенді.
+    // «Пускові локації» вище — це ІНШЕ: обʼєкт-інструмент (kind==='launch'),
+    // який оператор ставить сам. Тут — позначка з даних (cat==='launch'),
+    // і назва в неї своя, інакше на карті з обома був би однаковий рядок.
+    if(shown('boom'))
+      rows.push({name:LZ.boomName||'Вибух',
+                 draw:markIcon((S.style.boom||{}).col||'#ff5252')});
+    if(shown('launch'))
+      rows.push({name:LZ.launchMarkName||'Пуск',
+                 draw:markIcon((S.style.launch||{}).col||'#c77dff')});
+    if(shown('fix'))
+      rows.push({name:LZ.fixName||'Фіксація',
+                 draw:markIcon((S.style.fix||{}).col||'#9fb3c8')});
     // Зони в легенді — окремий вимикач. На карті, де вся легенда це два
     // рядки про події, рядки «Україна» й «Окупована територія» лише
     // подовжують плашку: територія на карті й так підписана заливкою.
@@ -6794,14 +6812,42 @@ function sightCovered(s){
   }
   return false;
 }
+// Панівний вид у місці. Одне джерело правди для підказки й для позначки,
+// яку робить клік: доти кожна рахувала свій максимум окремо.
+function sightTop(s){
+  const e=Object.entries(s.kinds||{}).sort((x,y)=>y[1]-x[1])[0];
+  return e?e[0]:'фіксація';
+}
 function drawSights(c){
   if(!S.sight.length||S.layers.sights===false) return;
   c.save();
-  const col='#7fd3ff';
+  // Форма каже, наскільки точна координата (крапка проти кільця для центру
+  // району), колір — що саме бачили. Форму під вид не міняємо: оператор уже
+  // просив, щоб позначки різнились лише кольором (див. drawMark).
+  //
+  // Виділяється САМЕ пуск, і лише він. ППО та збиття мають власний шар
+  // позначок (`mknight.strikes`), а пуск не мав ніде: до кліку по крапці
+  // його на карті не було видно нічим. Заміряно на 20 ночах вересня:
+  // місць-ночей, де панує пуск, 48, ще 19 мають пуск у суміші (фіксацій
+  // для порівняння 3493). Мало — але це початок нальоту, і оператор просив
+  // саме його бачити.
+  //
+  // Колір беремо з `S.style.launch`, того самого, яким намалюється позначка
+  // після кліку: підказка має виглядати як те, на що вона перетвориться.
+  const COL_FIX='#7fd3ff';
+  const COL_LAUNCH=(S.style.launch||{}).col||'#c77dff';
   for(const s of S.sight){
     if(!sightVisible(s)||sightCovered(s)) continue;
     const cnt=sightCount(s), r=sightR(cnt), p=P(s.la,s.lo);
-    const a=cnt>1?.75:.4;
+    const launch=sightTop(s)==='пуск';
+    const col=launch?COL_LAUNCH:COL_FIX;
+    // Прозорість у фіксацій означає «скільки разів це місце згадали»: одна
+    // згадка блідa, кілька — яскравіша. Для пуску це правило не годиться.
+    // Пусків за ніч 2-3, майже всі з однією згадкою, тобто всі вони були б
+    // найблідішими на карті — і серед шести десятків блакитних крапок
+    // фіолетова просто губилась. Пуск — початок нальоту, а не ще одна
+    // згадка, тому він завжди на повну.
+    const a=launch?.9:(cnt>1?.75:.4);
     if(s.area){
       // центр району чи здогад — кільце, не крапка
       c.beginPath();c.arc(p[0],p[1],r,0,7);
@@ -6855,8 +6901,7 @@ function sightAt(sx,sy){
 function sightToMark(s){
   const CAT={'ППО':'ppo','збиття':'downed','влучання':'impact',
              'вибух':'boom','пуск':'launch','фіксація':'fix'};
-  const top=Object.entries(s.kinds||{}).sort((x,y)=>y[1]-x[1])[0];
-  const kind=top?top[0]:'фіксація';
+  const kind=sightTop(s);
   const u=topU(s.types);
   return {kind:'impact',cat:CAT[kind]||'fix',type:typeForU(u).id,u:u,sight:true,
           origin:'night:'+((window.NIGHT&&window.NIGHT.date)||''),
@@ -6872,8 +6917,10 @@ function putSights(){
   S.sight=list.map(s=>Object.assign({},s));
   S.sightHover=null;
   const areas=S.sight.filter(s=>s.area).length;
-  toast(`фіксацій: ${S.sight.length} місць`+(areas?` (з них районів ${areas})`:''));
-  jlog('sights',{n:S.sight.length,areas});
+  const launches=S.sight.filter(s=>sightTop(s)==='пуск').length;
+  toast(`фіксацій: ${S.sight.length} місць`+(areas?` (з них районів ${areas})`:'')
+        +(launches?` · пусків ${launches}`:''));
+  jlog('sights',{n:S.sight.length,areas,launches});
   refresh();
 }
 document.getElementById('sights').onclick=()=>{

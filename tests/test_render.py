@@ -89,11 +89,19 @@ class TestEscapingInGeneratedJs(unittest.TestCase):
                                  "поле даних іде в innerHTML без esc()")
 
     def test_makeraid_near_line_escapes_osm_name(self):
-        """nr.name — сирий тег OSM, його редагує будь-хто."""
+        """o.name — сирий тег OSM, його редагує будь-хто.
+
+        Якір — САМ вираз, не текст поруч. Раніше він шукав рядок «поблизу:»,
+        і коли той переїхав у коментар, тест лишився зеленим, стережучи
+        коментар. Тому беремо блок між двома опорами коду.
+        """
         tpl = load_script("makeraid.py").TPL
-        i = tpl.find("поблизу:")
-        self.assertGreater(i, 0)
-        self.assertEqual(self._unescaped_data_fields(tpl[i - 200:i + 300]), [])
+        i = tpl.find("const around=")
+        j = tpl.find("const rows=", i)
+        self.assertGreater(i, 0, "не знайдено обчислення сусідніх обʼєктів")
+        self.assertGreater(j, i, "не знайдено кінець блоку")
+        self.assertIn("esc(", tpl[i:j], "у блоці взагалі нема екранування")
+        self.assertEqual(self._unescaped_data_fields(tpl[i:j]), [])
 
     def test_detector_catches_an_unescaped_field(self):
         """Сам детектор має ловити те, заради чого існує."""

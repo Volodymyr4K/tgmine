@@ -625,10 +625,45 @@ map.on('click',ev=>{
   const T_UA={refinery:'НПЗ',airfield:'аеродром',ammo_depot:'склад БК',
     defense_plant:'оборонний завод',chemical:'хімія',fuel_depot:'нафтобаза',
     naval:'ВМБ',military_base:'військова зона',range:'полігон'};
-  const nr=seen.map(e=>e.near).find(Boolean);
-  const nearLine=nr?`<div style="color:#ffb01f;font-size:11px;margin:4px 0">`+
-    `⌖ поблизу: ${esc(nr.name||T_UA[nr.cat]||nr.cat)} `+
-    `(${esc(T_UA[nr.cat]||nr.cat)}, ${esc(nr.km)} км)</div>`:'';
+  // Сусідство рахуємо ТУТ, із targets.json, а не беремо поле near з події.
+  //
+  // Поле near називало ОДИН обʼєкт так, ніби подія з ним повʼязана. Заміряно
+  // 20.09.2026 на сховищі з 2026-04-18: у 68% привʼязок у радіусі стояло 6+
+  // цілей, у 51% — нічия в тому самому ярусі пріоритету, тож обирала відстань
+  // до центру НП. Текст події називав обʼєкт (НПЗ, аеродром, склад) лише в
+  // 1.2% випадків: «Тула / Работа ПВО по БПЛА» діставало «поблизу: Клокове,
+  // 5 км». І сама відстань була вигаданою точністю — вона рахується від
+  // ЦЕНТРОЇДА НП, а не від місця події, якого ми не знаємо.
+  //
+  // Тому тепер: геометрія, названа геометрією. Один обʼєкт у радіусі — можна
+  // назвати, бо вибору нема; кілька — лише число й типи, без імені. Стеля
+  // показана числом, а не прикрита вибором навмання.
+  //
+  // Крапка-фолбек (centroid/region-snap) рядка не отримує взагалі: там
+  // координата — центр області, а не місце, і «в радіусі 15 км» від неї не
+  // означає нічого. conf="region" сюди НЕ входить, хоч і лежить у
+  // store.REGIONAL_FALLBACK: це повноцінне розвʼязання топоніма всередині
+  // названої області, і крапка в нього справжня.
+  const around=(seen.every(e=>e.geo_conf==='centroid'||e.geo_conf==='region-snap')
+      ? [] : (TARGETS.objects||[]).filter(x=>x.lat!=null
+          && map.distance([pl.lat,pl.lon],[x.lat,x.lon])<=NEAR_R*1000));
+  const byCat={};
+  around.forEach(x=>{byCat[x.cat]=(byCat[x.cat]||0)+1;});
+  // Саме `o`, а не `around[0]`: назва обʼєкта — сирий тег OSM, і
+  // test_makeraid_near_line_escapes_osm_name стереже вставку за ІМЕНЕМ
+  // змінної. Через `around[0].name` детектор проходив повз, і тест зеленів,
+  // нічого не перевіривши — спіймано контрольним прогоном 20.09.2026.
+  const o=around.length===1?around[0]:null;
+  const nearBody=o
+    ? `у радіусі ${NEAR_R} км один відомий обʼєкт: `+
+      `${esc(o.name||T_UA[o.cat]||o.cat)} (${esc(T_UA[o.cat]||o.cat)})`
+    : around.length>1
+    ? `у радіусі ${NEAR_R} км відомих обʼєктів: ${around.length} — `+
+      Object.entries(byCat).sort((a,b)=>b[1]-a[1]).slice(0,3)
+        .map(kv=>`${esc(T_UA[kv[0]]||kv[0])} ×${kv[1]}`).join(', ')
+    : '';
+  const nearLine=nearBody?`<div style="color:#8ea0b2;font-size:11px;margin:4px 0">`+
+    `⌖ ${nearBody}</div>`:'';
   const rows=seen.slice(0,8).map(e=>
     `<div style="margin:3px 0;padding-left:7px;border-left:2px solid #2b3b4c">
        <b style="color:#38d4dd">${esc(e.hhmm)}</b>
@@ -677,6 +712,11 @@ const T_GLYPH={airfield:'✈',military_base:'▦',range:'◎',ammo_depot:'✷',
 // Зум-gating за ярусом: стратегічні цілі (T1) видно завжди; паливна
 // інфраструктура (T2) — від зуму 5; тло з тисяч баз/полігонів (T3) — від 7.
 // Так на далекому зумі видно лише важливе, а не стіну з військових зон.
+// Радіус, у якому попап рахує сусідні обʼєкти. 15 км — бо саме стільки
+// покривала стара привʼязка: медіана відстані подія->ціль 5.2 км, p90 11.2 км
+// (замір 20.09.2026). Це НЕ радіуси store.TARGET_PRIORITY: ті обирають одну
+// ціль для рейтингу, а тут ми нічого не обираємо, лише рахуємо.
+const NEAR_R=15;
 const TIER_ZOOM={1:0, 2:5, 3:7};
 function drawTargets(){
   if(!tActive.size){ document.getElementById('layToggle').textContent='🎯 Обʼєкти'; return; }

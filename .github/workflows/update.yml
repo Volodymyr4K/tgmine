@@ -262,7 +262,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .rank
-          key: rank-v3-${{ steps.cachekey.outputs.day }}
+          key: rank-v4-${{ steps.cachekey.outputs.day }}
 
       - name: Важливість цілей
         run: |
@@ -318,9 +318,9 @@ jobs:
       # крапка: сховище перезібране, 7237 подій змінили координату (5732 далі
       # 20 км), з них 2404 у Волгоградській. Привʼязок до цілей 51 399 ->
       # 46 880, Волгоградський НПЗ 2993 -> 277.
-      # v21 — маркер області більше не зʼїдає прикметник району: сховище
-      # перезібране, 12 911 подій змінили координату (8713 далі 20 км).
-      # Точкових подій, намальованих крапкою на центрі області, 15.9% -> 12.8%.
+      # v22 — маркер області більше не зʼїдає прикметник району: сховище
+      # перезібране, 13 219 подій змінили координату (8907 далі 20 км).
+      # Точкових подій, намальованих крапкою на центрі області, 15.9% -> 12.7%.
       #
       # RESTORE І SAVE РОЗНЕСЕНІ НАВМИСНО — це не стилістика. `actions/cache`
       # одним кроком зберігає кеш у post-дії, а вона НЕ зберігає нічого, якщо
@@ -343,8 +343,8 @@ jobs:
           path: |
             site/raids
             site/mapper/nights
-          key: raids-v21-${{ steps.cachekey.outputs.day }}
-          restore-keys: raids-v21-
+          key: raids-v22-${{ steps.cachekey.outputs.day }}
+          restore-keys: raids-v22-
 
       # Без --days: денні сторінки за всі 93 доби коштують 6 секунд, тобто
       # обрізання архіву економило час не там, де він витрачався. --raid-days 2
@@ -363,7 +363,7 @@ jobs:
           path: |
             site/raids
             site/mapper/nights
-          key: raids-v21-${{ steps.cachekey.outputs.day }}
+          key: raids-v22-${{ steps.cachekey.outputs.day }}
 
       - name: Кеш ранжування цілей (зберегти)
         if: always() && hashFiles('.rank/**') != ''
@@ -371,7 +371,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: .rank
-          key: rank-v3-${{ steps.cachekey.outputs.day }}
+          key: rank-v4-${{ steps.cachekey.outputs.day }}
 
       # Пуш бота падав, коли поки прогін ішов, у main зʼявився чужий коміт:
       # `! [rejected] main -> main (fetch first)`. Це не рідкість — прогін

@@ -557,7 +557,14 @@ def geocode_posts(posts: list[dict], gaz: Gazetteer, region_geo: dict,
                 # 5367 постів Волгоградської прибито до міста, у 1778 з них
                 # район чи село всередині RU.84 вже було розвʼязано.
                 codes = (region_a1 or {}).get(e["value"])
-                hit = (None if gaz.names_the_region(e["match"], codes)
+                # Маркер, після якого стоїть «район», — теж не місто. Без цього
+                # кроку правка в `extract` не спрацьовує там, де маркер таки
+                # резолвиться в місто: «Бердянский район» дало б місто
+                # Бердянськ (176 тис.), і воно за населенням перебило б сам
+                # район. Те саме з Мелітопольським, Шебекинським, Грайворонським.
+                district = (e.get("pos") is not None and DISTRICT_AFTER.match(
+                    p["text"][e["pos"] + len(str(e["match"])):]))
+                hit = (None if district or gaz.names_the_region(e["match"], codes)
                        else gaz.lookup(e["match"], base, max_km))
                 if hit and hit["fclass"] == "P" and hit["pop"] >= 1000:
                     e["lat"], e["lon"] = hit["lat"], hit["lon"]
@@ -662,6 +669,16 @@ def geocode_posts(posts: list[dict], gaz: Gazetteer, region_geo: dict,
                 # області). Але КРАПКОЮ площа бути не може, тому conf той самий,
                 # що в області, і point_entity її не бере.
                 e["geo_conf"] = "centroid" if subject else hit["conf"]
+                # Район — це ПЛОЩА, хай і менша за область. Мітка потрібна
+                # store.point_entity, щоб район не перебивав село за населенням.
+                e["geo_area"] = str(hit.get("fcode") or "").startswith("ADM")
+                # І чи ця площа лежить у названій області. Потрібне там само:
+                # пост часто перелічує кілька районів («Богучарский район,
+                # Воронежская область — фиксации на Шолоховский район,
+                # Ростовская»), і без цієї мітки серед площ вигравала б просто
+                # більша за населенням, хоч би з чужої області.
+                e["geo_in_region"] = bool(
+                    a1 and (hit.get("cc"), hit.get("a1")) in a1)
                 if subject:
                     stats["subject_area"] += 1
                 e["geo_dist_km"] = hit["dist_km"]

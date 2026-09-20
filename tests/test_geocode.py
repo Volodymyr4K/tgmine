@@ -632,3 +632,100 @@ class TestWholeSubjectIsAreaNotPoint(unittest.TestCase):
         p = self._post("Республика Дагестан, Республика Ингушетия, "
                        "Чеченская Республика - опасность по БПЛА")
         self.assertIsNone(ST.point_entity(p))
+
+
+@needs_gazetteer
+class TestDistrictEatenByTheRegionMarker(unittest.TestCase):
+    """Маркер області зʼїдав прикметник району, і місце зникало взагалі.
+
+    Маркери в конфізі — це назви МІСТ, і прикметник району від того самого
+    міста вони ловлять теж: «Россош\\w*» бере «Россошанский», «Камышин\\w*» —
+    «Камышинский». `freeform_of` вважав слово вже впізнаним і топоніма не
+    створював, тож розвʼязувати було нічого — подія падала на центр області.
+    Заміряно у вікні сховища: 8257 таких збігів, 3582 події на центрі області,
+    у 2236 зсув понад 30 км (медіана 109).
+
+    Правок три, бо поодинці кожна ламає інше:
+      1. `extract` — збіг перед словом «район» не «зайнятий», топонім є;
+      2. `geocode` — такий маркер не стає містом (інакше Бердянськ на 176 тис.
+         переб'є свій же район);
+      3. `store.point_entity` — площа не б'є крапку, а серед площ вирішує
+         область поста й порядок, не населення.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.cfg = E.Config.load(CFG)
+        cls.gaz = GC.Gazetteer.load(GAZ / "RU.txt", GAZ / "UA.txt")
+        cls.a1 = cls.gaz.region_codes(cls.cfg.entities["регіон"], cls.cfg.geo)
+
+    def _point(self, text):
+        posts = E.enrich([{"channel": "t", "id": 1, "text": text,
+                           "date": "2026-07-01T10:00:00+00:00"}], self.cfg)
+        GC.geocode_posts(posts, self.gaz, self.cfg.geo,
+                         aliases=self.cfg.geo_aliases, region_a1=self.a1)
+        return ST.point_entity(posts[0]), posts[0]
+
+    def _assert_near(self, text, want, tol):
+        best, _ = self._point(text)
+        self.assertIsNotNone(best, "крапки нема взагалі")
+        d = GC.haversine((best["lat"], best["lon"]), want)
+        self.assertLess(d, tol, f"крапка на {best.get('geo_name')} за {d:.0f} км")
+
+    def test_district_far_from_its_marker_city(self):
+        """Ті, де зсув найбільший."""
+        for text, want in [
+                ("Россошанский район\nВоронежская область\nФиксация БПЛА", (50.20, 39.57)),
+                ("Камышинский район\nВолгоградская область\nФиксация БПЛА", (50.25, 45.37)),
+                ("Валуйский район\nБелгородская область\nФиксация БПЛА", (50.21, 38.10)),
+                ("Морозовский район\nРостовская область\nФиксация БПЛА", (48.35, 41.82))]:
+            with self.subTest(text=text.split("\n")[0]):
+                self._assert_near(text, want, 30)
+
+    def test_marker_that_is_a_real_city_does_not_win(self):
+        """Бердянськ (176 тис.) не має перебивати Бердянський район.
+
+        Саме через це самої правки в `extract` мало: маркер резолвився в
+        місто, а місто за населенням билo район.
+        """
+        self._assert_near("Бердянский район\nЗапорожская область\nФиксация БПЛА",
+                          (46.76, 36.79), 30)
+
+    def test_safe_pairs_stay_put(self):
+        """Район навколо СВОГО ж міста чіпати не можна — зсув там одиниці км."""
+        for text, want in [
+                ("Орловский район\nОрловская область\nФиксация БПЛА", (52.97, 36.07)),
+                ("Мелитопольский район\nЗапорожская область\nФиксация БПЛА", (46.84, 35.36)),
+                ("Белгородский район\nБелгородская область\nФиксация БПЛА", (50.60, 36.59))]:
+            with self.subTest(text=text.split("\n")[0]):
+                self._assert_near(text, want, 25)
+
+    def test_city_marker_still_marks_the_city(self):
+        """Зворотний бік: без слова «район» маркер лишається містом."""
+        best, _ = self._point("Шебекино, Белгородская область - взрывы")
+        self.assertEqual(best.get("geo_name"), "Shebekino")
+
+    def test_settlement_beats_the_district(self):
+        """Село, назване поруч із районом, точніше за центр району."""
+        self._assert_near(
+            "Староивановка, Волоконовский район, Белгородская область - пролёт БПЛА",
+            (50.49, 37.86), 25)
+
+    def test_own_region_outranks_the_object_class(self):
+        """А ось СЕЛО З ЧУЖОЇ області району не б'є — і це не дрібниця.
+
+        «Богучарский район, Воронежская область — фиксации на Шолоховский
+        район, Ростовская»: Шолоховський розвʼязується селом на 10 тис. у
+        Ростовській, Богучарський — районом у Воронезькій. Правило «крапка
+        над площею» без перевірки області віддавало крапку селу за 100 км.
+        """
+        self._assert_near(
+            "Богучарский район, Воронежская область - фиксации БПЛА "
+            "на Шолоховский район, Ростовская область", (49.93, 40.55), 40)
+
+    def test_among_districts_the_first_named_wins(self):
+        """Серед площ вирішує порядок, не населення: рядок 1 — географія."""
+        best, _ = self._point("Наро-Фоминский район, Троицкий АО, "
+                              "Московская область - опасность по БПЛА")
+        self.assertIn("Naro-Fominsk", str(best.get("geo_name")),
+                      "має виграти перший названий район")

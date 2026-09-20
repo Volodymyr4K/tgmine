@@ -3,7 +3,7 @@ import json
 import unittest
 from datetime import datetime, timedelta, timezone
 
-from tests.helpers import ROOT, load_script, needs_gazetteer, needs_store
+from tests.helpers import GAZ, ROOT, load_script, needs_gazetteer, needs_store
 from tgmine import geocode as GC
 from tgmine import store as ST
 
@@ -965,3 +965,66 @@ class TestUtype(unittest.TestCase):
                 "url": "https://t.me/vrv_radar/1", "entities": [],
                 "text": "Старобельск / Ракетная опасность / Фиксации Фламинго"}
         self.assertEqual(ST.Store._event(st, post, cfg)["utype"], "Фламінго")
+
+
+@needs_gazetteer
+class TestWholeSubjectEventKeepsCoordinates(unittest.TestCase):
+    """Подія про цілий субʼєкт не втрачає координат, але й не стає крапкою.
+
+    Сторожа проти регресу, який я сам ледь не вкотив: перша версія правила
+    «цілий субʼєкт — не крапка» ВІДСІВАЛА таке розвʼязання геть, і 1321 пост
+    у вікні сховища лишався без координат зовсім — «Республика Чувашия —
+    опасность по БПЛА», «Пуски БПЛА Одесса» (місто лежить у газетирі під
+    записом області). Тепер координата є, а `geo_conf` — `centroid`, тож у
+    привʼязку до цілей вона не йде (REGIONAL_FALLBACK).
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        from tgmine import extract as E, geocode as GC
+        cls.E, cls.GC = E, GC
+        cls.cfg = E.Config.load(str(ROOT / "configs" / "ru-monitor.yaml"))
+        cls.gaz = GC.Gazetteer.load(GAZ / "RU.txt", GAZ / "UA.txt")
+        cls.a1 = cls.gaz.region_codes(cls.cfg.entities["регіон"], cls.cfg.geo)
+
+    def _geocoded(self, text):
+        posts = self.E.enrich([{"channel": "vrv_radar", "id": 1, "text": text,
+                                "date": "2026-07-19T18:02:00+00:00",
+                                "url": "https://t.me/vrv_radar/1"}], self.cfg)
+        self.GC.geocode_posts(posts, self.gaz, self.cfg.geo,
+                              aliases=self.cfg.geo_aliases, region_a1=self.a1)
+        return posts
+
+    def _event(self, text):
+        st = ST.Store.__new__(ST.Store)
+        return ST.Store._event(st, self._geocoded(text)[0], self.cfg)
+
+    def test_subject_only_post_keeps_a_coordinate(self):
+        """Головне тут — що координата НЕ зникає. Саме це я ледь не зламав."""
+        for text in ("Республика Чувашия - опасность по БПЛА",
+                     "Республика Адыгея - опасность по БПЛА."):
+            with self.subTest(text=text):
+                self.assertIsNotNone(self._event(text)["lat"], "координата зникла")
+
+    def test_subject_is_area_not_point(self):
+        """А тут — що це саме ПЛОЩА.
+
+        Перевірено на пакеті з `git show`: до правки такий пост мав
+        `geo_conf="region"` і повноцінну крапку, тобто цілий субʼєкт виглядав
+        як розвʼязане місце. `assertIn(..., REGIONAL_FALLBACK)` тут не
+        годиться — `region` до нього теж входить, і тест нічого не стеріг би.
+        """
+        for text in ("Республика Чувашия - опасность по БПЛА",
+                     "Республика Адыгея - опасность по БПЛА."):
+            with self.subTest(text=text):
+                posts = self._geocoded(text)
+                self.assertIsNone(ST.point_entity(posts[0]),
+                                  "цілий субʼєкт не може бути крапкою події")
+                st = ST.Store.__new__(ST.Store)
+                self.assertEqual(ST.Store._event(st, posts[0], self.cfg)["geo_conf"],
+                                 "centroid")
+
+    def test_area_does_not_bind_to_a_target(self):
+        """`near` рахується лише для координат, які справді вказують місце."""
+        e = self._event("Республика Чувашия - опасность по БПЛА")
+        self.assertIsNone(e["near"], "площа не привʼязується до цілі")

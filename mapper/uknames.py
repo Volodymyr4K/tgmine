@@ -80,6 +80,58 @@ ALIAS_UK = {
     "Богородск": "Богородськ", "Богородский": "Богородськ",
 }
 
+# Субʼєкти РФ — таблицею, у стилі підписів областей редактора
+# (`mkreglabels.NAMES`: «Брянська обл.», «Мордовія»). Відтворення давало
+# «Вологодська область» поряд з українськими «Харківська обл.», латиниця —
+# «Нортг Оссетиа-Аланіа» (заміряно 22 вересня 2026 на сховищі: 29 субʼєктів
+# серед місць подій). Назви — усі ADM1 з gazetteer/RU.txt.
+RU_ADM1 = {
+    "Altayskiy Kray": "Алтайський край", "Amur Oblast": "Амурська обл.",
+    "Arkhangelsk Oblast": "Архангельська обл.", "Astrakhan Oblast": "Астраханська обл.",
+    "Bashkortostan": "Башкортостан", "Belgorod Oblast": "Бєлгородська обл.",
+    "Bryansk Oblast": "Брянська обл.", "Chechenskaya Respublika": "Чечня",
+    "Chelyabinsk Oblast": "Челябінська обл.", "Chukotskiy Avtonomnyy Okrug": "Чукотка",
+    "Chuvashskaya Respublika": "Чувашія", "Dagestan": "Дагестан",
+    "Irkutsk Oblast": "Іркутська обл.", "Ivanovo Oblast": "Івановська обл.",
+    "Kabardino-Balkarskaya Respublika": "Кабардино-Балкарія",
+    "Kaliningrad Oblast": "Калінінградська обл.", "Kalmykiya": "Калмикія",
+    "Kaluga Oblast": "Калузька обл.", "Kamchatka Krai": "Камчатський край",
+    "Karachayevo-Cherkesiya": "Карачаєво-Черкесія", "Kemerovo Oblast": "Кемеровська обл.",
+    "Khabarovskiy Kray": "Хабаровський край",
+    "Khanty-Mansiyskiy Avtonomnyy Okrug-Yugra": "ХМАО — Югра",
+    "Kirov Oblast": "Кіровська обл.", "Komi": "Комі", "Kostroma Oblast": "Костромська обл.",
+    "Krasnodarskiy Kray": "Краснодарський край", "Krasnoyarskiy Kray": "Красноярський край",
+    "Kurgan Oblast": "Курганська обл.", "Kursk Oblast": "Курська обл.",
+    "Leningrad Oblast": "Ленінградська обл.", "Lipetsk Oblast": "Липецька обл.",
+    "Magadan Oblast": "Магаданська обл.", "Moscow Oblast": "Московська обл.",
+    "Moskva": "Москва", "Murmansk Oblast": "Мурманська обл.",
+    "Nenetskiy Avtonomnyy Okrug": "Ненецький АО",
+    "Nizhny Novgorod Oblast": "Нижньогородська обл.", "North Ossetia-Alania": "Північна Осетія",
+    "Novgorod Oblast": "Новгородська обл.", "Novosibirsk Oblast": "Новосибірська обл.",
+    "Omsk Oblast": "Омська обл.", "Orenburg Oblast": "Оренбурзька обл.",
+    "Oryol Oblast": "Орловська обл.", "Penza Oblast": "Пензенська обл.",
+    "Perm Krai": "Пермський край", "Primorskiy Kray": "Приморський край",
+    "Pskov Oblast": "Псковська обл.", "Republic of Sakha (Yakutia)": "Якутія",
+    "Respublika Adygeya": "Адигея", "Respublika Altay": "Республіка Алтай",
+    "Respublika Buryatiya": "Бурятія", "Respublika Ingushetiya": "Інгушетія",
+    "Respublika Kareliya": "Карелія", "Respublika Khakasiya": "Хакасія",
+    "Respublika Mariy-El": "Марій Ел", "Respublika Mordoviya": "Мордовія",
+    "Respublika Tyva": "Тива", "Rostov Oblast": "Ростовська обл.",
+    "Ryazan Oblast": "Рязанська обл.", "Sakhalin Oblast": "Сахалінська обл.",
+    "Samara Oblast": "Самарська обл.", "Sankt-Peterburg": "Санкт-Петербург",
+    "Saratovskaya Oblast": "Саратовська обл.", "Smolensk Oblast": "Смоленська обл.",
+    "Stavropol Kray": "Ставропольський край", "Sverdlovsk Oblast": "Свердловська обл.",
+    "Tambov Oblast": "Тамбовська обл.", "Tatarstan": "Татарстан",
+    "Tomsk Oblast": "Томська обл.", "Transbaikal Territory": "Забайкальський край",
+    "Tula Oblast": "Тульська обл.", "Tver Oblast": "Тверська обл.",
+    "Tyumen Oblast": "Тюменська обл.", "Udmurtskaya Respublika": "Удмуртія",
+    "Ulyanovsk Oblast": "Ульяновська обл.", "Vladimirskaya Oblast’": "Владимирська обл.",
+    "Volgograd Oblast": "Волгоградська обл.", "Vologda Oblast": "Вологодська обл.",
+    "Voronezh Oblast": "Воронезька обл.", "Yamalo-Nenetskiy Avtonomnyy Okrug": "ЯНАО",
+    "Yaroslavl Oblast": "Ярославська обл.",
+    "Yevrey (Jewish) Autonomous Oblast": "Єврейська АО",
+}
+
 # ---- порівняння назв у різних письмах --------------------------------------
 
 _RU_LAT = {"а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e", "ё": "e", "ж": "zh",
@@ -104,6 +156,8 @@ def _lat_norm(s):
     s = re.sub(r"\b(?:district|rayon|raion|rajon)\b", "raion", s)
     s = re.sub(r"\b(?:urban|gorodskoy|gorodskoi|gorodskoj)\s+okrug\b", "okrug", s)
     s = re.sub(r"\bgorod\b", "", s)
+    # прикметник району до назви міста: «Курманський район» ~ «Kurman Raion»
+    s = re.sub(r"(\w{3,}?)(?:s['’]?k[yi]*|ts['’]?k[yi]*) raion\b", r"\1 raion", s)
     s = s.replace("yi", "i").replace("iy", "i").replace("y", "i").replace("j", "i")
     s = re.sub(r"i+", "i", s)
     return re.sub(r"\s+", " ", s).strip()
@@ -200,11 +254,16 @@ def pick_ru(latin, alts, extra=()):
     ln, cands = _lat_norm(latin), []
     soft = latin.rstrip("’'").count("’") + latin.rstrip("’'").count("'")
     for a in list(extra) + list(alts):
-        if not GC.CYRILLIC.match(a):
+        # «Воробйове» — українська форма без і/ї/є: «приголосна + й + голосна»
+        # у російській не буває, а поверх неї відновлювалось «ё» («Воробйовьо»)
+        if not GC.CYRILLIC.match(a) or re.search(r"[бвгджзклмнпрстфхцчшщ]й[аоуеэ]", a, re.I):
             continue
         s = _sim(_lat_norm(_rom(a, _RU_LAT)), ln)
         inner = len(re.findall(r"[ьъ](?=.)", a, re.I))
-        cands.append((round(s, 3), _seps(a) == _seps(latin), a in extra,
+        # друга міра — латиниця з «ye/oy»: «Bol’shoye» — Большое, а не
+        # Большой (перша міра зводить y/i й дає нічию)
+        s2 = _sim(_lat_key(_rom_ru(a)), _lat_key(latin))
+        cands.append((round(s, 3), round(s2, 3), _seps(a) == _seps(latin), a in extra,
                       -max(0, inner - soft), a[-1:] in "ьЬ", a))
     if not cands:
         return None
@@ -251,6 +310,9 @@ _ADJ_OY = re.compile(r"(?:ск|цк|[нвт]|[аеиоуы]х)ой$")
 # «правило дев'ятки» плюс к і х: на 1608 парах з Вікіпедії «ки/хи»
 # лишаються «ки/хи» втричі частіше («Луки», «Валуйки»).
 _KEEP_I = set("дтзсцчшщжркх")
+# Перші частини складних назв, після яких «и» починає корінь.
+_JOINT = re.compile(r"(?:ново|старо|мало|велико|больше|красно|бело|черно|перво|"
+                    r"верхне|нижне|средне|зелено|светло|долго|широко)$")
 # Корені, спільні з українськими іменами й словами, де «и» лишається «и»:
 # «Михайловка», «Маломихайловка», «Дмитровский район» (було «Дмітровський»),
 # «Кириллов», «Мирный» — корінь будь-де в слові.
@@ -278,6 +340,22 @@ def _word(w, nine=True):
             lo, tail = lo[:-4], "цький"
         else:
             lo, tail = lo[:-2], "ий"
+    elif lo.endswith("ье") and len(lo) > 3:
+        # «-ье» українською: після шиплячої — прикметник середнього роду
+        # («Лебяжье» -> «Лебʼяже», «Гремячье» -> «Гремʼяче»), після губної й
+        # р — апостроф («Верховье» -> «Верховʼя», «Поморье» -> «Поморʼя»),
+        # після решти — подвоєння («Раздолье» -> «Раздолля», «Полесье» ->
+        # «Полесся»). Було «Лебʼяжьє», «Верховʼє».
+        # Іменник із префіксом («Заволжье», «Междуречье», «Подгорье») —
+        # подвоєння й після шиплячої: «Заволжжя», «Междуріччя»-подібне.
+        c = lo[-3]
+        noun = re.match(r"(?:за|при|под|по|между|над|пере|раз|без)", lo)
+        if c in "жчшщ" and not noun:
+            lo, tail = lo[:-2], "е"
+        elif c in "бпвмфр":
+            lo, tail = lo[:-2], "ʼя"
+        else:
+            lo, tail = lo[:-2], c + "я"
     elif nine and re.search(r"[^тчщжшдзср]ино$", lo):
         lo, tail = lo[:-3], "іно"          # «Шебекино» -> «Шебекіно»
     else:
@@ -308,14 +386,17 @@ def _word(w, nine=True):
                 ch = "є"
         elif ch == "и":
             prefix_pri = lo[max(0, i - 2):i] == "пр" and nx in "аоу"   # «Приазовский»
-            if not pv or (nx in "аеёиоуэюя" and not prefix_pri) \
+            # межа частин складної назви — «і», як на початку слова:
+            # «Новоивановское» -> «Новоіванівське», а не «Новоївановське»
+            joint = re.search(_JOINT, lo[:i]) is not None
+            if not pv or joint or (nx in "аеёиоуэюя" and not prefix_pri) \
                     or (nine and pv in _CONS and pv not in _KEEP_I and i not in keep):
                 ch = "і"
             elif pv in "аоуеэюяё":
                 ch = "ї"
         out.append(ch)
     s = re.sub(r"([бпвмфр])[ьъ](?=[яюєї])", r"\1ʼ", "".join(out) + tail)
-    return _cap(s, w)
+    return s.upper() if w.isupper() and len(w) > 1 else _cap(s, w)     # «ХТЗ»
 
 
 def ru2uk(name, nine=True):
@@ -326,8 +407,10 @@ def ru2uk(name, nine=True):
                    for p in re.split(r"([ \-])", name))
 
 
+# «-ино» -> «-ине»: український присвійний суфікс -ин- («Витине», «Наташине»,
+# «Юркине»); було «-іне» — «Витіне», «Наташіне».
 _UA_ENDS = (("овка", "івка"), ("евка", "ївка"), ("ово", "ове"), ("ево", "еве"),
-            ("ино", "іне"))
+            ("ино", "ине"))
 
 
 def ru2uk_ua(name):
@@ -369,6 +452,8 @@ def kmu2uk(latin):
         # («Bilovods'k»), перед голосною — апостроф («Slov`yanoserbsk»)
         lo = re.sub(r"(?<=[bcdfghklmnprstvz])['’`](?=[bcdfghklmnprstvz])", "\x01", w.lower())
         lo = re.sub(r"(?<=ch|sh|zh|ts)['’`](?=[aeiou])", "", lo)     # «Rybach'e»
+        # «Il’ichevskiy»: після «л», «н», «т»… апостроф — це мʼякий знак
+        lo = re.sub(r"(?<=[dtzslnkgh])['’`](?=[aeiouy])", "\x01", lo)
         tail = ""
         for a, b in (("tske", "цьке"), ("ske", "ське"), ("skyi", "ський"), ("ska", "ська"),
                      ("sk", "ськ"), ("tsk", "цьк"), ("tsia", "ція"), ("iia", "ія"),
@@ -420,6 +505,8 @@ def kmu2uk(latin):
             else:
                 i += 1
         res += tail
+        if w.isupper() and len(w) > 1:
+            res = res.upper()
         out.append(res if res in ("район", "область") else res[:1].upper() + res[1:])
     return "".join(out)
 
@@ -427,7 +514,7 @@ def kmu2uk(latin):
 # Латиниця GeoNames для України буває й російською (Крим, окуповане:
 # «Olenevka», «Uyutnoye», «Pervomayskiy») — тоді джерело назви російське.
 _RU_STYLE = re.compile(r"ë|’|g|yy\b|iy\b|ye\b|oe\b|sky\b|skiy|evka\b|ovka\b|aya\b|"
-                       r"district|rayon", re.I)
+                       r"(?<=\w)yo|[oe]vo\b|ino\b|district|rayon", re.I)   # «Vorobyovo»
 
 
 # ---- Wikidata ---------------------------------------------------------------
@@ -447,7 +534,12 @@ def _first(s):
     return next((w for w in re.split(r"[\s\-]+", s) if w), "")
 
 
-def _wd_ok(label, latin, fallback):
+def _renamed(aliases, latin):
+    """Wikidata знає назву з латиниці як стару: псевдонім, що збігається з нею."""
+    return any(_latin_sim(a, latin) >= 0.8 for a in aliases)
+
+
+def _wd_ok(label, latin, fallback, cc="RU", aliases=()):
     """Чи мітка Wikidata — назва саме цього місця, як його пишуть канали.
 
     Три відсіви, кожен із прикладу: схожість із латиницею або з українським
@@ -457,8 +549,17 @@ def _wd_ok(label, latin, fallback):
     для району — ні); не більше слів, ніж у назві («Музей-садиба
     Архангельське», «Зеленоградський адміністративний округ» — ні).
     """
-    s = max(_sim(_lat_norm(_rom(label, _UA_LAT)), _lat_norm(latin)),
-            _sim(label.lower(), fallback.lower()) if fallback else 0)
+    # Родові слова зі схожості прибрано: спільне «район» підтягувало
+    # «Ломоносовський район» до «Петродворцового» (заміряно 22 вересня 2026).
+    def bare(x):
+        return re.sub(r"\b(?:raion|okrug|район|округ|міський|міська|obl|обл)\b\.?", " ", x).strip()
+    s = _sim(bare(_lat_norm(_rom(label, _UA_LAT))), bare(_lat_norm(latin)))
+    if fallback:
+        s = max(s, _sim(bare(label.lower()), bare(fallback.lower())))
+    # Перейменування, про яке Wikidata знає: «Микільське» з псевдонімом
+    # «Нікольське» для «Nikol's’ke» — мітка новіша за GeoNames, беремо її.
+    if s < 0.6 and cc == "UA" and _renamed(aliases, latin):
+        s = 1.0
     if s < 0.6:
         return False
     # «Льгов» для селища «L’govskiy» (відтворення «Льговський») — інше місце,
@@ -479,14 +580,15 @@ def _wd_ok(label, latin, fallback):
     return _words(label) <= max(_words(fallback or latin), _words(latin))
 
 
-def load_wd(path=WD_UK):
+def load_wd(path=WD_UK, col=1):
+    """geonameid -> мітки Wikidata (col=1) або псевдоніми для України (col=2)."""
     out = {}
     if os.path.exists(path):
         with open(path, encoding="utf-8") as f:
             for line in f:
-                g, _, names = line.rstrip("\n").partition("\t")
-                if names:
-                    out[g] = names.split("|")
+                c = line.rstrip("\n").split("\t")
+                if len(c) > col and c[col]:
+                    out[c[0]] = c[col].split("|")
     return out
 
 
@@ -502,9 +604,18 @@ def _fallback(latin, cc, alts, extra):
         # Латиниця — англійський екзонім («Oryol District» для «Орловский
         # район»), тож зі збігом не вийде. Єдина російська назва запису —
         # і є його назва.
+        # Але лише схожої: «Zaytseva Gora» має єдину альт-назву «Цветовка» —
+        # це інше село. Поріг 0.5 без родових слів пропускає «Oryol
+        # District» / «Орловский район» і не пропускає її.
         only = {a for a in list(alts) + list(extra) if GC.CYRILLIC.match(a)}
-        if len(only) == 1:
-            ru = only.pop()
+        one = only.pop() if len(only) == 1 else None
+        bare = lambda x: re.sub(r"\b(?:raion|okrug)\b", " ", x).strip()
+        if one and _sim(bare(_lat_norm(_rom(one, _RU_LAT))), bare(_lat_norm(latin))) >= 0.5:
+            ru = one
+            # «Kulebaksky Urban Okrug» з альт-назвою «Кулебакский район»: район
+            # перетворено на округ, альт-назва стара — вид беремо з латиниці
+            if re.search(r"\bokrug\b", latin, re.I) and re.search(r"\bрайон\b", ru, re.I):
+                ru = re.sub(r"\bрайон\b", "городской округ", ru, flags=re.I)
             if _UNIT_LAT.search(latin) and not re.search(r"район|округ", ru, re.I):
                 ru += " район"
     if cc == "UA":
@@ -519,37 +630,62 @@ def _fallback(latin, cc, alts, extra):
 
 
 # «Gorod Shebekino», «Город Шебекино»: тип поселення, а не частина назви
-_PREFIX = re.compile(r"^(?:gorod|poselok|selo|stanitsa|derevnya|город|посёлок|поселок|село|"
-                     r"станица|деревня)\s+", re.I)
+_PREFIX = re.compile(r"^(?:gorod|poselok|selo|stanitsa|derevnya|urochishche|город|посёлок|поселок|"
+                     r"село|станица|деревня|урочище)\s+", re.I)
 _UNIT_CAP = re.compile(r"(?<=\S )(Район|Округ|Область|Міський|Міська)\b")
 
 
-def name_of(latin, cc="RU", alts=(), extra=(), wd=()):
+def name_of(latin, cc="RU", alts=(), extra=(), wd=(), wd_alias=()):
     """Українська назва запису GeoNames за описаною вище чергою джерел."""
     if not latin:
         return ""
     n = _name_of(_PREFIX.sub("", latin), cc,
                  [_PREFIX.sub("", GC.clean_alt(a)) for a in alts if a],
-                 [_PREFIX.sub("", a) for a in extra], wd)
+                 [_PREFIX.sub("", a) for a in extra], wd, wd_alias)
     # «Генічеський Район» з альт-назви: родові слова — з малої
-    return _UNIT_CAP.sub(lambda m: m.group(1).lower(), n)
+    n = _UNIT_CAP.sub(lambda m: m.group(1).lower(), n)
+    if " " not in n and n[:1].islower():      # «республіка» як уся назва
+        n = n[:1].upper() + n[1:]
+    # Губна після голосної перед я/ю/ї — з апострофом: «Камянка» (так у
+    # Wikidata), «Полубянка», «Девятське». Перевірено на всіх 51 збігах
+    # сховища й базових підписів; «є» сюди не входить — «Благовєщенськ»,
+    # «Совєтськ» пишуться так за конвенцією, без апострофа.
+    return _APOS.sub("ʼ", n)
 
 
-def _name_of(latin, cc, alts, extra, wd):
+_APOS = re.compile(r"(?<=[аеєиіїоуюя][бпвмф])(?=[яюї])", re.I)
+
+
+def _name_of(latin, cc, alts, extra, wd, wd_alias=()):
     if re.search(r"[а-яёіїєґ]", latin, re.I):       # аліас конфігу, кирилиця
         return ALIAS_UK.get(latin, latin)
     if latin in CITY_UA:
         return CITY_UA[latin]
     if latin in UA_OBLAST:
         return UA_OBLAST[latin]
+    if latin in RU_ADM1:
+        return RU_ADM1[latin]
     if latin in EXC:
         return EXC[latin]
     fb = _fallback(latin, cc, alts, extra)
-    good = [w for w in wd if _wd_ok(w, latin, fb)]
+    good = [w for w in wd if _wd_ok(w, latin, fb, cc, wd_alias)]
     if good:
         # кілька елементів на один ID — найближчий до того, що пишуть канали
-        return max(good, key=lambda w: _sim(w.lower(), (fb or latin).lower()))
+        best = max(good, key=lambda w: _sim(w.lower(), (fb or latin).lower()))
+        # Україна: латиниця GeoNames — офіційна українська. Якщо українська
+        # альт-назва збігається з нею точніше за мітку Wikidata, мітка стара:
+        # «Красноперекопський район» проти «Перекопський район» / «Perekop Raion»
+        # (перейменовано 2024).
+        # Але не тоді, коли Wikidata знає латиницю як стару назву (вище).
+        p = pick_uk(latin, alts) if cc == "UA" and not _renamed(wd_alias, latin) else None
+        if p and p != best and _latin_sim(p, latin) > _latin_sim(best, latin):
+            return p
+        return best
     return fb or uk_latin(latin)
+
+
+def _latin_sim(uk_name, latin):
+    return _sim(_lat_norm(_rom(uk_name, _UA_LAT)), _lat_norm(latin))
 
 
 class Names:
@@ -563,6 +699,7 @@ class Names:
         want = {p[0] for p in places}
         ids = set(ids)
         self.wd = load_wd(wd_path)
+        self.wd_alias = load_wd(wd_path, col=2)
         self.extra = GC._load_extra(GC.EXTRA)
         self.recs = {}          # назва -> [(lat, lon, uk)]
         self.by_id = {}
@@ -578,7 +715,8 @@ class Names:
                     if len(c) < 15:
                         continue
                     n = name_of(c[GC.NAME], c[GC.CC], c[GC.ALT].split(","),
-                                self.extra.get(c[0], ()), self.wd.get(c[0], ()))
+                                self.extra.get(c[0], ()), self.wd.get(c[0], ()),
+                                self.wd_alias.get(c[0], ()))
                     self.recs.setdefault(c[GC.NAME], []).append(
                         (float(c[GC.LAT]), float(c[GC.LON]), n))
                     self.by_id[c[0]] = n

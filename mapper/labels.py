@@ -381,6 +381,7 @@ def main(min_pop="12000", out=None):
     # сам бере словники з цього модуля.
     import uknames as UN
     wd, extra = UN.load_wd(), UN.GC._load_extra(UN.GC.EXTRA)
+    wd_alias = UN.load_wd(col=2)
     seen, res = {}, []
     for path in ("gazetteer/RU.txt", "gazetteer/UA.txt"):
         for line in open(f"{ROOT}/{path}", encoding="utf-8"):
@@ -396,7 +397,7 @@ def main(min_pop="12000", out=None):
             if f[1] in DROP:          # район міста, а не місто
                 continue
             name = UN.name_of(f[1], f[8], f[3].split(","), extra.get(f[0], ()),
-                              wd.get(f[0], ()))
+                              wd.get(f[0], ()), wd_alias.get(f[0], ()))
             # При збігу назв лишається БІЛЬШЕ місто, а не те, що трапилось
             # першим. RU.txt читається перед UA.txt, і через це український
             # Донецьк (905 тис.) відкидався як дубль: ім'я вже займав

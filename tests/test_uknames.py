@@ -36,6 +36,10 @@ class TestRu2Uk(unittest.TestCase):
                 ("Маломихайловка", "Маломихайловка"), ("Защитное", "Защитне"),
                 ("Приазовский район", "Приазовський район"),
                 ("Юрьев-Польский", "Юрʼєв-Польський"),
+                # «-ье»: прикметник, губна, подвоєння, іменник із префіксом
+                ("Лебяжье", "Лебяже"), ("Верховье", "Верховʼя"),
+                ("Раздолье", "Раздолля"), ("Заволжье", "Заволжжя"),
+                ("Новоивановское", "Новоівановське"), ("Строитель", "Строїтель"),
                 ("Васильевка", "Васильєвка")):
             with self.subTest(ru=ru):
                 self.assertEqual(UN.ru2uk(ru), want)
@@ -44,7 +48,8 @@ class TestRu2Uk(unittest.TestCase):
         """Для України — офіційні українські закінчення й «и» без «правила
         девʼятки» («Житомир», а не «Житомір»)."""
         for ru, want in (("Родниково", "Родникове"), ("Чистяково", "Чистякове"),
-                         ("Поповка", "Попівка"), ("Житомир", "Житомир")):
+                         ("Поповка", "Попівка"), ("Житомир", "Житомир"),
+                         ("Наташино", "Наташине"), ("Витино", "Витине")):
             with self.subTest(ru=ru):
                 self.assertEqual(UN.ru2uk_ua(ru), want)
 
@@ -147,6 +152,75 @@ class TestNameOf(unittest.TestCase):
                          "Старі Богади")
         self.assertEqual(UN.name_of("Henichesk Raion", "UA", ["Генічеський Район"]),
                          "Генічеський район")
+
+
+class TestCriticalReview(unittest.TestCase):
+    """Знахідки критичної перевірки 22 вересня 2026 на всьому сховищі."""
+
+    def test_single_russian_alt_must_resemble(self):
+        # єдина альт-назва «Цветовка» — інше село
+        self.assertEqual(UN.name_of("Zaytseva Gora", "RU", ["Цветовка"]), "Зайцева Гора")
+        # англійський екзонім, а російська назва та сама
+        self.assertEqual(UN.name_of("Oryol District", "RU", ["Орловский район"]),
+                         "Орловський район")
+
+    def test_ukrainian_form_is_not_a_russian_candidate(self):
+        alts = ["Kudajgul", "Vorob'jovo", "Воробйове", "Воробьёво", "Кудайгу́л"]
+        self.assertEqual(UN.name_of("Vorobyovo", "UA", alts), "Воробйове")
+
+    def test_unit_kind_from_latin(self):
+        self.assertEqual(UN.name_of("Kulebaksky Urban Okrug", "RU", ["Кулебакский район"]),
+                         "Кулебакський міський округ")
+
+    def test_neuter_vs_masculine(self):
+        self.assertEqual(UN.name_of("Bol’shoye", "RU", ["Большое", "Большой"]), "Велике")
+
+    def test_tract_prefix_and_acronym(self):
+        self.assertEqual(UN.name_of("Urochishche Zarya", "RU", ["Урочище Заря"]), "Заря")
+        self.assertEqual(UN.name_of("Rayon KTZ", "UA", ["Район ХТЗ"]), "район ХТЗ")
+
+    def test_wikidata_other_district_rejected(self):
+        # спільне «район» не робить Ломоносовський Петродворцовим
+        self.assertEqual(UN.name_of("Petrodvortsovyy Rayon", "RU",
+                                    ["Ломоносовский Район", "Петродворцовый Район"], [],
+                                    ["Ломоносовський район"]), "Петродворцовий район")
+
+    def test_ukraine_renamed_districts(self):
+        """Wikidata тримає назви до перейменування 2024; латиниця GeoNames і
+        українська альт-назва — нові."""
+        self.assertEqual(UN.name_of("Kurman Raion", "UA",
+                                    ["Красногвардейский район", "Курманський район"], [],
+                                    ["Красногвардійський район"]), "Курманський район")
+        self.assertEqual(UN.name_of("Perekop Raion", "UA",
+                                    ["Красноперекопский район", "Перекопський район"], [],
+                                    ["Красноперекопський район"]), "Перекопський район")
+
+    def test_rename_known_to_wikidata_wins(self):
+        """Wikidata знає латиницю як стару назву (псевдонім) — мітка новіша."""
+        self.assertEqual(UN.name_of("Nikol's’ke", "UA", ["Нікольське", "Никольское"], [],
+                                    ["Микільське"], ["Нікольське", "Володарське"]),
+                         "Микільське")
+        self.assertEqual(UN.name_of("Leninskiy Rayon", "UA", [], [],
+                                    ["Шевченківський район"], ["Ленінський район"]),
+                         "Шевченківський район")
+
+    def test_apostrophe_after_labial(self):
+        # мітка Wikidata без апострофа, відтворення російської — теж
+        self.assertEqual(UN.name_of("Bilmak", "UA", ["Більмак"], [], ["Камянка"], ["Більмак"]),
+                         "Камʼянка")
+        self.assertEqual(UN.name_of("Dal’nyaya Polubyanka", "RU", ["Дальняя Полубянка"]),
+                         "Дальня Полубʼянка")
+        # «є» — конвенція, апостроф не ставиться
+        self.assertEqual(UN.name_of("Blagoveshchensk", "RU", [], [], ["Благовєщенськ"]),
+                         "Благовєщенськ")
+
+    def test_russian_regions_in_editor_style(self):
+        for latin, want in (("Vologda Oblast", "Вологодська обл."),
+                            ("North Ossetia-Alania", "Північна Осетія"),
+                            ("Respublika Adygeya", "Адигея"),
+                            ("Chuvashskaya Respublika", "Чувашія")):
+            with self.subTest(latin=latin):
+                self.assertEqual(UN.name_of(latin, "RU", ["Вологодская область"]), want)
 
 
 @needs_gazetteer

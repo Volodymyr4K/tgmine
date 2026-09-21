@@ -21,7 +21,14 @@ Urban Okrug» — «Озйори міський округ». В українс�
 назву запасними правилами `mapper/uknames.py`; перезапуск інструмента
 його підхопить.
 
-Запуск: python3 tools/wd_uk.py. Формат: geonameid \t назва1|назва2.
+Для записів України беруться ще й псевдоніми (`skos:altLabel`): з них видно,
+чи знає Wikidata про перейменування. «Микільське» має псевдонім «Нікольське»
+(Wikidata новіша за GeoNames), «Красногвардійський район» псевдоніма
+«Курманський» не має (Wikidata старша) — див. `mapper/uknames._wd_ok`.
+
+Запуск: python3 tools/wd_uk.py            (усе, ≈15 хв)
+        python3 tools/wd_uk.py --aliases  (лише псевдоніми до наявного файла)
+Формат: geonameid \t назва1|назва2 \t псевдонім1|псевдонім2 (лише Україна).
 """
 import csv
 import glob
@@ -53,7 +60,7 @@ def wanted_ids():
                 places.add((e["place"], round(e["lat"], 3), round(e["lon"], 3)))
     names = {p[0] for p in places}
     extra = GC._load_extra(GC.EXTRA)
-    ids = set()
+    ids, ua = set(), set()
     for path in SRC:
         with open(path, encoding="utf-8") as f:
             for line in f:
@@ -62,6 +69,8 @@ def wanted_ids():
                     continue
                 if c[GC.FCLASS] == "A" and not c[GC.FCODE].startswith("ADM"):
                     continue
+                if c[GC.CC] == "UA":
+                    ua.add(c[0])
                 if c[GC.NAME] in names and (c[GC.NAME], round(float(c[GC.LAT]), 3),
                                             round(float(c[GC.LON]), 3)) in places:
                     ids.add(c[0])
@@ -73,13 +82,13 @@ def wanted_ids():
                         or any(GC.CYRILLIC.match(GC.clean_alt(x)) for x in alts)
                         or (c[GC.CC] == "UA" and any(GC._UKR.search(x) for x in alts))):
                     ids.add(c[0])
-    return sorted(ids, key=int)
+    return sorted(ids, key=int), ua
 
 
-def query(ids):
+def query(ids, prop="rdfs:label"):
     vals = " ".join(f'"{i}"' for i in ids)
     q = ("SELECT ?g ?l WHERE { VALUES ?g { " + vals + " } ?i wdt:P1566 ?g. "
-         "?i rdfs:label ?l. FILTER(lang(?l) = \"uk\") }")
+         f"?i {prop} ?l. FILTER(lang(?l) = \"uk\") }}")
     data = urllib.parse.urlencode({"query": q}).encode()
     req = urllib.request.Request(URL, data=data, headers={
         "Accept": "text/csv", "User-Agent": UA,
@@ -104,22 +113,37 @@ def clean(label: str) -> str:
     return re.sub(r"['’`]", "ʼ", n)
 
 
-def main():
-    ids = wanted_ids()
-    print(len(ids), "записів", file=sys.stderr)
-    names: dict[str, set[str]] = {}
+def fetch(ids, prop, what):
+    out: dict[str, set[str]] = {}
     for k in range(0, len(ids), BATCH):
-        for r in query(ids[k:k + BATCH]):
+        for r in query(ids[k:k + BATCH], prop):
             n = clean(r["l"])
             if n:
-                names.setdefault(r["g"], set()).add(n)
-        print(f"  {k + BATCH}/{len(ids)}: разом {len(names)}", file=sys.stderr)
+                out.setdefault(r["g"], set()).add(n)
+        print(f"  {what}: {k + BATCH}/{len(ids)}, разом {len(out)}", file=sys.stderr)
         time.sleep(3)
+    return out
+
+
+def main(argv):
+    ids, ua = wanted_ids()
+    if "--aliases" in argv:
+        names = {}
+        for line in open(OUT, encoding="utf-8"):
+            g, n = line.rstrip("\n").split("\t")[:2]
+            names[g] = set(n.split("|"))
+    else:
+        print(len(ids), "записів", file=sys.stderr)
+        names = fetch(ids, "rdfs:label", "назви")
+    alias = fetch(sorted((g for g in names if g in ua), key=int), "skos:altLabel", "псевдоніми")
     with open(OUT, "w", encoding="utf-8") as f:
         for g in sorted(names, key=int):
-            f.write(g + "\t" + "|".join(sorted(names[g])) + "\n")
+            row = g + "\t" + "|".join(sorted(names[g]))
+            if alias.get(g):
+                row += "\t" + "|".join(sorted(alias[g]))
+            f.write(row + "\n")
     print(len(names), "записів отримали назви ->", OUT, file=sys.stderr)
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])

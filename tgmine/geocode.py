@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import collections
 import math
+import pathlib
 import re
+import unicodedata
 
 # GeoNames: 1=name 3=alternatenames 4=lat 5=lon 6=class 7=code 8=country 14=population
 NAME, ALT, LAT, LON, FCLASS, FCODE, CC, ADM1, POP = 1, 3, 4, 5, 6, 7, 8, 10, 14
@@ -32,8 +34,37 @@ NAME, ALT, LAT, LON, FCLASS, FCODE, CC, ADM1, POP = 1, 3, 4, 5, 6, 7, 8, 10, 14
 CYRILLIC = re.compile(r"^[а-яё\s\-']+$", re.I)
 PUNCT = re.compile(r"[^\w\s-]", re.UNICODE)
 
+# Знаки наголосу й латинські двійники в кириличних альт-назвах GeoNames.
+# «Че́рнский райо́н», «Вя́земский райо́н», «Венëвский» (латинська ë) фільтр
+# CYRILLIC відкидав цілком — і район для геокода не існував: так зникали 149
+# районів (Чернский, Ершичский, Вяземский, Узловский, Дубенский, Ельнинский…),
+# які BACKLOG §3 вважав діркою в GeoNames. Латиницю міняємо лише в слові, де
+# решта літер кирилична, — англійська назва кириличною не стає.
+_ACCENTS = dict.fromkeys(map(ord, "\u0300\u0301\u0306\u0308"), None)
+_HOMO = str.maketrans("aceopxyёëABCEHKMOPTXY", "асеорхуеeАВСЕНКМОРТХУ")
+
+
+def clean_alt(x: str) -> str:
+    x = unicodedata.normalize("NFD", x)
+    # «й» у NFD — це «и» + U+0306; повертаємо її до знімання знаків
+    x = x.replace("и\u0306", "й").replace("И\u0306", "Й")
+    x = x.translate(_ACCENTS)
+    x = unicodedata.normalize("NFC", x)
+    if re.search(r"[а-яА-Я]", x) and re.search(r"[a-zA-Zë]", x):
+        x = x.translate(_HOMO)
+    return x
+
 # прикметник -> ймовірна основа НП: "шебекинский" -> "шебекин"
-ADJ_SUFFIX = re.compile(r"(ский|ская|ское|ские|цкий|цкая|цкое|ской|скому|ском)$")
+#
+# Непрямі відмінки (-ского, -ским, -ских, -скую, -цкого, -цкой…) додано 21
+# вересня 2026 (BACKLOG §4): без них «валуйского» давало стем «валуйск», а
+# ключ «валуйский район» — «валуй», і вони не зустрічались у жодному кошику.
+# «Аннинским районом», «Погарского района», «Унечским» падали на центр області.
+ADJ_SUFFIX = re.compile(r"(ского|скому|ским|ских|скую|ский|ская|ское|ские|ской|ском|"
+                        r"цкого|цкому|цким|цких|цкую|цкий|цкая|цкое|цкие|цкой|цком)$")
+# Форми, у яких російською називають саму область: «Харьковская»,
+# «Николаевской». Лише для винятку ADM1 у `lookup`.
+REGION_ADJ = re.compile(r"(ский|ская|ское|ские|цкий|цкая|цкое|ской|скому|ском)$")
 CASE_SUFFIX = re.compile(r"(ого|ому|ыми|ами|ой|ей|ом|ым|ах|ях|у|е|а|ы|и|о)$")
 
 
@@ -65,6 +96,25 @@ def in_box(lat, lon, box=THEATER):
     return box[0] <= lat <= box[1] and box[2] <= lon <= box[3]
 
 
+# Російські назви з Wikidata для записів GeoNames, де кириличної назви нема
+# (tools/wd_names.py, зʼєднання за geonameid, P1566). Відсутній файл — не
+# помилка: газетир працює як раніше.
+EXTRA = pathlib.Path(__file__).resolve().parent.parent / "refdata" / "wikidata_ru.tsv"
+
+
+def _load_extra(path) -> dict[str, list[str]]:
+    out = {}
+    if not path or not pathlib.Path(path).exists():
+        return out
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            gid, _, names = line.rstrip("\n").partition("\t")
+            ok = [y for y in map(clean_alt, names.split("|")) if CYRILLIC.match(y)]
+            if ok:
+                out[gid] = ok
+    return out
+
+
 class Gazetteer:
     def __init__(self):
         self.by_name: dict[str, list[dict]] = collections.defaultdict(list)
@@ -79,8 +129,10 @@ class Gazetteer:
         self._self_roots: dict[frozenset, set[str]] = {}
 
     @classmethod
-    def load(cls, *paths, min_pop: int = 0, classes=("P", "A")) -> "Gazetteer":
+    def load(cls, *paths, min_pop: int = 0, classes=("P", "A"),
+             extra=EXTRA) -> "Gazetteer":
         g = cls()
+        extra_names = _load_extra(extra)
         for path in paths:
             with open(path, encoding="utf-8") as f:
                 for line in f:
@@ -100,7 +152,9 @@ class Gazetteer:
                            "cc": c[CC], "fclass": c[FCLASS], "fcode": c[FCODE],
                            "a1": c[ADM1]}
                     names = {c[NAME]}
-                    names.update(x for x in c[ALT].split(",") if CYRILLIC.match(x))
+                    names.update(y for y in map(clean_alt, c[ALT].split(","))
+                                 if CYRILLIC.match(y))
+                    names.update(extra_names.get(c[0], ()))
                     if c[FCODE] in ("ADM1", "ADM1H"):
                         g.adm1.append({**rec, "alts": list(names)})
                     for n in names:
@@ -254,6 +308,15 @@ class Gazetteer:
         7800 км: назва збіглася, сенсу нуль.
         """
         q = norm(query)
+        # Загальне слово — не місце, хоч би що знайшлось за основою: «Высоко»
+        # діставало Высокое, «России» — село Россия (друга рецензія).
+        if q in NOT_PLACES:
+            return None
+        # Розвʼязання через відмінковий фолбек нижче (родовий, складена назва,
+        # дефіс) — «морфологічне». `store.point_entity` ставить його нижче за
+        # пряме: інакше ціль у родовому («в сторону Смоленска или Рославля»,
+        # «в сторону на Орла») перебивала назване місце.
+        morph = False
         # Рамка театру потрібна лише там, де вибирає населення: у фолбеку
         # «найбільший тезка» і в якорі. Коли область відома, її й так
         # обмежують радіус max_km і near_a1, а рамка тільки шкодила: «Новый
@@ -263,11 +326,82 @@ class Gazetteer:
         # європейська координат не втрачає. «Ангарск» при Криму й далі None —
         # його відсікає радіус, не рамка.
         cands = self.candidates(query, None if near else box)
+        if not cands and q and " " not in q:
+            # Іменник у непрямому відмінку: «Одессы», «Анапы», «Орла», «Ялты»,
+            # «Качи». Короткі назви `_word_stem` не зрізає, тож ні точний, ні
+            # стемовий пошук їх не бачив (366 згадок «Одессы» лише за вікно
+            # сховища). Лише коли інакше нема нічого — точний збіг варіанту.
+            #
+            # Лише варіанти, що МІНЯЮТЬ закінчення. Дописування «+ы/+и» (його
+            # `_nominatives` має для «от Сум») тут давало сміття: «Шарк» ->
+            # Шарки, «Через» -> Черезы. Загальні слова з відмінковим
+            # закінченням («Победы» з «Дня Победы», «Силы», «Уйти») за
+            # формою від назв не відрізнити — їх відсікає NOT_PLACES.
+            for v in _nominatives(q)[1:] + _fleeting(q):
+                if v.startswith(q):
+                    continue
+                # Лише НП чи ціла область (її `_seat_over_region` замінить
+                # адмінцентром). «Лимана» інакше ставав Лиманським районом
+                # ADM2H — історичним записом.
+                cands = [c for c in self.by_name.get(v, [])
+                         if (near or in_box(c["lat"], c["lon"], box))
+                         and (c["fclass"] == "P" or c.get("fcode") in ("ADM1", "ADM1H"))]
+                if cands:
+                    # «Одессы» — місто, а не однойменна область поруч
+                    prefer_seat = morph = True
+                    break
+        if not cands and near and q and "-" in q and " " not in q:
+            # Відрізок траси «Луганск-Лисичанск», «Урзуф-Мангуш»: такої назви
+            # нема, а перший кінець є. Доки лукахед не відсував «Трасса», розбір
+            # сам різав рядок на слова й знаходив другий кінець; тепер дефісна
+            # пара приходить цілою (рецензія: ~25 подій падали на центр).
+            # Беремо перший кінець — рядок 1 цих каналів називає місце першим.
+            #
+            # Лише коли КОЖНА частина — назва і пост назвав область. Інакше
+            # ріжеться одна назва: «Ай-Петри» -> Petri у Псковській,
+            # «Князе-Григоровка» -> Григорівка, «Воздушно-десантных» -> Десантне.
+            parts = q.split("-")
+            got = [self.candidates(x, None) for x in parts]
+            if all(len(x) >= 3 for x in parts) and all(got):
+                cands, morph = got[0], True
+        if not cands and q and q.count(" ") == 1:
+            # Складена назва в непрямому відмінку: «Через Великую Лепетиху»,
+            # «Малую Белозерку», «Белой Березки». Точного ключа нема, а стем
+            # бере лише перше слово. Пробуємо називний відмінок обох слів.
+            w1, w2 = q.split()
+            v1 = [_ADJ_OBL.sub(lambda m: _ADJ_NOM[m.group(1)], w1)]
+            v2 = [w2] + _nominatives(w2)[1:] + (
+                [w2[:-1] + "а"] if w2.endswith("у") else
+                [w2[:-1] + "я"] if w2.endswith("ю") else [])
+            for a in v1:
+                for b in v2:
+                    k = f"{a} {b}"
+                    if k != q and self.by_name.get(k):
+                        cands = [c for c in self.by_name[k]
+                                 if near or in_box(c["lat"], c["lon"], box)]
+                        morph = bool(cands)
+                        if cands:
+                            break
+                if cands:
+                    break
         if not cands:
             return None
         if near:
             scoped = [(haversine(near, (c["lat"], c["lon"])), c) for c in cands]
             scoped = [(d, c) for d, c in scoped if d <= max_km]
+            if (not scoped and self.by_name.get(q)
+                    and not _FEM_ADJ.search(q.split()[0])):
+                # Те саме для області: усі точні тезки далеко («Вяземский» —
+                # село на Далекому Сході, «Губкинский» — місто в ЯНАО), а
+                # район під боком лежить під ключем «… район» і досяжний лише
+                # за основою. Раніше точний збіг обривав пошук, і подія падала
+                # на центр області (BACKLOG §3, «район є, але не знайшовся»).
+                seen = {id(c) for c in cands}
+                more = [c for st in _stems(q) for k in self.stems.get(st, [])
+                        for c in self.by_name[k] if id(c) not in seen]
+                scoped = [(d, c) for d, c in
+                          ((haversine(near, (c["lat"], c["lon"])), c) for c in more)
+                          if d <= max_km]
             # Якщо в самій області є тезка — беремо тільки з неї. Це відсікає
             # однойменні райони сусідніх регіонів ДО того, як їх порівнює
             # формула: населення в GeoNames — ненадійний сигнал (pop=0 стоїть у
@@ -289,12 +423,25 @@ class Gazetteer:
                 # Райони (ADM2/ADM3) винятку не мають узагалі — саме їх і треба
                 # відсікати: «Дмитровский район» при Орловській це не однойменний
                 # район Москви.
-                adjectival = bool(ADJ_SUFFIX.search(q.split()[0])) if q else False
+                # Старий перелік закінчень свідомо: ширший ADJ_SUFFIX (з
+                # «-ским», «-ского») пускав сюди ЧУЖІ області — «Краснодонским
+                # районом» ставало Краснодарським краєм, бо стем «краснод».
+                adjectival = bool(REGION_ADJ.search(q.split()[0])) if q else False
                 same = [(d, c) for d, c in scoped
                         if (c.get("cc"), c.get("a1")) in near_a1
                         or (adjectival and c.get("fcode") in ("ADM1", "ADM1H"))]
                 if same:
                     scoped = same
+            # Іменник — це місто, а не район: «от Старобельска» давав
+            # Старобільський РАЙОН (123 тис.) замість міста (16 тис.), коли
+            # район дістав російську назву з Wikidata, — і `point_entity`
+            # площу відкидав, подія падала на центр ЛНР. Назви районів —
+            # прикметники; для іменника район лишається, лише коли НП нема.
+            if q and not _ADJ_STEM.search(q.split()[0]):
+                ppl = [(d, c) for d, c in scoped if c["fclass"] == "P"]
+                if ppl:
+                    scoped = ppl + [(d, c) for d, c in scoped
+                                    if c.get("fcode") in ("ADM1", "ADM1H")]
             if scoped:
                 # Компроміс населення/відстань. Чиста максимізація населення
                 # кидала "ГО Богородск, Московская область" у нижегородський
@@ -309,13 +456,13 @@ class Gazetteer:
                         if prefer_seat else c)
                 if seat is not c:
                     d = haversine(near, (seat["lat"], seat["lon"]))
-                return {**seat, "dist_km": round(d), "conf": "region"}
+                return {**seat, "dist_km": round(d), "conf": "region", "morph": morph}
             if not allow_far:
                 return None
         best = max(cands, key=lambda c: c["pop"])
         if prefer_seat:
             best = self._seat_over_region(q, best, cands)
-        return {**best, "dist_km": None, "conf": "global"}
+        return {**best, "dist_km": None, "conf": "global", "morph": morph}
 
     @staticmethod
     def _seat_over_region(q: str, best: dict, pool: list[dict]) -> dict:
@@ -354,6 +501,14 @@ def _word_stem(w: str) -> str:
     if len(w) > 6:
         w = CASE_SUFFIX.sub("", w)
     return w[:7]
+
+
+# Прикметник жіночого/середнього роду чи множини. Обхід далеких точних тезок
+# для такого слова не вмикається: район — «-ский район», чоловічий рід, а
+# «Брянская» (область), «Большая», «Старая» (перше слово складеної назви)
+# через основу діставали місто Брянськ, Велику Знамʼянку, Стару Царичанку.
+# «-ой» свідомо тут: «Брянской» частіше область, ніж «Донской» район.
+_FEM_ADJ = re.compile(r"(ая|яя|ую|юю|ое|ее|ой|ей|ые|ие)$")
 
 
 # Слова-класифікатори: самі по собі місця не називають, а стем від них тягне
@@ -485,6 +640,7 @@ def _nominatives(q: str) -> list[str]:
         out += [q[:-1] + "а"]
     if q.endswith("и"):
         out += [q[:-1] + "а", q[:-1] + "ь"]
+        out += [q[:-1] + "я"]              # «Ивни» -> «ивня»
     if q.endswith("а"):
         out += [q[:-1], q[:-1] + "ь"]
     if q.endswith("я"):
@@ -494,6 +650,37 @@ def _nominatives(q: str) -> list[str]:
     if not q.endswith(("ы", "и", "а", "я")):
         out += [q + "ы", q + "и"]          # «от Сум» -> «сумы»
     return out
+# Загальні слова, які в родовому відмінку збігаються з назвою села:
+# «Дня Победы» -> Победа, «Силы ПВО» -> Сила, «Уйти в укрытие» -> Уйта.
+#
+# Річки теж: «вдоль Днепра в сторону Каховки» ставало містом Дніпро, «Десны»,
+# «Волги», «Дуная» — селами. Абстрактні іменники з переліку рецензії (21
+# вересня 2026) усі розвʼязувались у села-тезки.
+NOT_PLACES = {"победы", "силы", "уйти", "службы", "группы", "цели", "атаки",
+              "угрозы", "тревоги", "области", "власти", "стороны", "границы",
+              "днепра", "десны", "волги", "дуная", "дона", "донца", "оки",
+              "почти", "куда", "китая", "радости", "сирени", "славы", "мира",
+              "правды", "свободы", "надежды", "родины", "весны", "звезды",
+              "искры", "дружбы", "бригады", "нивы", "зори", "воли", "зари",
+              "линии", "станции", "трассы", "дороги", "реки", "моря", "залива",
+              "россии", "украины", "высоко", "низко", "далее", "очень"}
+
+SEA_AFTER = re.compile(r"\s+(?:мор[еяюмь]\w*|залив\w*|водохранилищ\w*)", re.I)
+
+# Непрямий відмінок прикметника -> називний, для першого слова складеної
+# назви: «великую» -> «великая», «белой» -> «белая», «нового» -> «новое».
+_ADJ_OBL = re.compile(r"(ую|юю|ой|ей|ого|его|ом|ем|ых|их)$")
+_ADJ_NOM = {"ую": "ая", "юю": "яя", "ой": "ая", "ей": "яя", "ого": "ое",
+            "его": "ее", "ом": "ое", "ем": "ее", "ых": "ые", "их": "ие"}
+
+
+def _fleeting(q: str) -> list[str]:
+    """Випадний голосний: «Орла» -> «орел», «Льгова» теж не сюди, лише -ла/-ра."""
+    if len(q) >= 4 and q[-1] == "а" and q[-2] in "лр" and q[-3] not in "аеиоуыэюяь":
+        return [q[:-2] + "е" + q[-2]]
+    return []
+
+
 #: непрямий відмінок прикметника -> називний жіночого роду, як в alt-назвах
 #: GeoNames: «Николаевской области» -> «николаевская область»
 _ADJ_TO_NOM = re.compile(r"(ск|цк)(?:ой|ую|ая|ом|ою)$")
@@ -672,6 +859,11 @@ def geocode_posts(posts: list[dict], gaz: Gazetteer, region_geo: dict,
             if e["type"] != entity_type:
                 continue
             q = e.get("match") or e["value"]
+            # «над Азовским морем», «Чёрного моря» — море, не станиця Азовська
+            # (прикметник із «-ским» тепер доходить до основи «азов»)
+            if e.get("pos") is not None and SEA_AFTER.match(
+                    p["text"][e["pos"] + len(str(q)):]):
+                continue
             al = (aliases or {}).get(str(q).lower().strip())
             if al:                       # ручне виправлення має пріоритет
                 hit = {"lat": al[0], "lon": al[1], "name": q, "pop": 0,
@@ -754,6 +946,18 @@ def geocode_posts(posts: list[dict], gaz: Gazetteer, region_geo: dict,
                     if d and (d.get("cc"), d.get("a1")) in a1:
                         hit = d
                         stats["district"] += 1
+                        if d["fclass"] == "P":
+                            # «Кашинского района» -> місто Кашин: знайдено
+                            # місто, а названо район — площа (друга рецензія,
+                            # «Пустынька, Кашинского района» ставала Кашином)
+                            e["_district_word"] = True
+                    elif hit:
+                        # Району в газетирі нема, і прикметник розвʼязався
+                        # МІСТОМ («Куйбышевский район» -> Більмак, колишнє
+                        # Куйбишеве). Координата лишається, але це площа: інакше
+                        # місто за населенням перебиває село, назване поруч, —
+                        # «Розовка, Куйбышевский район» ставала Більмаком.
+                        e["_district_word"] = True
             if e.get("pos") is not None:
                 after = p["text"][e["pos"] + len(str(e.get("match") or q)):]
                 nq = norm(q)
@@ -796,6 +1000,7 @@ def geocode_posts(posts: list[dict], gaz: Gazetteer, region_geo: dict,
                 # пуску з російських каналів — український бік, і «Шебекинский
                 # район — пуски» не має ставати пуском ІЗ Шебекиного.
                 e["geo_cc"] = hit.get("cc")
+                e["geo_morph"] = bool(hit.get("morph"))
                 # Координату лишаємо — «Республика Чувашия — опасность по БПЛА»
                 # це подія по площі, і центр республіки для неї чесний. Відсів
                 # такого розвʼязання геть коштував 1321 поста координати, зокрема
@@ -805,7 +1010,9 @@ def geocode_posts(posts: list[dict], gaz: Gazetteer, region_geo: dict,
                 e["geo_conf"] = "centroid" if subject else hit["conf"]
                 # Район — це ПЛОЩА, хай і менша за область. Мітка потрібна
                 # store.point_entity, щоб район не перебивав село за населенням.
-                e["geo_area"] = str(hit.get("fcode") or "").startswith("ADM")
+                e["geo_fcode"] = hit.get("fcode")
+                e["geo_area"] = (str(hit.get("fcode") or "").startswith("ADM")
+                                 or bool(e.pop("_district_word", False)))
                 # І чи ця площа лежить у названій області. Потрібне там само:
                 # пост часто перелічує кілька районів («Богучарский район,
                 # Воронежская область — фиксации на Шолоховский район,
@@ -820,4 +1027,58 @@ def geocode_posts(posts: list[dict], gaz: Gazetteer, region_geo: dict,
                 stats["ok_" + hit["conf"]] += 1
             else:
                 stats["miss"] += 1
+        if a1:
+            _scope_to_district(p, gaz, a1, entity_type, stats)
     return dict(stats)
+
+
+# Село, назване поруч із районом, шукається в цьому районі, а не по всій
+# області. Доки район розвʼязувався містом-тезкою («Токаревский» -> Токарьовка),
+# крапка стояла там; коли район почав знаходитись як ПЛОЩА (21 вересня 2026,
+# наголоси в GeoNames), `point_entity` слушно віддає перевагу селу — але село
+# шукалось по області, і перемагав тезка: «Васильевка, Токаревский район,
+# Тамбовская» ставала іншою Васильєвкою за 40+ км від району.
+#
+# Район — 40-60 км завширшки, його точка в GeoNames — центроїд, тому поріг
+# 50 км: село далі за нього від СВОГО району — це вже не воно.
+DISTRICT_SCOPE_KM = 50.0
+
+
+def _scope_to_district(p, gaz, a1, entity_type, stats):
+    """Лише канонічний формат «Село, X район»: між селом і районом тільки
+    розділовий знак, район — справжній запис ADM у своїй області, а нова
+    відповідь — ТОЧНИЙ збіг назви. Перша версія брала будь-яку сутність далі
+    50 км від будь-якої площі поста й шукала за основою — і переносила міста-
+    цілі на сіл-тезок біля району джерела: «Старый Оскол» -> Staryy Gorod,
+    «Краснодар» -> Krasnodarskiy (друга рецензія, 1237 переносів)."""
+    ents = sorted((e for e in p.get("entities", [])
+                   if e["type"] == entity_type and "lat" in e and e.get("pos") is not None),
+                  key=lambda e: e["pos"])
+    for x, d in zip(ents, ents[1:]):
+        if (x.get("geo_area") or x.get("geo_conf") != "region"
+                or not d.get("geo_in_region") or d.get("geo_conf") != "region"
+                or not str(d.get("geo_fcode") or "").startswith("ADM")):
+            continue
+        gap = p["text"][x["pos"] + len(str(x.get("match") or x["value"])):d["pos"]]
+        if not _VILLAGE_GAP.fullmatch(gap):
+            continue
+        c = (d["lat"], d["lon"])
+        if haversine(c, (x["lat"], x["lon"])) <= DISTRICT_SCOPE_KM:
+            continue
+        near = [(haversine(c, (h["lat"], h["lon"])), h)
+                for h in gaz.by_name.get(norm(x.get("match") or x["value"]), [])
+                if h["fclass"] == "P" and (h.get("cc"), h.get("a1")) in a1]
+        near = [dh for dh in near if dh[0] <= DISTRICT_SCOPE_KM]
+        if not near:
+            continue
+        dist, hit = min(near, key=lambda dh: dh[0])
+        x["lat"], x["lon"] = hit["lat"], hit["lon"]
+        x["geo_name"], x["geo_pop"] = hit["name"], hit["pop"]
+        x["geo_cc"] = hit.get("cc")
+        x["geo_dist_km"] = round(dist)
+        stats["district_scoped"] += 1
+
+
+# Між селом і його районом — лише розділовий знак: «Анненка, Гавриловский»,
+# «Ржавец, \u200bЗалегощенский», «Мещеряковский (Верхнедонской».
+_VILLAGE_GAP = re.compile(r"[\s,;/(\u200b-]*")

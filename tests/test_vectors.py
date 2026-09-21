@@ -79,11 +79,18 @@ class TestSourceFallbacks(unittest.TestCase):
         self.assertIsNone(v["src"])
         self.assertNotIn(v.get("src_name"), self.cfg.geo)
 
-    def test_without_the_codes_the_old_behaviour_is_unchanged(self):
-        """Фолбек мовчить, якщо йому не дали карти кодів admin1."""
+    def test_without_the_codes_the_district_is_still_near(self):
+        """Без карти кодів admin1 районний фолбек векторів мовчить.
+
+        Раніше тут стояло «src — None». З 21 вересня 2026 район знаходить сам
+        геокодер: точний тезка «Мантуровский» лежить далеко, і `lookup` шукає
+        за основою в радіусі області (див. TestMorphologyFallbacks). Тест тепер
+        стереже, що знайдене — саме курський район, а не тезка.
+        """
         posts = [{"text": "Куськино, Мантуровский район, Курская область - "
                           "пролёт БПЛА на север в сторону Орловской области.",
                   "date": "2026-08-20T10:00:00+03:00", "url": "u", "channel": "t",
                   "entities": [{"type": "регіон", "value": "Курська"}]}]
         v = V.geocode_vectors(posts, self.gaz, self.cfg.geo)[0]
-        self.assertIsNone(v["src"])
+        self.assertIsNotNone(v["src"])
+        self.assertLess(GC.haversine(tuple(v["src"]), (51.44, 37.25)), 30)

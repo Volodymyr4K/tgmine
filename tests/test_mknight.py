@@ -165,3 +165,15 @@ class TestTypes(unittest.TestCase):
         self.assertEqual(len(al["onsets"]), 1)
         self.assertEqual(al["onsets"][0]["ty"], "крилата ракета")
         self.assertEqual(al["onsets"][0]["src"][0]["ty"], "крилата ракета")
+
+
+class TestAreaNameLatin(unittest.TestCase):
+    """«Gorodskoy Okrug Chekhov», «Mikhaylovka Urban Okrug» — площа, не крапка."""
+
+    def test_latin_unit_words(self):
+        from mapper import mknight as MK
+        for name in ("Gorodskoy Okrug Chekhov", "Mikhaylovka Urban Okrug",
+                     "Kharkiv Oblast", "Kozel’skiy Rayon"):
+            with self.subTest(name=name):
+                self.assertTrue(MK.AREA_NAME.search(name))
+        self.assertFalse(MK.AREA_NAME.search("Okhtyrka"))

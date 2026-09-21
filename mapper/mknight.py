@@ -102,7 +102,11 @@ def bearings(raid):
     return out
 
 
-AREA_NAME = re.compile(r"rayon|raion|district|округ|район|\bГО\b", re.I)
+# Латинські «Okrug», «Oblast», «Miskrada», «Hromada» — теж площа: назви
+# GeoNames англійські, і «Gorodskoy Okrug Chekhov», «Mikhaylovka Urban Okrug»
+# (46 подій) малювались крапкою (рецензія 21 вересня 2026).
+AREA_NAME = re.compile(r"\b(?:rayon|raion|district|okrug|oblast|miskrada|hromada)\b|"
+                       r"округ|район|\bГО\b", re.I)
 
 
 def sightings(raid):

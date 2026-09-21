@@ -235,10 +235,14 @@ const TRAIL=25*60*1000;     // довжина хвоста комети
 // шари лишаються синхронними.
 const map=L.map('map',{zoomControl:true,zoomAnimation:false,
                        markerZoomAnimation:false,fadeAnimation:false}).setView([52,38],5);
-L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png',
-  {attribution:'&copy; OpenStreetMap, &copy; CARTO',maxZoom:11,opacity:.5}).addTo(map);
-L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png',
-  {maxZoom:11,opacity:.38}).addTo(map);
+// Підкладка — Esri Dark Gray, без ключа. CARTO (dark_nolabels) з вересня
+// 2026 віддає на кожній плитці водяний знак «API KEY REQUIRED», зокрема й з
+// Referer продакшну: публічна карта йшла ним поцяткована.
+const ESRI='https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/';
+L.tileLayer(ESRI+'World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+  {attribution:'&copy; Esri, HERE, Garmin, &copy; OpenStreetMap',maxZoom:11,opacity:.55}).addTo(map);
+L.tileLayer(ESRI+'World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}',
+  {maxZoom:11,opacity:.45}).addTo(map);
 const q=(a,p)=>a.slice().sort((x,y)=>x-y)[Math.floor(a.length*p)];
 const la=EV.map(e=>e.lat), ln=EV.map(e=>e.lon);
 map.fitBounds([[q(la,.04),q(ln,.04)],[q(la,.96),q(ln,.96)]],{padding:[40,70],maxZoom:7});
@@ -248,12 +252,33 @@ const RG=RAID.region_geo||{};
 let POLY={};
 
 // Точкові спостереження групуємо по НП; вузол не зникає, лише холоне.
+//
+// Мова форми — як у редакторі (mapper/mknight.sightings): крапка — місце,
+// порожнє кільце — площа. Центр ОБЛАСТІ (centroid, region-snap) крапкою
+// брехав: «Пуски БПЛА от Одесской области» ставали кружком у центрі Одещини,
+// «Брянская область / Фиксация БПЛА» — точкою під Брянськом (BACKLOG §13.1).
+// Такі події на карту місцем не йдуть — область і так підсвічується шаром
+// тривог (hotIn рахує їх). Виняток — пуск: його джерело найчастіше ціла
+// область, і він малюється кільцем, як центр району чи здогад без області.
+const AREA_NAME=/\b(?:rayon|raion|district|okrug|oblast|miskrada|hromada)\b|округ|район|(^|\s)ГО(\s|$)/i;
+const areaOf=e=>{
+  const fb=e.geo_conf==='centroid'||e.geo_conf==='region-snap';
+  if(fb) return e.kind==='пуск'?'область':null;
+  if(AREA_NAME.test(e.place||'')) return 'район';
+  if(e.geo_conf==='global') return 'здогад';
+  return '';
+};
+const onMap=e=>e.scope==='точка'&&areaOf(e)!==null;
 const places=new Map();
-EV.filter(e=>e.scope==='точка').forEach(e=>{
+EV.filter(onMap).forEach(e=>{
   const k=e.place+'|'+e.lat.toFixed(3);
-  if(!places.has(k)) places.set(k,{lat:e.lat,lon:e.lon,name:e.place,region:e.region,ev:[]});
-  places.get(k).ev.push(e);
+  if(!places.has(k)) places.set(k,{lat:e.lat,lon:e.lon,name:e.place,region:e.region,ev:[],area:areaOf(e)});
+  const pl=places.get(k); pl.ev.push(e);
+  if(!areaOf(e)) pl.area='';      // хоч одне справжнє розвʼязання — це місце
 });
+// Площа чи місце — за подіями, які вже ВІДБУЛИСЬ на цей момент: інакше місце
+// ставало суцільним ще до своєї першої справжньої події.
+const areaNow=(pl,now)=>pl.ev.every(e=>e.ms>now||areaOf(e));
 const PT=[...places.values()];
 
 // Тривоги — це СТАН області в часі: вмикається на тривозі, гасне на відбої.
@@ -369,7 +394,8 @@ function draw(){
     if(x<-80||y<-80||x>r.width+80||y>r.height+80) return;   // поза екраном
     const key=Math.round(x/CELL)+':'+Math.round(y/CELL);
     let c=cells.get(key);
-    if(!c){c={x:0,y:0,w:0,n:0,drones:0,last:0,kinds:new Set(),places:0};cells.set(key,c);}
+    if(!c){c={x:0,y:0,w:0,n:0,drones:0,last:0,kinds:new Set(),places:0,solid:0};cells.set(key,c);}
+    if(!areaNow(pl,now)) c.solid++;
     const drones=seen.reduce((m,e)=>Math.max(m,e.drones||0),0);
     const wgt=1+drones;
     c.x+=x*wgt; c.y+=y*wgt; c.w+=wgt;        // центр ваги, не центр комірки
@@ -386,7 +412,19 @@ function draw(){
     const kind=order.find(k=>c.kinds.has(k))||'фіксація';
     const rad=R_OF(c.drones||c.n);
 
-    if(kind==='вибух'){
+    if(!c.solid){
+      // лише площі (область-джерело пуску, центр району, здогад) — порожнє
+      // кільце кольору виду, як у редакторі; крапка тут означала б місце
+      const col=kind==='пуск'?'74,222,128':kind==='ППО'||kind==='збиття'?'255,77,99'
+               :kind==='вибух'?'255,138,31':'90,220,228';
+      // Пунктир: у плеєрі й фіксація — кільце з ледь помітною заливкою, тож
+      // суцільне порожнє кільце від неї на око не відрізнялось.
+      ctx.beginPath(); ctx.arc(x,y,rad,0,7);
+      ctx.lineWidth=3; ctx.strokeStyle='rgba(4,7,12,.7)'; ctx.stroke();
+      ctx.setLineDash([4,3]);
+      ctx.lineWidth=1.6; ctx.strokeStyle=`rgba(${col},${.5+.45*h})`; ctx.stroke();
+      ctx.setLineDash([]);
+    } else if(kind==='вибух'){
       ctx.beginPath();
       for(let i=0;i<10;i++){const a2=i*Math.PI/5-Math.PI/2, rr=i%2?rad*.45:rad+5;
         ctx[i?'lineTo':'moveTo'](x+Math.cos(a2)*rr,y+Math.sin(a2)*rr);}
@@ -440,7 +478,7 @@ function draw(){
 
   // ---- ШАР 2: імпульс щойної події ----------------------------------------
   EV.forEach(e=>{
-    if(e.scope!=='точка') return;
+    if(!onMap(e)) return;
     const ts=e.ms, age=now-ts;
     if(age<0||age>PULSE) return;
     const k=age/PULSE, [x,y]=P(e.lat,e.lon);
@@ -497,7 +535,7 @@ function panel(){
     else if(e.kind==='вибух') boom++;
     drones+=e.drones||0;
     if(e.region) regs.add(e.region);
-    if(e.scope==='точка'){ places.add(e.place);
+    if(onMap(e)){ places.add(e.place);
       if(now-e.ms<3600000) recent.push(e.depth); }
   }
   const pl=places.size;
@@ -658,7 +696,9 @@ map.on('click',ev=>{
   // медіана 4 обʼєкти в радіусі, p90 29, макс 251, конкретне імʼя в 25%
   // рядків. Без тла — 29.4%, медіана 1, p90 5, макс 41, імʼя у 50% рядків,
   // і це аеродроми, нафтобази, склади БК, НПЗ.
-  const around=(seen.every(e=>e.geo_conf==='centroid'||e.geo_conf==='region-snap')
+  // Площа (центр району, здогад, область-джерело пуску) рядка теж не має:
+  // «у радіусі 15 км» від центроїда району означає так само мало.
+  const around=(seen.every(e=>areaOf(e))
       ? [] : (TARGETS.objects||[]).filter(x=>x.lat!=null && (x.tier||3)<=2
           && map.distance([pl.lat,pl.lon],[x.lat,x.lon])<=NEAR_R*1000));
   const byCat={};

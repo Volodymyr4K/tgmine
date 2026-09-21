@@ -456,19 +456,21 @@ class TestDistrictSuffix(unittest.TestCase):
                     f"жодна точка не в {reg}: "
                     f"{[(e.get('geo_name'), e['lat'], e['lon']) for e in got]}")
 
-    def test_missing_district_keeps_old_answer(self):
-        """Району в газетирі може не бути — тоді нічого не змінюється.
+    def test_accented_district_is_found(self):
+        """Район із наголосами в альт-назві — теж район.
 
-        «Урицкий район» Орловської області в GeoNames відсутній; правка не має
-        ні падати, ні підставляти район із чужої області.
+        Тут був тест «району в газетирі нема» саме на «Урицкий район»: у
+        GeoNames він записаний як «У́рицкий райо́н», і фільтр CYRILLIC відкидав
+        назву цілком. Після `clean_alt` (21 вересня 2026) район є, і крапка
+        має лягти в Орловську, а не на центр області.
         """
+        self.assertTrue(self.gaz.by_name.get(GC.norm("Урицкий район")))
         got = self._resolve("п.Гагаринский, Урицкий район, Орловская область - "
                             "пролёт БПЛА на Нарышкино.\n📡\nЛокатор России -\n"
                             "@locatorru")
-        self.assertTrue(got, "розбір не має ламатись на відсутньому районі")
-        self.assertEqual(
-            self.gaz.by_name.get(GC.norm("Урицкий район")), None,
-            "район зʼявився в газетирі — тест більше не про той випадок")
+        self.assertTrue(got, "розбір не має ламатись")
+        self.assertTrue(any(self._inside(e["lat"], e["lon"], self.polys["Орловська"])
+                            for e in got))
 
 
 @needs_gazetteer
@@ -872,3 +874,211 @@ class TestFreeformKeepsTheSecondWord(unittest.TestCase):
                           ("Приазовье Краснодарский край", "Приазовье")):
             with self.subTest(text=text):
                 self.assertNotIn(bad, [e["value"] for e in E.freeform_of(text, cfg)])
+
+
+class TestCleanAlt(unittest.TestCase):
+    """Наголоси й латинські двійники в кириличних альт-назвах GeoNames.
+
+    «Че́рнский райо́н», «Венëвский» фільтр CYRILLIC відкидав цілком — 149
+    районів для геокода не існували (BACKLOG §3, «844 відсутні райони»).
+    """
+
+    def test_accents_and_homoglyphs(self):
+        for raw, want in (("Че́рнский райо́н", "Чернский район"),
+                          ("Венëвский Район", "Веневский Район"),
+                          ("Чeрнянский Район", "Чернянский Район"),
+                          ("Йошкар-Ола", "Йошкар-Ола")):
+            with self.subTest(raw=raw):
+                self.assertEqual(GC.clean_alt(raw), want)
+                self.assertTrue(GC.CYRILLIC.match(GC.clean_alt(raw)))
+
+    def test_latin_name_stays_latin(self):
+        self.assertEqual(GC.clean_alt("Chernsky"), "Chernsky")
+
+
+class TestLeadingFunctionWord(unittest.TestCase):
+    """Службове слово чи класифікатор на початку не склеюється з назвою.
+
+    «Через Валуйский район», «Стык Хомутовский район», «Трасса Чкалово»
+    ставали одним двослівним НП, якого нема, і подія падала на центр області.
+    """
+
+    def test_word_is_skipped(self):
+        cfg = E.Config.load(CFG)
+        for text, want in (("Через Валуйский район, Белгородской области", "Валуйский"),
+                           ("Весь Лабинский район, Краснодарского края", "Лабинский"),
+                           ("Стык Хомутовский район с Рыльским", "Хомутовский"),
+                           ("Трасса Чкалово опасность", "Чкалово"),
+                           ("Между Маловидное и Бахчисараем", "Маловидное")):
+            with self.subTest(text=text):
+                vals = [e["value"] for e in E.freeform_of(text, cfg)]
+                self.assertIn(want, vals)
+                self.assertFalse([v for v in vals if " " in v and want in v], vals)
+
+    def test_compound_names_survive(self):
+        cfg = E.Config.load(CFG)
+        for text, want in (("Белой Березки группа БПЛА", "Белой Березки"),
+                           ("Арабатская Стрелка опасность", "Арабатская Стрелка")):
+            with self.subTest(text=text):
+                self.assertIn(want, [e["value"] for e in E.freeform_of(text, cfg)])
+
+
+@needs_gazetteer
+class TestMorphologyFallbacks(unittest.TestCase):
+    """Три шляхи, якими назва з газетира не знаходилась (21 вересня 2026)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.cfg = E.Config.load(CFG)
+        cls.gaz = GC.Gazetteer.load(GAZ / "RU.txt", GAZ / "UA.txt")
+        cls.a1 = cls.gaz.region_codes(cls.cfg.entities["регіон"], cls.cfg.geo)
+
+    def _in(self, word, reg):
+        return self.gaz.lookup(word, self.cfg.geo[reg], near_a1=self.a1.get(reg))
+
+    def test_oblique_adjective_reaches_district(self):
+        """§4: «Аннинским», «Погарского» — не лише називний відмінок."""
+        for word, reg in (("Аннинским", "Воронезька"), ("Погарского", "Брянська"),
+                          ("Валуйского", "Бєлгородська")):
+            with self.subTest(word=word):
+                hit = self._in(word, reg)
+                self.assertTrue(hit)
+                self.assertIn((hit["cc"], hit["a1"]), self.a1[reg])
+
+    def test_far_exact_namesake_does_not_block_stem(self):
+        """«Козельский» буквально є лише селом у Сибіру — район мав знаходитись."""
+        for word, reg in (("Козельский", "Калузька"), ("Вяземский", "Смоленська"),
+                          ("Шиловский", "Рязанська")):
+            with self.subTest(word=word):
+                hit = self._in(word, reg)
+                self.assertTrue(hit)
+                self.assertEqual(hit["fclass"], "A")
+                self.assertIn((hit["cc"], hit["a1"]), self.a1[reg])
+
+    def test_genitive_noun(self):
+        """«Одессы» — місто Одеса, не область; загальні слова селами не стають."""
+        for word, name in (("Одессы", "Odesa"), ("Анапы", "Anapa"), ("Орла", "Orël"),
+                           ("Качи", "Kacha")):
+            with self.subTest(word=word):
+                hit = self.gaz.lookup(word, None, allow_far=True)
+                self.assertTrue(hit)
+                self.assertEqual(hit["name"], name)
+        for word in ("Шарк", "Через", "Победы", "Силы"):
+            with self.subTest(word=word):
+                self.assertIsNone(self.gaz.lookup(word, None, allow_far=True))
+
+    def test_single_word_does_not_reach_compound_name(self):
+        """«Большая группа БПЛА … Симферополь» — не Велика Знамʼянка.
+
+        Точні тезки «Большая» всі далеко, і обхід за основою діставав
+        «Большая Знаменка» (Запоріжжя) — за першим словом складеної назви.
+        Стереже `_FEM_ADJ`: жіночий рід обходу не вмикає.
+        """
+        for word in ("Большая", "Старая"):
+            with self.subTest(word=word):
+                self.assertIsNone(self._in(word, "Крим"))
+
+
+@needs_gazetteer
+class TestReviewFindings(unittest.TestCase):
+    """Вади, знайдені рецензією 21 вересня 2026 на першій версії правок."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.cfg = E.Config.load(CFG)
+        cls.gaz = GC.Gazetteer.load(GAZ / "RU.txt", GAZ / "UA.txt")
+        cls.a1 = cls.gaz.region_codes(cls.cfg.entities["регіон"], cls.cfg.geo)
+
+    def _in(self, word, reg):
+        return self.gaz.lookup(word, self.cfg.geo[reg], near_a1=self.a1.get(reg),
+                               prefer_seat=True)
+
+    def _resolve(self, text):
+        posts = [{"channel": "t", "id": 1, "date": "2026-08-20T10:00:00+00:00",
+                  "text": text}]
+        posts = E.enrich(posts, self.cfg)
+        GC.geocode_posts(posts, self.gaz, self.cfg.geo,
+                         aliases=self.cfg.geo_aliases, region_a1=self.a1)
+        return posts[0]
+
+    def test_cape_and_bay_stay_in_sevastopol(self):
+        """«Мыс Херсонес» — не село Херсонес у ДНР за 370 км."""
+        for text in ("Мыс Херсонес, Фиолент / Фиксации БПЛА",
+                     "Бухты Казачья / Пролёт БПЛА / Севастополь"):
+            with self.subTest(text=text):
+                p = self._resolve(text)
+                pt = ST.point_entity(p)
+                self.assertTrue(pt)
+                self.assertLess(GC.haversine((pt["lat"], pt["lon"]), (44.6, 33.5)), 20)
+
+    def test_noun_is_a_town_not_its_district(self):
+        """«от Старобельска» — місто, а не Старобільський район (площа)."""
+        hit = self._in("Старобельска", "ТОТ_Луганськ")
+        self.assertEqual(hit["fclass"], "P")
+
+    def test_road_segment_takes_first_end(self):
+        hit = self._in("Луганск-Лисичанск", "ТОТ_Луганськ")
+        self.assertEqual(hit["name"], "Luhansk")
+
+    def test_compound_name_in_oblique_case(self):
+        for word, reg, name in (("Великую Лепетиху", "ТОТ_Херсон", "Velyka Lepetykha"),
+                                ("Белой Березки", "Брянська", "Belaya Berëzka")):
+            with self.subTest(word=word):
+                self.assertEqual(self._in(word, reg)["name"], name)
+
+    def test_rivers_and_common_nouns_are_not_villages(self):
+        for word in ("Днепра", "Десны", "Волги", "Славы"):
+            with self.subTest(word=word):
+                self.assertIsNone(self.gaz.lookup(word, None, allow_far=True))
+
+    def test_district_word_resolved_as_town_is_still_an_area(self):
+        """«Розовка, Куйбышевский район» — Розівка, а не Більмак."""
+        p = self._resolve("Розовка, Куйбышевский район / Фиксация БПЛА / "
+                          "Запорожская область")
+        dist = [e for e in p["entities"] if e["value"] == "Куйбышевский" and "lat" in e]
+        for e in dist:
+            self.assertTrue(e["geo_area"])
+
+    def test_village_is_searched_in_its_named_district(self):
+        """«Васильевка, Токаревский район» — Васильєвка цього району.
+
+        Коли район почав знаходитись як площа, село шукалось по всій області
+        й діставало тезку за 130 км (друга рецензія, арбітр «названий район»).
+        """
+        p = self._resolve("Васильевка, Токаревский район, Тамбовская область - "
+                          "пролёт от 2 БПЛА в сторону Ржакса.")
+        v = next(e for e in p["entities"] if e["value"] == "Васильевка")
+        d = next(e for e in p["entities"] if e["value"] == "Токаревский")
+        self.assertLess(GC.haversine((v["lat"], v["lon"]), (d["lat"], d["lon"])),
+                        GC.DISTRICT_SCOPE_KM)
+
+    def test_target_in_genitive_does_not_beat_named_place(self):
+        """«Ершичи … в сторону Смоленска или Рославля» — Єршичі, не Рославль.
+
+        Родовий «Рославля» знайдено фолбеком; пряма назва стоїть вище.
+        """
+        p = self._resolve("Ершичи / Фиксация БПЛА в сторону Смоленска или "
+                          "Рославля / Смоленская область")
+        pt = ST.point_entity(p)
+        self.assertEqual(pt["value"], "Ершичи")
+
+    def test_sea_is_not_a_village(self):
+        """«над Азовским морем» — не станиця Азовська."""
+        p = self._resolve("БПЛА над Азовским морем в направлении "
+                          "Краснодарского края")
+        self.assertFalse([e for e in p["entities"]
+                          if e["type"] == "нп" and "lat" in e])
+
+    def test_hyphen_is_not_cut_inside_one_name(self):
+        for word, reg in (("Ай-Петри", "Крим"), ("Князе-Григоровка", "ТОТ_Херсон")):
+            with self.subTest(word=word):
+                hit = self._in(word, reg)
+                self.assertTrue(hit is None or hit["name"] not in ("Petri",))
+
+    def test_district_scope_needs_village_district_format(self):
+        """Ціль напрямку біля району не переноситься на тезку."""
+        p = self._resolve("Валуйский район - пролёты БПЛА в сторону Старый Оскол "
+                          "/ Белгородская область")
+        so = [e for e in p["entities"] if e["value"].startswith("Старый")]
+        for e in so:
+            self.assertLess(GC.haversine((e["lat"], e["lon"]), (51.30, 37.84)), 15)

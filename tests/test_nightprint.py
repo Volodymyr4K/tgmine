@@ -47,6 +47,29 @@ class TestInputsAreComplete(unittest.TestCase):
             with self.subTest(path=str(p)):
                 self.assertIn(Path(p).resolve(), have)
 
+    def test_site_builds_nights_only_through_night_argv(self):
+        """site.py не в відбитку, тож команди збирання ночі мусять іти з
+        NP.NIGHT_ARGV (яка у відбитку). Прямий виклик скрипта ночі в site.py
+        означав би, що зміна його аргументів не перебудує карт."""
+        src = (ROOT / "site.py").read_text(encoding="utf-8")
+        for script in ("raid.py", "makeraid.py", "mapper/mknight.py"):
+            with self.subTest(script=script):
+                self.assertNotIn(f'"{script}"', src)
+        self.assertIn("NP.NIGHT_ARGV", src)
+
+    def test_argv_changes_the_print(self):
+        root = ROOT
+        base = NP.code_print(root)
+        old = NP.NIGHT_ARGV
+        try:
+            NP.NIGHT_ARGV = (("raid.py", "{d}", "18", "12"),) + old[1:]
+            self.assertNotEqual(NP.code_print(root), base)
+        finally:
+            NP.NIGHT_ARGV = old
+
+    def test_nightprint_itself_is_not_an_input(self):
+        self.assertFalse([p for p in NP.inputs(ROOT) if p.name == "nightprint.py"])
+
     def test_raid_reads_the_config_and_gazetteer_named_in_inputs(self):
         src = (ROOT / "raid.py").read_text(encoding="utf-8")
         self.assertIn('"configs/ru-monitor.yaml"', src)

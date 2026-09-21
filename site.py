@@ -778,7 +778,7 @@ def main():
         fp_path.parent.mkdir(parents=True, exist_ok=True)
         prints = NP.load(fp_path)
         code = NP.code_print(Path("."))
-        stale_n = 0
+        why = collections.Counter()
         for r in rows:
             d = r["date"]
             want_page = r["points"] >= PAGE_MIN
@@ -792,19 +792,22 @@ def main():
             stale = prints.get(d) != fp
             if not fresh and done_page and done_night and not stale:
                 continue
-            stale_n += stale and done_page and done_night and not fresh
+            why["свіжих" if fresh else "відсутніх" if not (done_page and done_night)
+                else "застарілих"] += 1
             try:
-                subprocess.run([sys.executable, "raid.py", d], check=True,
+                # argv — з NP.NIGHT_ARGV: вони ж входять у відбиток ночі
+                argv = [[x.format(d=d, night=nights / f"{d}.js") for x in step]
+                        for step in NP.NIGHT_ARGV]
+                subprocess.run([sys.executable, *argv[0]], check=True,
                                capture_output=True, timeout=900)
                 if want_page:
-                    subprocess.run([sys.executable, "makeraid.py", f"raid_{d}.json"],
+                    subprocess.run([sys.executable, *argv[1]],
                                    check=True, capture_output=True, timeout=900)
                     shutil.move(f"raid_{d}.html", OUT / "raids" / f"{d}.html")
                 night_ok = True
                 if want_night:
                     try:
-                        subprocess.run([sys.executable, "mapper/mknight.py",
-                                        f"raid_{d}.json", str(nights / f"{d}.js")],
+                        subprocess.run([sys.executable, *argv[2]],
                                        check=True, capture_output=True, timeout=900)
                     except Exception as e:
                         night_ok = False
@@ -816,10 +819,13 @@ def main():
                 print(f"  наліт {d} ok" if want_page else f"  ніч {d} ok (тиха доба)")
             except Exception as e:
                 print(f"  ! наліт {d}: {e}")
-        # Рядок для логу CI: у звичайному прогоні тут 0 — старі ночі не
-        # чіпаються; після правки коду чи перебудови сховища — стільки,
-        # скільки ночей це зачепило.
-        print(f"  відбиток: перебудовано застарілих ночей {stale_n}")
+        # Рядок для логу CI — окремо свіжі (завжди), відсутні (холодний кеш)
+        # і застарілі (змінився відбиток). У звичайному прогоні відсутніх і
+        # застарілих 0. Перша версія рахувала лише застарілі й на холодному
+        # прогоні писала «0», хоча зібрано було все, — рядок, який має бути
+        # доказом, вводив в оману.
+        print("  відбиток: перебудовано " + (", ".join(
+            f"{k} {why[k]}" for k in ("свіжих", "відсутніх", "застарілих")) or "0"))
         # Відбиток АРХІВУ — ночей поза свіжими — для ключа кешу CI. Свіжі
         # змінюються щогодини; з ними ключ міняв би кожен прогін (53 МБ × 24
         # на добу). Без них ключ сталий у звичайні прогони і новий рівно тоді,

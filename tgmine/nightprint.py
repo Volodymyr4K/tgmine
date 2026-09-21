@@ -25,11 +25,20 @@ import os
 from datetime import date, timedelta
 from pathlib import Path
 
-#: Код, що будує ніч: `site.py` викликає `raid.py`, `makeraid.py` і
-#: `mapper/mknight.py`; ті імпортують `tgmine/*` і `mapper/labels.py`,
-#: `mapper/mkreglabels.py`. `site.py` сюди свідомо не входить — він лише
-#: викликає скрипти й переносить файли, і кожна його правка інакше
-#: перебудовувала б увесь архів.
+#: Як `site.py` будує ніч — рівно ці команди, argv збирається звідси. Входить
+#: у відбиток явно: `site.py` сам у відбитку нема (кожна його правка
+#: перебудовувала б архів), і без цієї константи зміна аргументів (скажімо,
+#: годин вікна для `raid.py`) змінила б карти, не змінивши відбитка.
+NIGHT_ARGV = (("raid.py", "{d}"),
+              ("makeraid.py", "raid_{d}.json"),
+              ("mapper/mknight.py", "raid_{d}.json", "{night}"))
+
+#: Код, що будує ніч: скрипти з NIGHT_ARGV і все, що вони імпортують.
+#: `tgmine/*.py` — цілим пакетом, а не точним переліком імпортів: `makeraid.py`
+#: уже тягне `tgmine.territory` через `__import__`, а такого імпорту не бачить
+#: ні `modulefinder`, ні тест. Ціна — зайва перебудова після правки
+#: `scrape.py`/`cli.py`/`analyze.py` (ночі їх не імпортують), вона рідкісна.
+#: Сам `nightprint.py` не входить: правка логіки відбитка карт не змінює.
 CODE = ("raid.py", "makeraid.py", "mapper/mknight.py", "mapper/labels.py",
         "mapper/mkreglabels.py", "tgmine/*.py")
 
@@ -62,14 +71,14 @@ def inputs(root: Path) -> list[Path]:
     """Усі файли коду й даних, від яких залежить будь-яка ніч."""
     out = []
     for pat in CODE + DATA:
-        hits = sorted(root.glob(pat))
+        hits = [p for p in sorted(root.glob(pat)) if p.name != "nightprint.py"]
         out += hits if hits else [root / pat]      # відсутній теж впливає
     return out
 
 
 def code_print(root: Path) -> str:
     """Спільна частина відбитка — рахується раз на прогін."""
-    h = hashlib.sha256()
+    h = hashlib.sha256(repr(NIGHT_ARGV).encode())
     for p in inputs(root):
         h.update(f"{p.relative_to(root)}\0{_file_hash(p)}\n".encode())
     return h.hexdigest()

@@ -1159,3 +1159,17 @@ class TestThirdReview(TestReviewFindings):
         p = self._resolve("Архангельская область - опасность по БПЛА")
         self.assertFalse([e for e in p["entities"] if e["type"] == "нп"
                           and "lat" in e and e.get("geo_fcode") not in ("ADM1", "ADM1H")])
+
+    def test_ukrainian_only_name_found_by_skeleton_in_region(self):
+        """«Стрелковое», «Серогозы», «Бановка» — у GeoNames лише українською
+        (Стрілкове, Сірогози, Банівка). Кістяк приголосних — лише з областю
+        поста й за єдиного збігу: без області він давав сміття."""
+        for word, reg, name in (("Стрелковое", "ТОТ_Херсон", "Strilkove"),
+                                ("Серогозы", "ТОТ_Херсон", "Sirohozy"),
+                                ("Бановка", "ТОТ_Запоріжжя", "Banivka")):
+            with self.subTest(word=word):
+                hit = self._in(word, reg)
+                self.assertTrue(hit and hit["name"] == name, hit)
+                self.assertTrue(hit["morph"])
+        self.assertIsNone(self.gaz.lookup("Грабер", None, allow_far=True))
+        self.assertIsNone(self._in("Скорость", "Крим"))

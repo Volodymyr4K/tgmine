@@ -125,6 +125,9 @@ class Gazetteer:
         # самої назви не зустрічались у жодному спільному кошику.
         self.roots: dict[str, list[str]] = collections.defaultdict(list)
         self.adm1: list[dict] = []       # записи ADM1 — для region_codes()
+        # Кістяк приголосних українських назв записів БЕЗ російської назви:
+        # «Сірогози» -> «сргз». Див. `_ua_fallback`.
+        self.ua_skel: dict[str, list[dict]] = collections.defaultdict(list)
         # корені власних прикметникових назв субʼєктів, на набір кодів ADM1
         self._self_roots: dict[frozenset, set[str]] = {}
 
@@ -157,6 +160,12 @@ class Gazetteer:
                     names.update(extra_names.get(c[0], ()))
                     if c[FCODE] in ("ADM1", "ADM1H"):
                         g.adm1.append({**rec, "alts": list(names)})
+                    if c[CC] == "UA" and c[FCLASS] == "P" and names == {c[NAME]}:
+                        for a in {clean_alt(x) for x in c[ALT].split(",")
+                                  if _UKR.search(x)}:
+                            k = _skel(a)
+                            if len(k.replace(" ", "")) >= 4:
+                                g.ua_skel[k].append(rec)
                     for n in names:
                         n = norm(n)
                         if len(n) >= 3:
@@ -256,6 +265,30 @@ class Gazetteer:
                     if c:
                         return c, False
         return [], False
+
+    def _ua_fallback(self, q: str, near, max_km: float, near_a1) -> dict | None:
+        """Назва, що в GeoNames є лише УКРАЇНСЬКОЮ: «Серогозы» — «Сірогози»,
+        «Стрелковое» — «Стрілкове», «Бановка» — «Банівка». Половина НП
+        України в газетирі без російської назви, і такий запис для постів
+        російською не існував.
+
+        Порівнюється кістяк приголосних: голосні корня відповідають по-різному
+        («Сірогози»/«Серогозы», «Білозерка»/«Белозерка», «Кам'янка»/«Каменка»),
+        тож прямий трансліт не годиться. Кістяк — грубий ключ, і заміряно, що
+        БЕЗ області поста він дає сміття («Грабер» -> Гарбарі, «Скорость» ->
+        Іскорость, «Причина» -> Пірчине). Тому лише: пост назвав область, запис
+        у ній і в радіусі, і він ЄДИНИЙ. Остання спроба перед «не знайдено»."""
+        if not near or not near_a1 or len(q) < 5:
+            return None
+        vs = {q} | set(_nominatives(q)[1:] + _adj_nominatives(q)) if " " not in q else {q}
+        hits = {id(c): c for v in vs for c in self.ua_skel.get(_skel(v), [])
+                if (c["cc"], c["a1"]) in near_a1
+                and haversine(near, (c["lat"], c["lon"])) <= max_km}
+        if len(hits) != 1:
+            return None
+        c = next(iter(hits.values()))
+        return {**c, "dist_km": round(haversine(near, (c["lat"], c["lon"]))),
+                "conf": "region", "morph": True}
 
     def has_compound(self, q2: str) -> bool:
         """Двослівна назва є в газетирі — точно або в називному відмінку.
@@ -407,7 +440,7 @@ class Gazetteer:
             if all(len(x) >= 3 for x in parts) and all(got):
                 cands, morph = got[0], True
         if not cands:
-            return None
+            return self._ua_fallback(q, near, max_km, near_a1)
         if near:
             scoped = [(haversine(near, (c["lat"], c["lon"])), c) for c in cands]
             scoped = [(d, c) for d, c in scoped if d <= max_km]
@@ -500,7 +533,7 @@ class Gazetteer:
                     d = haversine(near, (seat["lat"], seat["lon"]))
                 return {**seat, "dist_km": round(d), "conf": "region", "morph": morph}
             if not allow_far:
-                return None
+                return self._ua_fallback(q, near, max_km, near_a1)
         best = max(cands, key=lambda c: c["pop"])
         if prefer_seat:
             best = self._seat_over_region(q, best, cands)
@@ -730,6 +763,15 @@ SEA_AFTER = re.compile(r"\s+(?:мор[еяюмь]\w*|залив\w*|водохр�
 _ADJ_OBL = re.compile(r"(ую|юю|ой|ей|ого|его|ом|ем|ых|их)$")
 _ADJ_NOM = {"ую": "ая", "юю": "яя", "ой": "ая", "ей": "яя", "ого": "ое",
             "его": "ее", "ом": "ое", "ем": "ее", "ых": "ые", "их": "ие"}
+
+
+_UKR = re.compile(r"[іїєґ]", re.I)
+_SKEL_DROP = dict.fromkeys(map(ord, "аеёиіїоуыэюяєьъ'’ʼ"), None)
+
+
+def _skel(s: str) -> str:
+    """Кістяк приголосних: «Сірогози» і «Серогозы» -> «сргз»."""
+    return norm(s).replace("ґ", "г").translate(_SKEL_DROP)
 
 
 def _adj_nominatives(q: str) -> list[str]:

@@ -22,6 +22,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
+from tgmine import nightprint as NP
 from tgmine import store as ST
 from tgmine.labels import region_label
 
@@ -769,6 +770,15 @@ def main():
         # п'яту годину, у зведенні стояло 15 спостережень, а в списку дат
         # редактора її не було взагалі.
         PAGE_MIN, NIGHT_MIN = 40, 3
+        # Відбиток кожної ночі — див. tgmine/nightprint.py. Ніч, чий відбиток
+        # змінився (сховище її вікна, код чи дані, що її будують), будується
+        # наново; записаний відбиток — лише після успішної збірки, тож
+        # обірваний прогін просто доробить решту наступного разу.
+        fp_path = OUT / "raids" / "_fingerprints.json"
+        fp_path.parent.mkdir(parents=True, exist_ok=True)
+        prints = NP.load(fp_path)
+        code = NP.code_print(Path("."))
+        stale_n = 0
         for r in rows:
             d = r["date"]
             want_page = r["points"] >= PAGE_MIN
@@ -778,8 +788,11 @@ def main():
             fresh = rebuild is not None and d in rebuild
             done_page = (not want_page) or d in built
             done_night = (not want_night) or d in have_night
-            if not fresh and done_page and done_night:
+            fp = NP.night_print(Path("."), d, code)
+            stale = prints.get(d) != fp
+            if not fresh and done_page and done_night and not stale:
                 continue
+            stale_n += stale and done_page and done_night and not fresh
             try:
                 subprocess.run([sys.executable, "raid.py", d], check=True,
                                capture_output=True, timeout=900)
@@ -787,17 +800,35 @@ def main():
                     subprocess.run([sys.executable, "makeraid.py", f"raid_{d}.json"],
                                    check=True, capture_output=True, timeout=900)
                     shutil.move(f"raid_{d}.html", OUT / "raids" / f"{d}.html")
+                night_ok = True
                 if want_night:
                     try:
                         subprocess.run([sys.executable, "mapper/mknight.py",
                                         f"raid_{d}.json", str(nights / f"{d}.js")],
                                        check=True, capture_output=True, timeout=900)
                     except Exception as e:
+                        night_ok = False
                         print(f"  ! ніч для редактора {d}: {e}")
+                if night_ok:
+                    prints[d] = fp
+                    NP.save(fp_path, prints)
                 Path(f"raid_{d}.json").unlink(missing_ok=True)
                 print(f"  наліт {d} ok" if want_page else f"  ніч {d} ok (тиха доба)")
             except Exception as e:
                 print(f"  ! наліт {d}: {e}")
+        # Рядок для логу CI: у звичайному прогоні тут 0 — старі ночі не
+        # чіпаються; після правки коду чи перебудови сховища — стільки,
+        # скільки ночей це зачепило.
+        print(f"  відбиток: перебудовано застарілих ночей {stale_n}")
+        # Відбиток АРХІВУ — ночей поза свіжими — для ключа кешу CI. Свіжі
+        # змінюються щогодини; з ними ключ міняв би кожен прогін (53 МБ × 24
+        # на добу). Без них ключ сталий у звичайні прогони і новий рівно тоді,
+        # коли перебудовано архів, — інакше збереження «вже існує» не пустило
+        # б новий архів у кеш, і кожен наступний прогін будував би його знову.
+        arch = {d: f for d, f in prints.items() if not (rebuild and d in rebuild)}
+        (OUT / "raids" / "_archive_print.txt").write_text(
+            hashlib.sha256(json.dumps(arch, sort_keys=True).encode()).hexdigest() + "\n",
+            encoding="utf-8")
         night_index(nights)
 
     have = {p.stem for p in (OUT / "raids").glob("*.html")}

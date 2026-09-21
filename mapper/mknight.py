@@ -19,7 +19,17 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 sys.path.insert(0, HERE)
 from tgmine import routes as RT
-from labels import CITY_UA, uk          # ті самі правила назв, що й у підписах
+import uknames as UN                    # українські назви місць (див. там)
+
+
+def _namer(raid):
+    """Українські назви місць ночі — один прохід газетира на ніч, спільний
+    для збиттів, курсів і фіксацій (`mapper/uknames.py`)."""
+    nm = raid.get("_uk")
+    if nm is None:
+        nm = raid["_uk"] = UN.Names({(e["place"], e["lat"], e["lon"]) for e in raid["events"]
+                                     if e.get("place") and e.get("lat")})
+    return nm
 
 
 def strikes(raid):
@@ -43,6 +53,7 @@ def strikes(raid):
         key = (round(e["lat"], 2), round(e["lon"], 2))
         b = by.setdefault(key, {"la": key[0], "lo": key[1], "n": 0,
                                 "place": e.get("place") or "", "t": e.get("hhmm", ""),
+                                "lat": e["lat"], "lon": e["lon"],
                                 "kinds": collections.Counter(),
                                 "types": collections.Counter(), "src": []})
         b["n"] += 1
@@ -57,9 +68,9 @@ def strikes(raid):
         if e.get("url"):
             b["src"].append({"u": e["url"], "t": e.get("hhmm", ""),
                              "k": e.get("kind", ""), "ty": e.get("utype")})
-    out = []
+    out, nm = [], _namer(raid)
     for b in by.values():
-        name = CITY_UA.get(b["place"]) or uk(b["place"]) if b["place"] else ""
+        name = nm.place(b["place"], b["lat"], b["lon"])
         kind = b["kinds"].most_common(1)[0][0]
         # Більше восьми посилань на одну позначку читати ніхто не буде, а
         # вага файла росте на кожну ніч. Скільки їх насправді — каже `n`.
@@ -88,14 +99,15 @@ def bearings(raid):
         key = (round(e["lat"], 2), round(e["lon"], 2), int(e["bearing"]))
         b = by.setdefault(key, {"la": key[0], "lo": key[1], "deg": key[2], "n": 0,
                                 "place": e.get("place") or "", "t": e.get("hhmm", ""),
+                                "lat": e["lat"], "lon": e["lon"],
                                 "src": []})
         b["n"] += 1
         if e.get("url"):
             b["src"].append({"u": e["url"], "t": e.get("hhmm", ""),
                              "k": e.get("kind", ""), "ty": e.get("utype")})
-    out = []
+    out, nm = [], _namer(raid)
     for b in by.values():
-        name = CITY_UA.get(b["place"]) or uk(b["place"]) if b["place"] else ""
+        name = nm.place(b["place"], b["lat"], b["lon"])
         out.append({"la": b["la"], "lo": b["lo"], "deg": b["deg"], "n": b["n"],
                     "place": name, "t": b["t"], "src": b["src"][:8]})
     out.sort(key=lambda s: (s["t"], -s["n"]))
@@ -141,7 +153,7 @@ def sightings(raid):
             continue
         key = (round(e["lat"], 2), round(e["lon"], 2))
         b = by.setdefault(key, {"la": key[0], "lo": key[1], "n": 0,
-                                "place": e.get("place") or "",
+                                "place": e.get("place") or "", "lat": e["lat"], "lon": e["lon"],
                                 "kinds": collections.Counter(), "ts": [],
                                 "types": collections.Counter(),
                                 "degs": collections.Counter(), "src": [],
@@ -175,9 +187,9 @@ def sightings(raid):
         h = int(hhmm[:2])
         return (h + 24 if h < 12 else h, hhmm)
 
-    out = []
+    out, nm = [], _namer(raid)
     for b in by.values():
-        name = CITY_UA.get(b["place"]) or uk(b["place"]) if b["place"] else ""
+        name = nm.place(b["place"], b["lat"], b["lon"])
         ts = sorted(b["ts"], key=night_key)
         out.append({"la": b["la"], "lo": b["lo"], "n": b["n"], "place": name,
                     "kinds": dict(b["kinds"]), "types": dict(b["types"]), "ts": ts,

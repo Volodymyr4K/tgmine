@@ -107,7 +107,7 @@ CITY_UA = {
     "Dolgoprudnyy": "Долгопрудний", "Dmitrov": "Дмитров",
     "Chekhov": "Чехов", "Stupino": "Ступіно", "Yegoryevsk": "Єгорʼєвськ",
     "Naro-Fominsk": "Наро-Фомінськ", "Bronnitsy": "Бронниці",
-    "Aleksin": "Алексин", "Uzlovaya": "Узловая", "Novomoskovsk": "Новомосковськ",
+    "Aleksin": "Алексин", "Novomoskovsk": "Новомосковськ",
     "Yefremov": "Єфремов", "Shchekino": "Щокіно", "Donskoy": "Донськой",
     "Rossosh’": "Россош", "Borisoglebsk": "Борисоглібськ",
     "Gukovo": "Гуково", "Salsk": "Сальськ", "Azov": "Азов",
@@ -132,7 +132,7 @@ CITY_UA = {
     "Shchyokino": "Щокіно", "Shchekino": "Щокіно",
     "Kirishi": "Кириші", "Borovichi": "Боровичі", "Klimovsk": "Климовськ",
     "Mikhaylovsk": "Михайловськ", "Liski": "Лиски",
-    "Krasnaya Glinka": "Красная Глинка", "Novaya Balakhna": "Нова Балахна",
+    "Krasnaya Glinka": "Красна Глинка", "Novaya Balakhna": "Нова Балахна",
     "Shuya": "Шуя", "Feodosiya": "Феодосія", "Oleksandriya": "Олександрія",
     "Berdychiv": "Бердичів", "Bakhmut": "Бахмут", "Yenakiyeve": "Єнакієве",
     "Kadiyivka": "Кадіївка", "Khrustalnyy": "Хрустальний",
@@ -272,7 +272,7 @@ EXC = {
     "Klintsy": "Клинці", "Novy Oskol": "Новий Оскол",
     "Stary Oskol": "Старий Оскол", "Krasny Sulin": "Красний Сулін",
     "Zheleznogorsk": "Желєзногорськ", "Kotelnich": "Котельнич",
-    "Rossosh": "Россош", "Kstovo": "Кстово", "Uzlovaya": "Узловая",
+    "Rossosh": "Россош", "Kstovo": "Кстово", "Uzlovaya": "Узлова",
     "Sergiyev Posad": "Сергієв Посад", "Orekhovo-Zuyevo": "Орєхово-Зуєво",
 }
 
@@ -376,6 +376,11 @@ def main(min_pop="12000", out=None):
     # Кадр за замовчуванням лишається європейським, оператор тягне карту
     # на схід, коли ніч уральська — таких 42 доби зі 145.
     BOX = (41.0, 70.0, 22.0, 82.0)
+    # Назва — з людського джерела (Wikidata, українська альт-назва, відтворення
+    # російської), а не з латиниці: див. uknames.py. Імпорт тут, бо uknames
+    # сам бере словники з цього модуля.
+    import uknames as UN
+    wd, extra = UN.load_wd(), UN.GC._load_extra(UN.GC.EXTRA)
     seen, res = {}, []
     for path in ("gazetteer/RU.txt", "gazetteer/UA.txt"):
         for line in open(f"{ROOT}/{path}", encoding="utf-8"):
@@ -390,7 +395,8 @@ def main(min_pop="12000", out=None):
                 continue
             if f[1] in DROP:          # район міста, а не місто
                 continue
-            name = CITY_UA.get(f[1]) or uk(f[1])
+            name = UN.name_of(f[1], f[8], f[3].split(","), extra.get(f[0], ()),
+                              wd.get(f[0], ()))
             # При збігу назв лишається БІЛЬШЕ місто, а не те, що трапилось
             # першим. RU.txt читається перед UA.txt, і через це український
             # Донецьк (905 тис.) відкидався як дубль: ім'я вже займав
@@ -406,8 +412,14 @@ def main(min_pop="12000", out=None):
             # прибрані оператором назви й памʼять розкладки прив'язані до
             # української назви, тож перемикання мови їх не губить.
             seen[name] = len(res)
-            res.append({"n": name, "e": en(f[1]), "la": round(la, 3),
-                        "lo": round(lo, 3), "p": pop})
+            row = {"n": name, "e": en(f[1]), "la": round(la, 3),
+                   "lo": round(lo, 3), "p": pop}
+            # Стара назва (трансліт латиниці) — лише коли інша: за нею в
+            # збережених картах лежать підписи, які оператор прибрав руками.
+            old_name = CITY_UA.get(f[1]) or uk(f[1])
+            if old_name != name:
+                row["o"] = old_name
+            res.append(row)
     res = [c for c in res if c]
     res.sort(key=lambda c: -c["p"])
     open(out, "w", encoding="utf-8").write(

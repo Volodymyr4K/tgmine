@@ -40,12 +40,13 @@ NIGHT_ARGV = (("raid.py", "{d}"),
 #: `scrape.py`/`cli.py`/`analyze.py` (ночі їх не імпортують), вона рідкісна.
 #: Сам `nightprint.py` не входить: правка логіки відбитка карт не змінює.
 CODE = ("raid.py", "makeraid.py", "mapper/mknight.py", "mapper/labels.py",
-        "mapper/mkreglabels.py", "tgmine/*.py")
+        "mapper/uknames.py", "mapper/mkreglabels.py", "tgmine/*.py")
 
 #: Дані, які цей код відкриває. `raid.py` сам геокодує вектори руху, тож
 #: газетир, `refdata` і конфіг змінюють карту навіть без зміни сховища;
 #: `ukraine_controlled.json` вшивається в сторінку пунктиром лінії контролю;
-#: `regions.json` читає `mknight` для стартів тривог.
+#: `regions.json` читає `mknight` для стартів тривог; `refdata/wikidata_uk.tsv`
+#: — українські назви місць (`mapper/uknames.py`).
 DATA = ("configs/ru-monitor.yaml", "regions.json", "ukraine_controlled.json",
         "refdata/*", "gazetteer/RU.txt", "gazetteer/UA.txt")
 

@@ -244,6 +244,28 @@ NINE = set("дтзсцчшжр")
 # Кінцеве «-y» неоднозначне: у «Shakhty» це -ы (Шахти), у «Grozny» -ый
 # (Грозний). З самої латиниці це не розрізнити, тому прикметникові назви
 # театру просто перелічені. Виняток дешевший за правило, яке вгадує.
+# Області України — таблицею, а не транслітом. Транслітерація англійської
+# назви GeoNames давала «Одеска Област», «Миколаиів Област»: доки області
+# майже не траплялись серед місць подій, цього не було видно, а відколи пуск
+# стоїть на ДЖЕРЕЛІ, «пуски від Одеської області» — найчастіший його вид.
+# Назви — точно ті, що лежать у gazetteer/UA.txt (ADM1).
+UA_OBLAST = {
+    "Autonomous Republic of Crimea": "АР Крим", "Cherkasy Oblast": "Черкаська обл.",
+    "Chernihiv Oblast": "Чернігівська обл.", "Chernivtsi Oblast": "Чернівецька обл.",
+    "Dnipropetrovsk Oblast": "Дніпропетровська обл.", "Donetska Oblast": "Донецька обл.",
+    "Ivano-Frankivsk Oblast": "Івано-Франківська обл.", "Kharkiv Oblast": "Харківська обл.",
+    "Kherson Oblast": "Херсонська обл.", "Khmelnytskyi Oblast": "Хмельницька обл.",
+    "Kirovohrad Oblast": "Кіровоградська обл.", "Kyiv Oblast": "Київська обл.",
+    "Luhanska Oblast": "Луганська обл.", "Lvivska Oblast": "Львівська обл.",
+    "Misto Kyiv": "Київ", "Mykolayiv Oblast": "Миколаївська обл.",
+    "Odeska Oblast": "Одеська обл.", "Poltava Oblast": "Полтавська обл.",
+    "Rivne Oblast": "Рівненська обл.", "Sebastopol City": "Севастополь",
+    "Sumska Oblast": "Сумська обл.", "Ternopil Oblast": "Тернопільська обл.",
+    "Vinnytsya Oblast": "Вінницька обл.", "Volynska Oblast": "Волинська обл.",
+    "Zakarpattia Oblast": "Закарпатська обл.", "Zaporizhzhya Oblast": "Запорізька обл.",
+    "Zhytomyr Oblast": "Житомирська обл.",
+}
+
 EXC = {
     "Grozny": "Грозний", "Groznyy": "Грозний", "Volzhsky": "Волзький",
     "Volzhskiy": "Волзький", "Khmelnytskyi": "Хмельницький",
@@ -262,6 +284,8 @@ PREFIX_DROP = ("Gorod ", "gorod ", "Poselok ", "poselok ", "Selo ", "selo ",
 
 
 def uk(name: str) -> str:
+    if name in UA_OBLAST:
+        return UA_OBLAST[name]
     if name in EXC:
         return EXC[name]
     for pre in PREFIX_DROP:

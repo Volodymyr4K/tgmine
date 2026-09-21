@@ -729,3 +729,146 @@ class TestDistrictEatenByTheRegionMarker(unittest.TestCase):
                               "Московская область - опасность по БПЛА")
         self.assertIn("Naro-Fominsk", str(best.get("geo_name")),
                       "має виграти перший названий район")
+
+
+@needs_gazetteer
+class TestLaunchesTellTheTruth(unittest.TestCase):
+    """Пуск на карті: ЗВІДКИ і ЧИМ — правдиво (21 вересня 2026).
+
+    Розбір 547 крапок-пусків: на джерелі стояли 219 (40%), решта — на цілі.
+    Тут стережуться всі механізми, які цю брехню давали.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.cfg = E.Config.load(CFG)
+        cls.gaz = GC.Gazetteer.load(GAZ / "RU.txt", GAZ / "UA.txt")
+        cls.a1 = cls.gaz.region_codes(cls.cfg.entities["регіон"], cls.cfg.geo)
+
+    def _post(self, text):
+        posts = E.enrich([{"channel": "t", "id": 1, "text": text,
+                           "date": "2026-07-01T10:00:00+00:00"}], self.cfg)
+        GC.geocode_posts(posts, self.gaz, self.cfg.geo,
+                         aliases=self.cfg.geo_aliases, region_a1=self.a1)
+        return posts[0]
+
+    def _names(self, text):
+        return {e.get("geo_name") for e in self._post(text)["entities"]}
+
+    # ---- назви зброї й службові слова — не села ----
+
+    def test_storm_shadow_is_not_a_village(self):
+        """«Штормов» — ракета Storm Shadow, а не село Штормове в Криму (10 із 12)."""
+        self.assertNotIn("Shtormovoye",
+                         self._names("В воздухе носители Штормов!"))
+        self.assertEqual(ST.utype_of("Возможны пуски Штормов"), "Storm Shadow / SCALP")
+        self.assertEqual(ST.utype_of("Ещё Шторма Бердянск в море"), "Storm Shadow / SCALP")
+
+    def test_real_villages_named_storm_survive(self):
+        """«Штормовое» (105 згадок) — справжнє кримське село."""
+        self.assertIn("Shtormovoye",
+                      self._names("Донузлав, Мирный, Витино, Штормовое, Молочное"))
+        self.assertIsNone(ST.utype_of("Донузлав, Мирный, Витино, Штормовое"))
+
+    def test_compass_word_is_not_a_place(self):
+        """«Юг Киевская область» — «юг» ставав селом Югський у Вологодській."""
+        self.assertNotIn("Yugskiy", self._names("Юг Киевская область фиксация F-16 пары"))
+
+    def test_named_oblast_is_the_whole_oblast(self):
+        """«Киевская область» — Київська область, а не село Kiyevskaya за 1500 км.
+
+        Те саме з субʼєктами РФ, яких нема в конфізі: «Архангельская область»
+        була селом за 1977 км.
+        """
+        for text, want in (("Киевская область фиксация самолётов F16", "Kyiv Oblast"),
+                           ("Урдома, Ленский район, Архангельская область - пролёт",
+                            "Arkhangelsk Oblast")):
+            with self.subTest(text=text):
+                self.assertIn(want, self._names(text))
+
+    def test_uab_plural_is_uab(self):
+        """«УАБы», «УАБов» — 226 подій лишались без типу; «Кабардино» — не КАБ."""
+        self.assertEqual(ST.utype_of("Уабы на Гуляйполе"), "УАБ")
+        self.assertEqual(ST.utype_of("Изюм Харьковская область пуск УАБов"), "УАБ")
+        self.assertNotEqual(ST.utype_of("Кабардино-Балкарская Республика"), "УАБ")
+
+    # ---- місто не програє своїй області ----
+
+    def test_city_beats_its_own_oblast(self):
+        """«из-под Чернигова» — місто Чернігів, а не Чернігівська область."""
+        self.assertIn("Chernihiv", self._names(
+            "Ещё пуски БПЛА из-под Чернигова в направлении Брянской области."))
+
+    def test_adjective_stays_the_oblast(self):
+        """Прикметник — це і є область; «-цкой» теж прикметник («Липецкой»)."""
+        self.assertIn("Chernihiv Oblast", self._names("Черниговская область фиксация"))
+        p = self._post("Тульская область / Опасность по БПЛА от Липецкой области")
+        self.assertFalse(any(e.get("geo_conf") == "city-marker" and
+                             e.get("geo_name") == "Lipetsk" for e in p["entities"]),
+                         "назва області не має ставати містом (перша версія: +2500 подій)")
+
+    # ---- крапка пуску — на джерелі ----
+
+    def test_launch_origin(self):
+        cases = [
+            ("Ещё пуски БПЛА из-под Чернигова в направлении Брянской области.", "Chernihiv"),
+            ("Пуски БПЛА от Николаевской области\nХерсонская область РФ", "Mykolayiv Oblast"),
+            ("Таирово, Одесская область - пуски БПЛА в акваторию Чёрного моря.", "Tayirove"),
+            ("Славянск ещё пуски РСЗО", "Slovyansk"),
+        ]
+        for text, want in cases:
+            with self.subTest(text=text):
+                o = ST.launch_origin(self._post(text))
+                self.assertIsNotNone(o, "джерело назване — має бути знайдене")
+                self.assertEqual(o["geo_name"], want)
+
+    def test_source_city_is_not_a_guess(self):
+        """«от Одессы» — розвʼязання за граматикою, а не здогад за населенням.
+
+        З позначкою «global» редактор малював Одесу-джерело кільцем «здогад».
+        """
+        o = ST.launch_origin(self._post("Пуски БПЛА от Одессы"))
+        self.assertEqual((o or {}).get("geo_name"), "Odesa")
+        self.assertEqual(o["geo_conf"], "source")
+
+    def test_target_is_not_an_origin(self):
+        """Ціль і пуск із літака В БІК місця — не джерело; РФ — не джерело."""
+        for text in ["Суджанский район, Курская область - ракетная опасность! Пуски с авиации.",
+                     "Ещё пуски ракет в направлении Белгородской области",
+                     "Шебекинский район - пуски РСЗО"]:
+            with self.subTest(text=text):
+                self.assertIsNone(ST.launch_origin(self._post(text)))
+
+
+class TestFreeformKeepsTheSecondWord(unittest.TestCase):
+    """Пара слів, що зачепила маркер області, не губить друге слово.
+
+    «Север Крыма Джанкойский район»: вікно ставало «Крыма Джанкойский», і збіг
+    відкидався цілком — разом із районом. Та сама вада діяла для будь-якої
+    пари «маркер області + назва» («Брянская Климово»).
+    """
+
+    def test_second_word_survives(self):
+        cfg = E.Config.load(CFG)
+        for text, want in (("Север Крыма Джанкойский район приготовиться", "Джанкойский"),
+                           ("Поныри Курская область в стороны Липецка", "Поныри"),
+                           ("Никольское Бгд / Ударный БПЛА", "Никольское"),
+                           ("Климово Брянская область", "Климово")):
+            with self.subTest(text=text):
+                self.assertIn(want, [e["value"] for e in E.freeform_of(text, cfg)])
+
+    def test_compound_names_and_junk_are_not_split(self):
+        """Складену назву не ріжемо, службове слово й територію не беремо.
+
+        Перша версія поділу дала: «Геническая Горка» -> село Gorka, «Новая
+        Москва» -> Novaya, «Порт Крым» -> Port, «Республики Крым» -> Respublika,
+        «Приазовье Краснодарского края» -> станиця Приазовська (145 подій).
+        """
+        cfg = E.Config.load(CFG)
+        for text, bad in (("Геническая Горка и близлежащие", "Горка"),
+                          ("Можайский район, Новая Москва", "Новая"),
+                          ("Порт Крым и близлежащие", "Порт"),
+                          ("над территориями Курской области, Республики Крым", "Республики"),
+                          ("Приазовье Краснодарский край", "Приазовье")):
+            with self.subTest(text=text):
+                self.assertNotIn(bad, [e["value"] for e in E.freeform_of(text, cfg)])

@@ -13,7 +13,7 @@ from pathlib import Path
 
 import yaml
 
-from .geocode import DISTRICT_AFTER
+from .geocode import DISTRICT_AFTER, GENERIC as _GENERIC_WORDS, LAUNCH_WORD
 
 
 @dataclass
@@ -171,6 +171,12 @@ def entities_of(text: str, cfg: Config) -> list[dict]:
     return sorted(out, key=lambda e: e["pos"])
 
 
+#: Прикметник у називному/непрямому відмінку — для розпізнавання складених назв.
+_ADJ_WORD = re.compile(r"(?:ая|яя|ый|ий|ой|ое|ее|ые|ие|ую|юю|ого|его|ому|ему|ым|им|ых|их)$", re.I)
+#: Прикметник назви області: основа «-ск-/-цк-» («Курская», «Брянской»).
+_REGION_ADJ = re.compile(r"(?:ск|цк)(?:ий|ая|ое|ие|ой|ую|ого|ому|ом|ою|их|им|ими|ых|ым|ей)$", re.I)
+
+
 def freeform_of(text: str, cfg: Config) -> list[dict]:
     """Сутності, яких не перелічиш у конфізі — напр. сотні населених пунктів.
 
@@ -201,15 +207,94 @@ def freeform_of(text: str, cfg: Config) -> list[dict]:
         taken += [m.span() for vals in cfg.entities.values()
                   for rx in vals.values() for m in rx.finditer(scope)
                   if not DISTRICT_AFTER.match(scope[m.end():])]
-        for m in spec["pattern"].finditer(scope):
-            val = m.group(0).strip(" ,.:;!?-")
+        def add(val, pos):
             low = val.lower()
             if len(val) < spec["min_len"] or low in spec["stoplist"] or low in seen:
-                continue
-            if any(a < m.end() and m.start() < b for a, b in taken):
-                continue          # перекривається з відомою сутністю/тегом
+                return
             out.append({"type": etype, "value": val, "match": val,
-                        "modifier": None, "pos": m.start()})
+                        "modifier": None, "pos": pos})
+
+        for m in spec["pattern"].finditer(scope):
+            val = m.group(0).strip(" ,.:;!?-")
+            if not any(a < m.end() and m.start() < b for a, b in taken):
+                add(val, m.start())
+                continue
+            # Збіг із двох слів зачепив відому сутність — друге слово може бути
+            # самостійним топонімом, і викидати його разом із першим не можна.
+            # «Север Крыма Джанкойский район»: коли розбір почав перестрибувати
+            # напрямки світу, вікно зсунулось на «Крыма Джанкойский», «Крыма» —
+            # маркер області, і збіг відкидався цілком — разом із районом, де
+            # усе відбувалось. Та сама вада діяла й раніше для будь-якої пари
+            # «маркер області + назва». Слово, що саме нічого не зачіпає,
+            # береться окремо.
+            #
+            # Але пара буває й СКЛАДЕНОЮ назвою, яку різати не можна. Правило
+            # виведене з даних (перша версія без нього дала «Геническая Горка»
+            # -> село Gorka, «Новая Москва» -> Novaya):
+            #   прикметник ПЕРЕД назвою — складена назва («Геническая Горка»);
+            #   маркер ПІСЛЯ місця, і це назва області чи скорочення («Поныри
+            #   Курская», «Никольское Бгд», «Ялта Крым») — різати;
+            #   місто-іменник після прикметника («Новая Москва») — не різати.
+            words = list(re.finditer(r"\S+", m.group(0)))
+            if len(words) == 2:
+                (w1, w2) = words
+                hit1 = any(a < m.start() + w1.end() and m.start() + w1.start() < b
+                           for a, b in taken)
+                if hit1:
+                    compound = bool(_ADJ_WORD.search(w1.group(0)))
+                else:
+                    marker = w2.group(0).strip(" ,.:;!?-")
+                    region_word = (bool(_REGION_ADJ.search(marker)) or len(marker) <= 4)
+                    compound = not region_word and bool(_ADJ_WORD.search(w1.group(0)))
+                if compound:
+                    continue
+            for w in words:
+                a0, b0 = m.start() + w.start(), m.start() + w.end()
+                if any(a < b0 and a0 < b for a, b in taken):
+                    continue
+                val = w.group(0).strip(" ,.:;!?-")
+                if val.lower() in _GENERIC_WORDS:
+                    continue      # «Порт Крым» -> не село Port
+                add(val, a0)
+    return out
+
+
+#: Назва одразу після прийменника джерела: «от Одессы», «из-под Чернигова»,
+#: «с района Днепра». Лише назва з великої — «пуски с авиации» сюди не йде.
+#: БЕЗ re.I: з ним [А-ЯЁ] ловив і малі літери, і «Из-под под Чернигова»
+#: (помилка в тексті) давало назву «под» -> село Pody. Регістр прийменника
+#: задано явно.
+_SRC_NAME = re.compile(
+    r"(?:\b[Оо]т|\b[Ии]з-под|\b[Сс]о\s+стороны|\b[Сс]\s+района|\b[Ии]з\s+района"
+    r"|\b[Ии]з|\b[Сс]о?)"
+    r"\s+(?:г\.\s*|города\s+)?(?P<n>[А-ЯЁ][а-яё]+(?:-[А-ЯЁа-яё]+)*)")
+
+
+def launch_sources(text: str, known: list[dict]) -> list[dict]:
+    """Джерела пуску з УСІХ рядків поста — лише для постів про пуск.
+
+    Звичайний розбір (freeform) читає перший рядок і має стоп-список, у якому
+    з першого коміту стоять «Одессы» й «Николаева»: для фіксації «от Одессы»
+    — джерело, яке НЕ є місцем події. Для пуску навпаки, і через це «Пуски
+    БПЛА от Одессы» не мали жодної сутності, а оглядові пости («Ещё пуски: /
+    От Чернигов в сторону Брянской / От Сумы в сторону Курской») — джерела,
+    бо воно в другому рядку. Тут стоп-список свідомо не діє: назву після «от»
+    у пості про пуск вибрано граматикою, а не шаблоном «слово з великої».
+
+    Пропускається все, що вже впізнано на тій самій позиції.
+    """
+    if not LAUNCH_WORD.search(text):
+        return []
+    taken = [(e["pos"], e["pos"] + len(str(e.get("match") or e["value"])))
+             for e in known if e.get("pos") is not None]
+    out = []
+    for m in _SRC_NAME.finditer(text):
+        a, b = m.span("n")
+        if any(x < b and a < y for x, y in taken):
+            continue
+        out.append({"type": "нп", "value": m.group("n"), "match": m.group("n"),
+                    "modifier": None, "pos": a, "src": True})
+        taken.append((a, b))
     return out
 
 
@@ -250,6 +335,7 @@ def enrich(posts: list[dict], cfg: Config) -> list[dict]:
                 p["entities"] = [he]
         if cfg.freeform:
             p["entities"] = p["entities"] + freeform_of(p["text"], cfg)
+        p["entities"] = p["entities"] + launch_sources(p["text"], p["entities"])
         p["segment"] = segment(p["text"], cfg)
     return posts
 

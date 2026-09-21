@@ -246,7 +246,7 @@ class Gazetteer:
 
     def lookup(self, query: str, near: tuple[float, float] | None = None,
                max_km: float = 400.0, allow_far: bool = False, near_a1=None,
-               box=THEATER) -> dict | None:
+               box=THEATER, prefer_seat: bool = False) -> dict | None:
         """Знаходить НП. `near` — центроїд регіону з того ж поста, для омонімів.
 
         Якщо регіон відомий, а жодного тезки в радіусі немає — повертає None.
@@ -304,11 +304,44 @@ class Gazetteer:
                     dist, c = dc
                     return (c["pop"] + 500) / (1 + dist / 50.0)
                 best = max(scoped, key=score)
-                return {**best[1], "dist_km": round(best[0]), "conf": "region"}
+                d, c = best
+                seat = (self._seat_over_region(q, c, [x for _, x in scoped])
+                        if prefer_seat else c)
+                if seat is not c:
+                    d = haversine(near, (seat["lat"], seat["lon"]))
+                return {**seat, "dist_km": round(d), "conf": "region"}
             if not allow_far:
                 return None
         best = max(cands, key=lambda c: c["pop"])
+        if prefer_seat:
+            best = self._seat_over_region(q, best, cands)
         return {**best, "dist_km": None, "conf": "global"}
+
+    @staticmethod
+    def _seat_over_region(q: str, best: dict, pool: list[dict]) -> dict:
+        """Місто, а не його область, коли назва — іменник.
+
+        «Пуски БПЛА из-под Чернигова в направлении Брянской» віддавало
+        Чернігівську ОБЛАСТЬ: запис ADM1 на 959 тис. за формулою населення
+        перебивав місто Чернігів, область — площа, крапки нема, і пуск падав на
+        область-ціль поста. Те саме з «Одесса» (місто лежить у газетирі поруч
+        із записом області під тим самим імʼям).
+
+        Беремо адмінцентр (PPLA/PPLC) САМЕ ЦІЄЇ області, і лише для іменникової
+        форми. Прикметник («Черниговская») — це і є область, його не чіпаємо;
+        назва республіки без однойменного міста («Адыгея», «Чувашия») свого
+        адмінцентру серед кандидатів не має й лишається площею, як і було.
+        """
+        if best.get("fcode") not in ("ADM1", "ADM1H"):
+            return best
+        # Прикметник — за основою «-ск-/-цк-» з БУДЬ-ЯКИМ закінченням. ADJ_SUFFIX
+        # тут не годиться: він не знає «-цкой», і «Липецкой области» ставала
+        # іменником, тобто містом Липецьк (перша версія правила, +2500 подій).
+        if q and _ADJ_STEM.search(q.split()[0]):
+            return best
+        seats = [c for c in pool if c.get("fcode") in ("PPLA", "PPLC")
+                 and c.get("cc") == best.get("cc") and c.get("a1") == best.get("a1")]
+        return max(seats, key=lambda c: c["pop"]) if seats else best
 
 
 def _stem(s: str) -> str:
@@ -415,6 +448,56 @@ WIDE_VOTE_MAX = 400
 # правильного запису серед кандидатів нема взагалі.
 DISTRICT_AFTER = re.compile(
     r"\s*(?:муниципальн\w*\s+)?(?:район\w*|р-?н\b|округ\w*)", re.I)
+
+# «Киевская область» — ЦІЛА область, а не село-тезка. Області України в конфізі
+# нема (там субʼєкти РФ і ТОТ), тож прикметник іде у freeform як НП, і точний
+# збіг назви обриває пошук: «киевская» в газетирі — лише село Kiyevskaya у
+# Вологодській (pop 0), а «киевская область» — Kyiv Oblast (ADM1). Крапка
+# «Киевская область фиксация самолётов F16» ставала у Вологодській за 1500 км.
+#
+# Результат — запис ADM1, тобто площа: крапкою область не стає, як і всюди.
+# «от Киевской и Черниговской областей» — перший прикметник теж область.
+REGION_AFTER = re.compile(
+    r"\s*(?:и\s+[А-ЯЁа-яё]+(?:ск|цк)\w{2,3}\s+)?обл(?:асть|асти|астей|астью|\.)?(?!\w)", re.I)
+
+# ---- ДЖЕРЕЛО ПУСКУ ------------------------------------------------------------
+# У пості про пуск назва після «от / из-под / со стороны / с района» — звідки
+# пустили. Визначення одне на весь конвеєр: extract витягує такі назви з усіх
+# рядків, тут вони геокодуються, store.launch_origin бере з них крапку.
+LAUNCH_WORD = re.compile(r"\bпуск", re.I)
+LAUNCH_SRC_BEFORE = re.compile(
+    r"(?:\bот|\bсо\s+стороны|\bиз-под|\bиз\s+района|\bс\s+района|\bиз|\bс|\bсо)"
+    r"\s+(?:г\.\s*|города\s+|района\s+)?$", re.I)
+
+
+def _nominatives(q: str) -> list[str]:
+    """Називний відмінок для назви в родовому після «от»: «одессы» -> «одесса».
+
+    Для коротких назв (до 6 літер) `_word_stem` відмінка не зрізає, тож
+    «Одессы», «Днепра», «Сум» не зустрічались із «Одесса», «Днепр», «Сумы» у
+    жодному кошику і не знаходились узагалі. Варіанти — лише для джерела
+    пуску, де відмінок гарантований прийменником.
+    """
+    out = [q]
+    if " " in q:
+        return out
+    if q.endswith("ы"):
+        out += [q[:-1] + "а"]
+    if q.endswith("и"):
+        out += [q[:-1] + "а", q[:-1] + "ь"]
+    if q.endswith("а"):
+        out += [q[:-1], q[:-1] + "ь"]
+    if q.endswith("я"):
+        out += [q[:-1] + "ь", q[:-1] + "й"]
+    if q.endswith("ов") or q.endswith("ев"):
+        out += [q + "ка"]
+    if not q.endswith(("ы", "и", "а", "я")):
+        out += [q + "ы", q + "и"]          # «от Сум» -> «сумы»
+    return out
+#: непрямий відмінок прикметника -> називний жіночого роду, як в alt-назвах
+#: GeoNames: «Николаевской области» -> «николаевская область»
+_ADJ_TO_NOM = re.compile(r"(ск|цк)(?:ой|ую|ая|ом|ою)$")
+_ADJ_STEM = re.compile(r"(?:ск|цк)(?:ий|ая|ое|ие|ой|ую|ого|ому|ом|ою|их|им|ими|ых|ым|ей)$")
 
 
 def _consensus(queries: list[str], gaz: "Gazetteer", radius: float = CONSENSUS_KM):
@@ -634,9 +717,32 @@ def geocode_posts(posts: list[dict], gaz: Gazetteer, region_geo: dict,
                                (dc[1]["pop"] + 500) / (1 + dc[0] / 50.0))
                     hit = {**c, "dist_km": round(d), "conf": "consensus"}
                 else:
-                    hit = gaz.lookup(q, near, max_km, near_a1=a1)
+                    hit = gaz.lookup(q, near, max_km, near_a1=a1, prefer_seat=True)
             else:
-                hit = gaz.lookup(q, near, max_km, near_a1=a1)
+                hit = gaz.lookup(q, near, max_km, near_a1=a1, prefer_seat=True)
+            # Джерело пуску: область поста — це ЦІЛЬ, а джерело за кордоном,
+            # тож пошук «у своїй області» тягнув до російського села-тезки:
+            # «из-под Харькова в направлении Белгородской» -> Харьковское на
+            # Білгородщині. Тут — без near_a1, з називним відмінком і перевагою
+            # українського запису (канали російські, пуски з українського боку).
+            if (e.get("pos") is not None and LAUNCH_WORD.search(p["text"])
+                    and LAUNCH_SRC_BEFORE.search(p["text"][max(0, e["pos"] - 24):e["pos"]])):
+                nq = norm(q)
+                src_hits = [h for h in (gaz.lookup(v, near, max_km, allow_far=True,
+                                                   prefer_seat=True)
+                                        for v in _nominatives(nq)) if h]
+                ua = [h for h in src_hits if h.get("cc") == "UA"]
+                if ua:
+                    # місто перед площею: «от Очаков» — місто, а не Очаківський
+                    # район, хоч у району більше населення
+                    hit = max(ua, key=lambda h: (h.get("fclass") == "P", h["pop"]))
+                    # Власна позначка, а не «global»: пошук поза радіусом
+                    # області поста повертав «global», і редактор малював
+                    # Одесу-джерело кільцем «здогад», ніби її вгадано за
+                    # населенням. Тут назву вибрано граматикою й перевірено
+                    # країною — це розвʼязання, а не здогад.
+                    hit = {**hit, "conf": "source"}
+                    stats["launch_src"] += 1
             # Пост сказав «район» — шукаємо район. Беремо його ТІЛЬКИ якщо він
             # у названій області: інакше це той самий здогад, лише інший.
             # Тому правка не може погіршити — вона замінює позарегіональний
@@ -648,6 +754,20 @@ def geocode_posts(posts: list[dict], gaz: Gazetteer, region_geo: dict,
                     if d and (d.get("cc"), d.get("a1")) in a1:
                         hit = d
                         stats["district"] += 1
+            if e.get("pos") is not None:
+                after = p["text"][e["pos"] + len(str(e.get("match") or q)):]
+                nq = norm(q)
+                if (REGION_AFTER.match(after) and nq and " " not in nq
+                        and _ADJ_TO_NOM.search(nq)):
+                    key = _ADJ_TO_NOM.sub(r"\1ая", nq) + " область"
+                    adm = [c for c in gaz.by_name.get(key, [])
+                           if c.get("fcode") in ("ADM1", "ADM1H")]
+                    if adm:
+                        c = adm[0]
+                        hit = {**c, "conf": "region" if near else "global",
+                               "dist_km": (round(haversine(near, (c["lat"], c["lon"])))
+                                           if near else None)}
+                        stats["region_named"] += 1
             # Цілий субʼєкт — не крапка події. Принцип уже діяв під узгодженням
             # («Советского района» віддавало АР Крим на 1.9 млн), але лише там,
             # і в звичайній гілці лишався. Видно його стало, коли назва області
@@ -672,6 +792,10 @@ def geocode_posts(posts: list[dict], gaz: Gazetteer, region_geo: dict,
                 e["lat"], e["lon"] = hit["lat"], hit["lon"]
                 e["geo_name"] = hit["name"]
                 e["geo_pop"] = hit["pop"]
+                # Країна запису газетира. Потрібна store.launch_origin: джерело
+                # пуску з російських каналів — український бік, і «Шебекинский
+                # район — пуски» не має ставати пуском ІЗ Шебекиного.
+                e["geo_cc"] = hit.get("cc")
                 # Координату лишаємо — «Республика Чувашия — опасность по БПЛА»
                 # це подія по площі, і центр республіки для неї чесний. Відсів
                 # такого розвʼязання геть коштував 1321 поста координати, зокрема

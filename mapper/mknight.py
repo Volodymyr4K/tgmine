@@ -127,7 +127,13 @@ def sightings(raid):
             continue
         if e.get("kind") not in ("фіксація", "пуск", "ППО", "збиття", "вибух"):
             continue
-        if e.get("geo_conf") in ("centroid", "region-snap"):
+        # Центр області крапкою бреше, тож такі місця сюди не йдуть — КРІМ
+        # пуску. Пуск стоїть на джерелі, і найчастіше джерело — ціла область:
+        # «Пуски БПЛА от Одесской области». Без винятку найчастіший вид пуску
+        # зник би з редактора зовсім. Малюється він як площа — порожнім
+        # кільцем із позначкою «область», як центр району.
+        launch_area = e.get("kind") == "пуск" and e.get("geo_conf") == "centroid"
+        if e.get("geo_conf") in ("centroid", "region-snap") and not launch_area:
             continue
         key = (round(e["lat"], 2), round(e["lon"], 2))
         b = by.setdefault(key, {"la": key[0], "lo": key[1], "n": 0,
@@ -147,7 +153,9 @@ def sightings(raid):
         if e.get("url"):
             b["src"].append({"u": e["url"], "t": e.get("hhmm", ""),
                              "k": e.get("kind", ""), "ty": e.get("utype")})
-        if AREA_NAME.search(e.get("place") or ""):
+        if launch_area:
+            b["area"] = "область"
+        elif AREA_NAME.search(e.get("place") or ""):
             b["area"] = "район"
         elif e.get("geo_conf") == "global" and not b["area"]:
             b["area"] = "здогад"

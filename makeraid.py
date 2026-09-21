@@ -530,10 +530,14 @@ function panel(){
   lg('lgFix',fix); lg('lgPvo',pvo-kill); lg('lgKill',kill); lg('lgBoom',boom);
   lg('lgAlert',alertsNow);
   document.getElementById('feed').innerHTML=seen.slice(-10).reverse().map(e=>{
+    // Тип засобу — поруч із видом: «пуск» без «чим» каже половину. Пуск
+    // Storm Shadow — це крилаті ракети, пуск БпЛА — дрони, і читач плеєра
+    // досі бачив однакове «пуск». Колір знака на карті тип НЕ кодує: він
+    // кодує вид події, і змішувати два виміри в одному кольорі не можна.
     const cls={'ППО':'pvo','збиття':'pvo','вибух':'pvo','фіксація':'fix',
                'тривога':'warn','відбій':'off'}[e.kind]||'';
     return `<div class="ev ${cls}"><time>${esc(e.hhmm)}</time><span class="km">${esc(e.depth)} км</span>
-      <b style="color:#96a8ba">${esc(e.kind)}</b> ${esc(e.place)}
+      <b style="color:#96a8ba">${esc(e.kind)}</b>${e.utype?` <span style="color:#c9d6e3">· ${esc(e.utype)}</span>`:''} ${esc(e.place)}
       <div style="color:var(--dim)">${esc((e.text||'').slice(0,72))}</div>
       <a href="${esc(e.url)}" target="_blank">джерело ↗</a></div>`;}).join('');
   document.getElementById('tracks').innerHTML=tracks.map((tr,i)=>{
@@ -677,7 +681,7 @@ map.on('click',ev=>{
   const rows=seen.slice(0,8).map(e=>
     `<div style="margin:3px 0;padding-left:7px;border-left:2px solid #2b3b4c">
        <b style="color:#38d4dd">${esc(e.hhmm)}</b>
-       <span style="color:#ff9db0">${esc(e.kind)}</span>${e.drones?` · ${esc(e.drones)} апаратів`:''}
+       <span style="color:#ff9db0">${esc(e.kind)}</span>${e.utype?` · <span style="color:#c9d6e3">${esc(e.utype)}</span>`:''}${e.drones?` · ${esc(e.drones)} апаратів`:''}
        <div style="color:#8ea0b2;font-size:11px">${esc((e.text||'').slice(0,150))}</div>
        <a href="${esc(e.url)}" target="_blank" style="color:#5b7c96;font-size:10px">джерело ↗</a>
      </div>`).join('');

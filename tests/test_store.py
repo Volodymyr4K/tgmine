@@ -470,8 +470,21 @@ class TestStoreInvariants(unittest.TestCase):
             if e.get("lat") is None:
                 continue
             c = cfg.geo.get(e.get("region") or "")
-            ok = (haversine((e["lat"], e["lon"]), c) <= 400 if c
-                  else near_theater(e["lat"], e["lon"]))
+            # Два законні винятки, обидва — свідомо далекі точки.
+            # Пуск стоїть на ДЖЕРЕЛІ, а область поста — ціль: Одеса від
+            # Брянська ~790 км. Межа для нього — театр, як для постів без
+            # області. Площа цілого субʼєкта, якого нема в конфізі, —
+            # «Мурманская область», «Новосибирская область» — розвʼязується в
+            # сам субʼєкт (REGION_AFTER) і лежить за рамкою по праву; до
+            # 21 вересня тест проходив лише тому, що такі пости ставали
+            # селами-тезками всередині рамки.
+            if e.get("kind") == "пуск" and e.get("scope") == "точка":
+                ok = near_theater(e["lat"], e["lon"])
+            elif not c and e.get("geo_conf") == "centroid":
+                ok = True
+            else:
+                ok = (haversine((e["lat"], e["lon"]), c) <= 400 if c
+                      else near_theater(e["lat"], e["lon"]))
             if not ok:
                 bad.append((e["id"], e.get("region"), e["lat"], e["lon"]))
         self.assertEqual(bad[:5], [])
@@ -488,8 +501,10 @@ class TestStoreInvariants(unittest.TestCase):
         розрізнити. Поле має бути в КОЖНОМУ рядку (навіть None — інакше
         падає test_schema_is_uniform) і мати осмислені значення.
         """
+        # source — джерело пуску, знайдене за прийменником «от/из-под»
+        # (21 вересня 2026): розвʼязання за граматикою, а не здогад.
         KNOWN = {"region", "consensus", "global", "alias",
-                 "city-marker", "centroid", "region-snap", None}
+                 "city-marker", "centroid", "region-snap", "source", None}
         seen = {e.get("geo_conf") for _, e in self.events}
         self.assertTrue(all("geo_conf" in e for _, e in self.events),
                         "подія без geo_conf")

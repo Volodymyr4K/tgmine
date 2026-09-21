@@ -1173,3 +1173,73 @@ class TestThirdReview(TestReviewFindings):
                 self.assertTrue(hit["morph"])
         self.assertIsNone(self.gaz.lookup("Грабер", None, allow_far=True))
         self.assertIsNone(self._in("Скорость", "Крим"))
+
+
+class TestFourthReview(unittest.TestCase):
+    """Правила, які рецензія комітів 2a4adc1/21b8243 могла прибрати без
+    жодного впалого тесту. Кожен тест тут падає саме на своєму правилі."""
+
+    def test_unit_word_is_never_a_second_word(self):
+        """Навіть коли пара «є в газетирі», «полуострова/моря/района» не
+        склеюється (DISTRICT_AFTER/REGION_AFTER цих слів не ловлять)."""
+        class Yes:
+            def has_compound(self, q2):
+                return True
+        for tail in (" полуострова фиксации", " моря", " водохранилища"):
+            with self.subTest(tail=tail):
+                self.assertIsNone(GC._second_word(Yes(), "Керченского", tail))
+        self.assertEqual(GC._second_word(Yes(), "Малой", " белозерки БПЛА"), "белозерки")
+
+    def _gaz_with(self, *recs):
+        g = GC.Gazetteer()
+        for r in recs:
+            g.ua_skel[GC._skel(r["uk"])].append(r)
+        return g
+
+    def test_ua_fallback_needs_unique_match_in_post_region(self):
+        near, a1 = (46.9, 34.4), {("UA", "08")}
+        r1 = {"uk": "Сірогози", "name": "Sirohozy", "lat": 46.94, "lon": 34.38,
+              "pop": 0, "cc": "UA", "a1": "08", "fclass": "P", "fcode": "PPL"}
+        r2 = dict(r1, name="Sirohozy 2", lat=46.8)
+        out = dict(r1, a1="26")
+        self.assertEqual(self._gaz_with(r1)._ua_fallback("серогозы", near, 400, a1)["name"],
+                         "Sirohozy")
+        self.assertIsNone(self._gaz_with(r1, r2)._ua_fallback("серогозы", near, 400, a1),
+                          "два збіги — не вгадуємо")
+        self.assertIsNone(self._gaz_with(out)._ua_fallback("серогозы", near, 400, a1),
+                          "поза областю поста — ні")
+        self.assertIsNone(self._gaz_with(r1)._ua_fallback("серогозы", near, 400, None),
+                          "без області — ні")
+
+
+@needs_gazetteer
+class TestFourthReviewOnData(TestReviewFindings):
+    """Випадки з рецензії на справжніх текстах."""
+
+    def _markers(self, text):
+        return [e for e in self._resolve(text)["entities"]
+                if e["type"] == "регіон" and e.get("geo_conf") == "city-marker"]
+
+    def test_genitive_marker_is_a_place_only_in_own_region(self):
+        self.assertTrue(self._markers("От Льгова, в направлении Курчатова / "
+                                      "Опасность по БПЛА / Курская область"))
+        self.assertTrue(self._markers("Севернее Джанкоя фиксации БПЛА курсом на юг. / "
+                                      "Республика Крым"))
+        self.assertFalse(self._markers("Ульяновская область - опасность по БПЛА. От Пензы"))
+        self.assertFalse(self._markers("Основной маршрут в сторону\nМосквы"))
+
+    def test_masculine_genitive_compound(self):
+        for text, name in (("Автомобилистам до Крутого лога не ехать / Белгородская область",
+                            "Krutoy Log"),):
+            with self.subTest(text=text):
+                self.assertEqual(ST.point_entity(self._resolve(text))["geo_name"], name)
+
+    def test_second_attempt_stays_in_post_region(self):
+        """«От Лозового … Крым» — не Лозове на Миколаївщині."""
+        p = self._resolve("От Лозового в сторону Таврической ТЭС / Республика Крым")
+        bad = [e for e in p["entities"] if e["value"] == "Лозового" and "lat" in e
+               and not (44.3 < e["lat"] < 46.3 and 32.4 < e["lon"] < 36.7)]
+        self.assertFalse(bad, "Лозового поза Кримом")
+
+    def test_common_genitive_adjective_is_not_a_village(self):
+        self.assertIsNone(self.gaz.lookup("Доброго", None, allow_far=True))

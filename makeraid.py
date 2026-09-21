@@ -264,7 +264,7 @@ const AREA_NAME=/\b(?:rayon|raion|district|okrug|oblast|miskrada|hromada)\b|ок
 const areaOf=e=>{
   const fb=e.geo_conf==='centroid'||e.geo_conf==='region-snap';
   if(fb) return e.kind==='пуск'?'область':null;
-  if(AREA_NAME.test(e.place||'')) return 'район';
+  if(e.area||AREA_NAME.test(e.place||'')) return 'район';
   if(e.geo_conf==='global') return 'здогад';
   return '';
 };

@@ -177,3 +177,21 @@ class TestAreaNameLatin(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertTrue(MK.AREA_NAME.search(name))
         self.assertFalse(MK.AREA_NAME.search("Okhtyrka"))
+
+
+class TestLabelsUk(unittest.TestCase):
+    """Підписи місць у редакторі: родові слова — перекладом, кирилиця — як є."""
+
+    def test_unit_words_are_translated(self):
+        from mapper.labels import uk
+        for name, want in (("Chernsky District", "Чернський район"),
+                           ("Kromskoy Rayon", "Кромський район"),
+                           ("Gorodskoy Okrug Chekhov", "міський округ Чехов"),
+                           ("Kharkiv Oblast", "Харківська обл.")):
+            with self.subTest(name=name):
+                self.assertEqual(uk(name), want)
+
+    def test_cyrillic_alias_keeps_its_name(self):
+        """Аліас «Бельбек» транслітом ставав порожнім підписом."""
+        from mapper.labels import uk
+        self.assertEqual(uk("Бельбек"), "Бельбек")

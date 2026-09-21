@@ -159,7 +159,9 @@ def sightings(raid):
                              "k": e.get("kind", ""), "ty": e.get("utype")})
         if launch_area:
             b["area"] = "область"
-        elif AREA_NAME.search(e.get("place") or ""):
+        # `area` із сховища (конвеєр v20) — район, зокрема розвʼязаний своїм
+        # містом; назва — для сховищ, зібраних раніше.
+        elif e.get("area") or AREA_NAME.search(e.get("place") or ""):
             b["area"] = "район"
         elif e.get("geo_conf") == "global" and not b["area"]:
             b["area"] = "здогад"

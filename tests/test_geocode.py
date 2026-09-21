@@ -1082,3 +1082,44 @@ class TestReviewFindings(unittest.TestCase):
         so = [e for e in p["entities"] if e["value"].startswith("Старый")]
         for e in so:
             self.assertLess(GC.haversine((e["lat"], e["lon"]), (51.30, 37.84)), 15)
+
+    def test_genitive_region_marker_is_not_a_city(self):
+        """«в направлении Москвы» — не крапка в Москві (маркер області)."""
+        p = self._resolve("Вся южная часть Московской области и в направлении "
+                          "Москвы - ракетная опасность!")
+        self.assertFalse([e for e in p["entities"]
+                          if e.get("geo_conf") == "city-marker"])
+
+
+@needs_gazetteer
+class TestThirdReview(TestReviewFindings):
+    """Вади, знайдені третьою рецензією 21 вересня 2026."""
+
+    def test_only_target_outside_region_falls_back_to_area(self):
+        """«Курская область — в сторону Орла»: не крапка в Орлі."""
+        p = self._resolve("Через Курскую область фиксации БПЛА в сторону Орла, Тулы")
+        pt = ST.point_entity(p)
+        self.assertTrue(pt is None or pt.get("geo_conf") == "centroid", pt)
+
+    def test_district_list_is_one_target_chain(self):
+        """«в сторону Шаблыкинского района, Сосковского района» — обидва цілі."""
+        self.assertTrue(ST.ENUM_GAP.fullmatch(" района, "))
+        self.assertFalse(ST.ENUM_GAP.fullmatch(" области, "))
+
+    def test_sea_in_instrumental_keeps_the_place(self):
+        """«Западнее Тарханкута морем» — Тарханкут, а «Азовским морем» — не НП."""
+        p = self._resolve("Западнее Тарханкута морем фиксации БПЛА в направлении Евпатории")
+        self.assertTrue([e for e in p["entities"]
+                         if e["value"].startswith("Тарханкут") and "lat" in e])
+        for text in ("Фиксации БПЛА в направлении акватории Чёрного моря",
+                     "БПЛА над Азовским морем в направлении Бердянска"):
+            with self.subTest(text=text):
+                p = self._resolve(text)
+                self.assertFalse([e for e in p["entities"] if e["type"] == "нп"
+                                  and "lat" in e and e["value"][:3] in ("Чёр", "Азо")])
+
+    def test_event_carries_area_flag(self):
+        """Район, розвʼязаний своїм містом, — площа й у події (поле `area`)."""
+        p = self._resolve("Шацкий район / Рязанская область / Фиксация БПЛА")
+        pt = ST.point_entity(p)
+        self.assertTrue(pt and pt.get("geo_area"), pt)

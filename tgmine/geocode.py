@@ -659,12 +659,15 @@ def _nominatives(q: str) -> list[str]:
 NOT_PLACES = {"победы", "силы", "уйти", "службы", "группы", "цели", "атаки",
               "угрозы", "тревоги", "области", "власти", "стороны", "границы",
               "днепра", "десны", "волги", "дуная", "дона", "донца", "оки",
-              "почти", "куда", "китая", "радости", "сирени", "славы", "мира",
+              "почти", "куда", "китая", "радости", "славы", "мира",
               "правды", "свободы", "надежды", "родины", "весны", "звезды",
-              "искры", "дружбы", "бригады", "нивы", "зори", "воли", "зари",
+              "искры", "бригады", "нивы", "зори", "воли", "зари",
               "линии", "станции", "трассы", "дороги", "реки", "моря", "залива",
               "россии", "украины", "высоко", "низко", "далее", "очень"}
 
+# Будь-який прикметник, не лише «-ский»: «Чёрного моря», «Чёрное море»
+# давали Чернський район і село Чорне (третя рецензія).
+_ANY_ADJ = re.compile(r"(?:ый|ий|ой|ая|яя|ое|ее|ого|его|ому|ему|ым|им|ом|ем|ую|юю|ей)$")
 SEA_AFTER = re.compile(r"\s+(?:мор[еяюмь]\w*|залив\w*|водохранилищ\w*)", re.I)
 
 # Непрямий відмінок прикметника -> називний, для першого слова складеної
@@ -846,7 +849,11 @@ def geocode_posts(posts: list[dict], gaz: Gazetteer, region_geo: dict,
                     for x in p.get("entities", []))
                 hit = (None if district or gaz.names_the_region(e["match"], codes)
                        else gaz.lookup(e["match"], base, max_km))
-                if hit and hit["fclass"] == "P" and hit["pop"] >= 1000:
+                # Місто-маркер — лише пряма назва. Родовий фолбек тут ставив би
+                # ціль: «в направлении Москвы» (маркер Московської) ставало
+                # крапкою в Москві, хоч до фолбека подія була площею області.
+                if (hit and hit["fclass"] == "P" and hit["pop"] >= 1000
+                        and not hit.get("morph")):
                     e["lat"], e["lon"] = hit["lat"], hit["lon"]
                     e["geo_name"], e["geo_pop"] = hit["name"], hit["pop"]
                     e["geo_conf"] = "city-marker"
@@ -859,12 +866,15 @@ def geocode_posts(posts: list[dict], gaz: Gazetteer, region_geo: dict,
             if e["type"] != entity_type:
                 continue
             q = e.get("match") or e["value"]
-            # «над Азовским морем», «Чёрного моря» — море, не станиця Азовська
-            # (прикметник із «-ским» тепер доходить до основи «азов»)
-            if e.get("pos") is not None and SEA_AFTER.match(
-                    p["text"][e["pos"] + len(str(q)):]):
-                continue
             al = (aliases or {}).get(str(q).lower().strip())
+            # «над Азовским морем», «Чёрного моря» — море, не станиця Азовська
+            # (прикметник із «-ским» тепер доходить до основи «азов»). Лише для
+            # ПРИКМЕТНИКА: «Западнее Тарханкута морем» — орудний відмінок
+            # («морем» = по морю), і Тарханкут там місце.
+            if (not al and e.get("pos") is not None
+                    and _ANY_ADJ.search(norm(q).split()[-1] if norm(q) else "")
+                    and SEA_AFTER.match(p["text"][e["pos"] + len(str(q)):])):
+                continue
             if al:                       # ручне виправлення має пріоритет
                 hit = {"lat": al[0], "lon": al[1], "name": q, "pop": 0,
                        "fclass": "P", "conf": "alias", "dist_km": None}
@@ -946,12 +956,12 @@ def geocode_posts(posts: list[dict], gaz: Gazetteer, region_geo: dict,
                     if d and (d.get("cc"), d.get("a1")) in a1:
                         hit = d
                         stats["district"] += 1
-                        if d["fclass"] == "P":
+                        if d["fclass"] == "P" and " " not in norm(q):
                             # «Кашинского района» -> місто Кашин: знайдено
                             # місто, а названо район — площа (друга рецензія,
                             # «Пустынька, Кашинского района» ставала Кашином)
                             e["_district_word"] = True
-                    elif hit:
+                    elif hit and " " not in norm(q):
                         # Району в газетирі нема, і прикметник розвʼязався
                         # МІСТОМ («Куйбышевский район» -> Більмак, колишнє
                         # Куйбишеве). Координата лишається, але це площа: інакше
@@ -1061,6 +1071,11 @@ def _scope_to_district(p, gaz, a1, entity_type, stats):
             continue
         gap = p["text"][x["pos"] + len(str(x.get("match") or x["value"])):d["pos"]]
         if not _VILLAGE_GAP.fullmatch(gap):
+            continue
+        # Район — лише коли так і сказано: у переліку «Белоглинский,
+        # Новопокровский, Тихорецкий» без слова «район» сусід — не село цього
+        # району (третя рецензія: перенос за 196 км).
+        if not DISTRICT_AFTER.match(p["text"][d["pos"] + len(str(d.get("match") or d["value"])):]):
             continue
         c = (d["lat"], d["lon"])
         if haversine(c, (x["lat"], x["lon"])) <= DISTRICT_SCOPE_KM:

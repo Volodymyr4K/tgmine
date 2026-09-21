@@ -1134,3 +1134,28 @@ class TestThirdReview(TestReviewFindings):
         p = self._resolve("Каланчак / Фиксации БПЛА / Херсонская область РФ")
         pt = ST.point_entity(p)
         self.assertFalse(pt.get("_aim"))
+
+    def test_observation_place_in_oblique_case_is_found(self):
+        """Місце спостереження в непрямому відмінку, що раніше губилось і
+        віддавало крапку цілі: дефіс, прикметник у родовому, пара з малої."""
+        for text, lat, lon in (
+                ("От Каменки-Днепровской опасность по БПЛА в направлении "
+                 "Мелитополя / Запорожская область РФ", 47.50, 34.41),
+                ("От Малой белозерки БПЛА в сторону Мелитополя", 47.24, 34.93),
+                ("От Нижнего песочного в сторону Хомутовки фиксации БПЛА "
+                 "Курская область", 51.88, 34.95),
+                ("От Веселого в сторону Мелитополя БПЛА", 47.01, 34.92)):
+            with self.subTest(text=text[:30]):
+                pt = ST.point_entity(self._resolve(text))
+                self.assertTrue(pt)
+                self.assertLess(GC.haversine((pt["lat"], pt["lon"]), (lat, lon)), 10, pt)
+
+    def test_unit_word_is_not_glued_as_second_word(self):
+        """«Архангельская область» — не пара «назва + слово з малої»."""
+        for w in ("область", "района", "край", "полуострова"):
+            self.assertTrue(GC._UNIT_NEXT.match(w), w)
+        for w in ("балки", "белозерки", "песочного", "горка"):
+            self.assertFalse(GC._UNIT_NEXT.match(w), w)
+        p = self._resolve("Архангельская область - опасность по БПЛА")
+        self.assertFalse([e for e in p["entities"] if e["type"] == "нп"
+                          and "lat" in e and e.get("geo_fcode") not in ("ADM1", "ADM1H")])

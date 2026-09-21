@@ -212,6 +212,67 @@ class Gazetteer:
             cands = [c for c in cands if in_box(c["lat"], c["lon"], box)]
         return cands
 
+    def _variant_cands(self, q: str, near, box) -> tuple[list, bool]:
+        """Точні збіги відмінкових варіантів назви: (кандидати, чи брати місто
+        замість області). Лише точні ключі газетира — без основи."""
+        ok = lambda c: near or in_box(c["lat"], c["lon"], box)
+        if " " not in q:
+            # Іменник у непрямому відмінку: «Одессы», «Анапы», «Орла», «Ялты»,
+            # «Качи»; прикметникова назва — «Веселого», «Широкого». Короткі
+            # назви `_word_stem` не зрізає, тож ні точний, ні стемовий пошук
+            # їх не бачив (366 згадок «Одессы» лише за вікно сховища).
+            #
+            # Лише варіанти, що МІНЯЮТЬ закінчення. Дописування «+ы/+и» (його
+            # `_nominatives` має для «от Сум») тут давало сміття: «Шарк» ->
+            # Шарки, «Через» -> Черезы. Загальні слова з відмінковим
+            # закінченням («Победы», «Силы», «Уйти») за формою від назв не
+            # відрізнити — їх відсікає NOT_PLACES.
+            for v in _nominatives(q)[1:] + _fleeting(q) + _adj_nominatives(q):
+                if v.startswith(q):
+                    continue
+                # Лише НП чи ціла область (її `_seat_over_region` замінить
+                # адмінцентром). «Лимана» інакше ставав Лиманським районом ADM2H.
+                c = [c for c in self.by_name.get(v, []) if ok(c)
+                     and (c["fclass"] == "P" or c.get("fcode") in ("ADM1", "ADM1H"))]
+                if c:
+                    return c, True        # «Одессы» — місто, а не область
+            if "-" in q:
+                # «От Каменки-Днепровской» — кожна частина до називного окремо
+                for k in _hyphen_nominatives(q):
+                    c = [c for c in self.by_name.get(k, []) if ok(c)]
+                    if c:
+                        return c, False
+        elif q.count(" ") == 1:
+            # Складена назва в непрямому відмінку: «Через Великую Лепетиху»,
+            # «Малую Белозерку», «Белой Березки», «Нижнего песочного».
+            w1, w2 = q.split()
+            a = _ADJ_OBL.sub(lambda m: _ADJ_NOM[m.group(1)], w1)
+            for b in [w2] + _nominatives(w2)[1:] + _adj_nominatives(w2) + (
+                    [w2[:-1] + "а"] if w2.endswith("у") else
+                    [w2[:-1] + "я"] if w2.endswith("ю") else []):
+                k = f"{a} {b}"
+                if k != q and self.by_name.get(k):
+                    c = [c for c in self.by_name[k] if ok(c)]
+                    if c:
+                        return c, False
+        return [], False
+
+    def has_compound(self, q2: str) -> bool:
+        """Двослівна назва є в газетирі — точно або в називному відмінку.
+
+        Без основи: «Большая группа» за першим словом дістала б «Большая
+        Знаменка», а тут питання одне — чи існує саме ця пара слів."""
+        k = norm(q2)
+        if self.by_name.get(k):
+            return True
+        w1, _, w2 = k.partition(" ")
+        a = _ADJ_OBL.sub(lambda m: _ADJ_NOM[m.group(1)], w1)
+        for b in [w2] + _nominatives(w2)[1:] + _adj_nominatives(w2) + (
+                [w2[:-1] + "а"] if w2.endswith("у") else []):
+            if self.by_name.get(f"{a} {b}"):
+                return True
+        return False
+
     def region_codes(self, entities_region: dict, geo: dict) -> dict:
         """Регіон конфіга -> код admin1 у GeoNames, напр. Ростовська -> RU.61.
 
@@ -326,30 +387,11 @@ class Gazetteer:
         # європейська координат не втрачає. «Ангарск» при Криму й далі None —
         # його відсікає радіус, не рамка.
         cands = self.candidates(query, None if near else box)
-        if not cands and q and " " not in q:
-            # Іменник у непрямому відмінку: «Одессы», «Анапы», «Орла», «Ялты»,
-            # «Качи». Короткі назви `_word_stem` не зрізає, тож ні точний, ні
-            # стемовий пошук їх не бачив (366 згадок «Одессы» лише за вікно
-            # сховища). Лише коли інакше нема нічого — точний збіг варіанту.
-            #
-            # Лише варіанти, що МІНЯЮТЬ закінчення. Дописування «+ы/+и» (його
-            # `_nominatives` має для «от Сум») тут давало сміття: «Шарк» ->
-            # Шарки, «Через» -> Черезы. Загальні слова з відмінковим
-            # закінченням («Победы» з «Дня Победы», «Силы», «Уйти») за
-            # формою від назв не відрізнити — їх відсікає NOT_PLACES.
-            for v in _nominatives(q)[1:] + _fleeting(q):
-                if v.startswith(q):
-                    continue
-                # Лише НП чи ціла область (її `_seat_over_region` замінить
-                # адмінцентром). «Лимана» інакше ставав Лиманським районом
-                # ADM2H — історичним записом.
-                cands = [c for c in self.by_name.get(v, [])
-                         if (near or in_box(c["lat"], c["lon"], box))
-                         and (c["fclass"] == "P" or c.get("fcode") in ("ADM1", "ADM1H"))]
-                if cands:
-                    # «Одессы» — місто, а не однойменна область поруч
-                    prefer_seat = morph = True
-                    break
+        if not cands and q:
+            cands, seat = self._variant_cands(q, near, box)
+            if cands:
+                morph = True
+                prefer_seat = prefer_seat or seat
         if not cands and near and q and "-" in q and " " not in q:
             # Відрізок траси «Луганск-Лисичанск», «Урзуф-Мангуш»: такої назви
             # нема, а перший кінець є. Доки лукахед не відсував «Трасса», розбір
@@ -364,26 +406,6 @@ class Gazetteer:
             got = [self.candidates(x, None) for x in parts]
             if all(len(x) >= 3 for x in parts) and all(got):
                 cands, morph = got[0], True
-        if not cands and q and q.count(" ") == 1:
-            # Складена назва в непрямому відмінку: «Через Великую Лепетиху»,
-            # «Малую Белозерку», «Белой Березки». Точного ключа нема, а стем
-            # бере лише перше слово. Пробуємо називний відмінок обох слів.
-            w1, w2 = q.split()
-            v1 = [_ADJ_OBL.sub(lambda m: _ADJ_NOM[m.group(1)], w1)]
-            v2 = [w2] + _nominatives(w2)[1:] + (
-                [w2[:-1] + "а"] if w2.endswith("у") else
-                [w2[:-1] + "я"] if w2.endswith("ю") else [])
-            for a in v1:
-                for b in v2:
-                    k = f"{a} {b}"
-                    if k != q and self.by_name.get(k):
-                        cands = [c for c in self.by_name[k]
-                                 if near or in_box(c["lat"], c["lon"], box)]
-                        morph = bool(cands)
-                        if cands:
-                            break
-                if cands:
-                    break
         if not cands:
             return None
         if near:
@@ -402,6 +424,19 @@ class Gazetteer:
                 scoped = [(d, c) for d, c in
                           ((haversine(near, (c["lat"], c["lon"])), c) for c in more)
                           if d <= max_km]
+            if not scoped and not morph:
+                # Жоден кандидат не лежить в області поста — а кандидатами були
+                # далекі збіги за основою («каменки…», «малой…»). Тоді пробуємо
+                # відмінкові варіанти: «От Каменки-Днепровской» ->
+                # «каменка-днепровская», «Малой белозерки» -> «малая
+                # белозерка». Раніше тут був None, тож гірше не стане.
+                alt, seat = self._variant_cands(q, near, box)
+                scoped = [(d, c) for d, c in
+                          ((haversine(near, (c["lat"], c["lon"])), c) for c in alt)
+                          if d <= max_km]
+                if scoped:
+                    morph = True
+                    prefer_seat = prefer_seat or seat
             # Якщо в самій області є тезка — беремо тільки з неї. Це відсікає
             # однойменні райони сусідніх регіонів ДО того, як їх порівнює
             # формула: населення в GeoNames — ненадійний сигнал (pop=0 стоїть у
@@ -432,6 +467,13 @@ class Gazetteer:
                         or (adjectival and c.get("fcode") in ("ADM1", "ADM1H"))]
                 if same:
                     scoped = same
+                # Відмінковий здогад поза областю поста НЕ відкидається —
+                # спробу зроблено й знято 21 вересня 2026. Область поста — перша
+                # названа, і часто це область ЦІЛІ («От Великой Лепетихи … в
+                # направлении Мелитополь»), тож правильне місце опинялось «поза
+                # областю»; а ненайдені цілі рвали ланцюг напрямку («в сторону
+                # Глазуновка, Тросны, Кромы, Орёл» — Орел ставав крапкою).
+                # Ціна — поодинокі «Жукова, Брянская» -> Жуков у Калузькій.
             # Іменник — це місто, а не район: «от Старобельска» давав
             # Старобільський РАЙОН (123 тис.) замість міста (16 тис.), коли
             # район дістав російську назву з Wikidata, — і `point_entity`
@@ -668,6 +710,19 @@ NOT_PLACES = {"победы", "силы", "уйти", "службы", "груп�
 # Будь-який прикметник, не лише «-ский»: «Чёрного моря», «Чёрное море»
 # давали Чернський район і село Чорне (третя рецензія).
 _ANY_ADJ = re.compile(r"(?:ый|ий|ой|ая|яя|ое|ее|ого|его|ому|ему|ым|им|ом|ем|ую|юю|ей)$")
+# Родовий маркер-місто — місце лише після прийменника місця («от Льгова»,
+# «Севернее Джанкоя», «у Анапы») або на початку рядка («Керчи и
+# близлежащие»). Перелік ДОЗВІЛЬНИЙ: заборонний («лише після слова
+# напрямку») обходили «В основном Москвы», «в сторону Тулы, Москвы»,
+# «города Тюмени» — усе цілі.
+_PLACE_BEFORE_MARKER = re.compile(
+    r"(?:(?:^|\n)\s*|\b(?:от|из-под|из|со\s+стороны|у|возле|около|недалеко\s+от|"
+    r"в\s+районе|район[еа]?|севернее|южнее|западнее|восточнее)\s+(?:г\.\s*)?)$", re.I)
+
+_UNIT_NEXT = re.compile(r"(?:район|област|округ|кра[йяюе]|республик|р-н|обл|го\b|мо\b|"
+                        r"полуостров|море|мор[яюе]|залив|водохранилищ)", re.I)
+_LOWER_NEXT = re.compile(r"[ \t]+([а-яё][а-яё\-]{2,})")
+
 SEA_AFTER = re.compile(r"\s+(?:мор[еяюмь]\w*|залив\w*|водохранилищ\w*)", re.I)
 
 # Непрямий відмінок прикметника -> називний, для першого слова складеної
@@ -675,6 +730,30 @@ SEA_AFTER = re.compile(r"\s+(?:мор[еяюмь]\w*|залив\w*|водохр�
 _ADJ_OBL = re.compile(r"(ую|юю|ой|ей|ого|его|ом|ем|ых|их)$")
 _ADJ_NOM = {"ую": "ая", "юю": "яя", "ой": "ая", "ей": "яя", "ого": "ое",
             "его": "ее", "ом": "ое", "ем": "ее", "ых": "ые", "их": "ие"}
+
+
+def _adj_nominatives(q: str) -> list[str]:
+    """Прикметникова назва в родовому: «От Веселого» -> «веселое», «Широкого»
+    -> «широкое», «Мирного» -> «мирное»/«мирный». Лише «-ого/-его»: «-ой»
+    неоднозначне («Брянской» — частіше область)."""
+    if len(q) >= 6 and q.endswith(("ого", "его")):
+        b = q[:-3]
+        return [b + "ое", b + "ее", b + "ый", b + "ий"]
+    return []
+
+
+def _hyphen_nominatives(q: str) -> list[str]:
+    """«каменки-днепровской» -> «каменка-днепровская» (кожна частина окремо)."""
+    import itertools
+    opts = []
+    for part in q.split("-"):
+        v = [part] + [x for x in _nominatives(part)[1:] if not x.startswith(part)]
+        adj = _ADJ_OBL.sub(lambda m: _ADJ_NOM[m.group(1)], part)
+        if adj != part:
+            v.append(adj)
+        opts.append(v[:5])
+    return ["-".join(c) for c in itertools.islice(itertools.product(*opts), 60)
+            if "-".join(c) != q]
 
 
 def _fleeting(q: str) -> list[str]:
@@ -852,8 +931,10 @@ def geocode_posts(posts: list[dict], gaz: Gazetteer, region_geo: dict,
                 # Місто-маркер — лише пряма назва. Родовий фолбек тут ставив би
                 # ціль: «в направлении Москвы» (маркер Московської) ставало
                 # крапкою в Москві, хоч до фолбека подія була площею області.
+                placed = e.get("pos") is not None and _PLACE_BEFORE_MARKER.search(
+                    p["text"][max(0, e["pos"] - 30):e["pos"]])
                 if (hit and hit["fclass"] == "P" and hit["pop"] >= 1000
-                        and not hit.get("morph")):
+                        and not (hit.get("morph") and not placed)):
                     e["lat"], e["lon"] = hit["lat"], hit["lon"]
                     e["geo_name"], e["geo_pop"] = hit["name"], hit["pop"]
                     e["geo_conf"] = "city-marker"
@@ -866,6 +947,21 @@ def geocode_posts(posts: list[dict], gaz: Gazetteer, region_geo: dict,
             if e["type"] != entity_type:
                 continue
             q = e.get("match") or e["value"]
+            # Складена назва з другим словом із малої: «Малой белозерки»,
+            # «Широкой балки», «Нижнего песочного», «Геническая горка».
+            # Шаблон розбору бере лише слова з великої, тож приходило саме
+            # перше слово. Друге беремо, лише коли ПАРА є в газетирі.
+            #
+            # «район», «область», «край» — не друге слово назви: для них є свої
+            # правила (DISTRICT_AFTER, REGION_AFTER), і склеєна «Архангельская
+            # область» їх обходила.
+            if e.get("pos") is not None and " " not in str(q):
+                tail = p["text"][e["pos"] + len(str(q)):]
+                nx = _LOWER_NEXT.match(tail)
+                if (nx and not DISTRICT_AFTER.match(tail) and not REGION_AFTER.match(tail)
+                        and not _UNIT_NEXT.match(nx.group(1))
+                        and gaz.has_compound(f"{q} {nx.group(1)}")):
+                    q = f"{q} {nx.group(1)}"
             al = (aliases or {}).get(str(q).lower().strip())
             # «над Азовским морем», «Чёрного моря» — море, не станиця Азовська
             # (прикметник із «-ским» тепер доходить до основи «азов»). Лише для

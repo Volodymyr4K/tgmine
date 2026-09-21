@@ -262,7 +262,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .rank
-          key: rank-v5-${{ steps.cachekey.outputs.day }}
+          key: rank-v6-${{ steps.cachekey.outputs.day }}
 
       - name: Важливість цілей
         run: |
@@ -343,8 +343,8 @@ jobs:
           path: |
             site/raids
             site/mapper/nights
-          key: raids-v25-${{ steps.cachekey.outputs.day }}
-          restore-keys: raids-v25-
+          key: raids-v26-${{ steps.cachekey.outputs.day }}
+          restore-keys: raids-v26-
 
       # Без --days: денні сторінки за всі 93 доби коштують 6 секунд, тобто
       # обрізання архіву економило час не там, де він витрачався. --raid-days 2
@@ -363,7 +363,7 @@ jobs:
           path: |
             site/raids
             site/mapper/nights
-          key: raids-v25-${{ steps.cachekey.outputs.day }}
+          key: raids-v26-${{ steps.cachekey.outputs.day }}
 
       - name: Кеш ранжування цілей (зберегти)
         if: always() && hashFiles('.rank/**') != ''
@@ -371,7 +371,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: .rank
-          key: rank-v5-${{ steps.cachekey.outputs.day }}
+          key: rank-v6-${{ steps.cachekey.outputs.day }}
 
       # Пуш бота падав, коли поки прогін ішов, у main зʼявився чужий коміт:
       # `! [rejected] main -> main (fetch first)`. Це не рідкість — прогін

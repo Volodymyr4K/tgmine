@@ -264,6 +264,9 @@ const AREA_NAME=/\b(?:rayon|raion|district|okrug|oblast|miskrada|hromada)\b|ок
 const areaOf=e=>{
   const fb=e.geo_conf==='centroid'||e.geo_conf==='region-snap';
   if(fb) return e.kind==='пуск'?'область':null;
+  // Пост назвав лише, КУДИ летять («в направлении Каланчак»): крапка на цілі,
+  // але це не місце спостереження (поле `aim`, сховище v21).
+  if(e.aim) return 'ціль';
   if(e.area||AREA_NAME.test(e.place||'')) return 'район';
   if(e.geo_conf==='global') return 'здогад';
   return '';
@@ -394,8 +397,9 @@ function draw(){
     if(x<-80||y<-80||x>r.width+80||y>r.height+80) return;   // поза екраном
     const key=Math.round(x/CELL)+':'+Math.round(y/CELL);
     let c=cells.get(key);
-    if(!c){c={x:0,y:0,w:0,n:0,drones:0,last:0,kinds:new Set(),places:0,solid:0};cells.set(key,c);}
+    if(!c){c={x:0,y:0,w:0,n:0,drones:0,last:0,kinds:new Set(),places:0,solid:0,aim:0};cells.set(key,c);}
     if(!areaNow(pl,now)) c.solid++;
+    else if(seen.every(e=>areaOf(e)==='ціль')) c.aim++;
     const drones=seen.reduce((m,e)=>Math.max(m,e.drones||0),0);
     const wgt=1+drones;
     c.x+=x*wgt; c.y+=y*wgt; c.w+=wgt;        // центр ваги, не центр комірки
@@ -412,7 +416,22 @@ function draw(){
     const kind=order.find(k=>c.kinds.has(k))||'фіксація';
     const rad=R_OF(c.drones||c.n);
 
-    if(!c.solid){
+    if(!c.solid&&c.aim===c.places){
+      // Лише цілі руху: знак прицілу (кільце й чотири риски) — «сюди летять».
+      // Не крапка («тут бачили») і не стрілка (звідки летять, пост не каже).
+      // Так само в редакторі.
+      const col=kind==='пуск'?'74,222,128':kind==='ППО'||kind==='збиття'?'255,77,99'
+               :kind==='вибух'?'255,138,31':'90,220,228';
+      const rr=Math.max(6,rad*.7), t0=rr-2.5, t1=rr+6;
+      const ring=(w,st)=>{ctx.lineWidth=w;ctx.strokeStyle=st;
+        ctx.beginPath();ctx.arc(x,y,rr,0,7);ctx.stroke();
+        ctx.beginPath();
+        for(const [dx,dy] of [[0,-1],[1,0],[0,1],[-1,0]]){
+          ctx.moveTo(x+dx*t0,y+dy*t0);ctx.lineTo(x+dx*t1,y+dy*t1);}
+        ctx.stroke();};
+      ring(3.4,'rgba(4,7,12,.75)');
+      ring(1.6,`rgba(${col},${.6+.35*h})`);
+    } else if(!c.solid){
       // лише площі (область-джерело пуску, центр району, здогад) — порожнє
       // кільце кольору виду, як у редакторі; крапка тут означала б місце
       const col=kind==='пуск'?'74,222,128':kind==='ППО'||kind==='збиття'?'255,77,99'
@@ -730,6 +749,8 @@ map.on('click',ev=>{
    .setContent(`<div style="font:12px ui-monospace,monospace;color:#dbe6f0">
       <div style="font-size:13px;margin-bottom:4px"><b>${esc(pl.name)}</b>
         <span style="color:#7a8b9c">${esc(pl.region||'')}</span></div>
+      ${seen.every(e=>areaOf(e)==='ціль')?`<div style="color:#c9d6e3;margin-bottom:4px">`+
+        `курс сюди — де саме бачили, пости не кажуть</div>`:''}
       <div style="color:#7a8b9c;margin-bottom:6px">${seen.length} повідомлень${
         dr?` · заявлено ${dr} апаратів`:''}${seen.length>8?' · показано 8 останніх':''}</div>
       ${nearLine}${rows}</div>`)

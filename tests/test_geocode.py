@@ -1123,3 +1123,14 @@ class TestThirdReview(TestReviewFindings):
         p = self._resolve("Шацкий район / Рязанская область / Фиксация БПЛА")
         pt = ST.point_entity(p)
         self.assertTrue(pt and pt.get("geo_area"), pt)
+
+    def test_only_target_in_region_is_marked_aim(self):
+        """«Ещё фиксации БПЛА в направлении Каланчак / Херсонская область РФ» —
+        крапка на цілі, але подія знає, що це ціль (`aim`)."""
+        p = self._resolve("Ещё фиксации БПЛА в направлении Каланчак / "
+                          "Херсонская область РФ")
+        pt = ST.point_entity(p)
+        self.assertTrue(pt and pt.get("_aim"), pt)
+        p = self._resolve("Каланчак / Фиксации БПЛА / Херсонская область РФ")
+        pt = ST.point_entity(p)
+        self.assertFalse(pt.get("_aim"))

@@ -147,6 +147,9 @@ def sightings(raid):
                                 "degs": collections.Counter(), "src": [],
                                 "area": ""})
         b["n"] += 1
+        # Місце — ЦІЛЬ руху, лише якщо так про нього сказано в усіх
+        # повідомленнях: хоч одне «тут бачили» робить його місцем.
+        b["aim"] = b.get("aim", True) and bool(e.get("aim"))
         b["kinds"][e["kind"]] += 1
         if e.get("utype"):
             b["types"][e["utype"]] += 1
@@ -180,7 +183,8 @@ def sightings(raid):
                     "kinds": dict(b["kinds"]), "types": dict(b["types"]), "ts": ts,
                     "t0": ts[0] if ts else "", "t1": ts[-1] if ts else "",
                     "deg": b["degs"].most_common(1)[0][0] if b["degs"] else None,
-                    "area": b["area"], "src": b["src"][:8]})
+                    "area": b["area"], "aim": b.get("aim", False),
+                    "src": b["src"][:8]})
     out.sort(key=lambda s: -s["n"])
     return out
 

@@ -6844,7 +6844,25 @@ function drawSights(c){
     const launch=sightTop(s)==='пуск';
     const col=launch?COL_LAUNCH:COL_FIX;
     const a=launch?.9:(cnt>1?.75:.4);
-    if(s.area){
+    if(s.aim){
+      // Ціль руху: пост сказав лише, КУДИ летять («в направлении Каланчак»),
+      // а де саме бачили — ні. Знак прицілу — кільце й чотири риски: його
+      // читають як «ціль» без легенди. Не крапка (читалась би як «тут
+      // бачили») і не стрілка (звідки летять, у даних нема). Перша версія —
+      // три риски — на малому кільці виглядала пропелером.
+      const rr=Math.max(5,r+1), t0=rr-2, t1=rr+5;
+      const sight=(w,st)=>{
+        c.strokeStyle=st;c.lineWidth=w;
+        c.beginPath();c.arc(p[0],p[1],rr,0,7);c.stroke();
+        c.beginPath();
+        for(const [dx,dy] of [[0,-1],[1,0],[0,1],[-1,0]]){
+          c.moveTo(p[0]+dx*t0,p[1]+dy*t0);c.lineTo(p[0]+dx*t1,p[1]+dy*t1);
+        }
+        c.stroke();
+      };
+      sight(3.4,hexa('#04070c',.75));
+      sight(1.6,hexa(col,.9));
+    }else if(s.area){
       // центр району чи здогад — кільце, не крапка
       c.beginPath();c.arc(p[0],p[1],r,0,7);
       c.strokeStyle=hexa('#04070c',.7);c.lineWidth=3;c.stroke();
@@ -6868,9 +6886,11 @@ function drawSights(c){
       .map(([k,n])=>n>1?`${k} ${n}`:k).join(', ');
     // «Одеська обл. · область» — повтор: для області-джерела пуску назва
     // вже каже, що це площа.
-    const lines=[(h.place||'без назви')+(h.area&&h.area!=='область'?' · '+h.area:''),
+    const lines=[(h.aim?'курс на ':'')+(h.place||'без назви')
+                   +(h.area&&h.area!=='область'?' · '+h.area:''),
                  `${cnt} повідомл.`+(h.t0?` · ${h.t0}${h.t1&&h.t1!==h.t0?'–'+h.t1:''}`:''),
-                 kinds].concat(types?[types]:[]);
+                 kinds].concat(types?[types]:[])
+                 .concat(h.aim?['летять сюди; де саме бачили — пост не каже']:[]);
     c.font='500 12px "MapSans",ui-sans-serif,-apple-system,Arial';
     const w=Math.max(...lines.map(l=>c.measureText(l).width))+16, lh=16, hh=lines.length*lh+8;
     let x=p[0]+12, y=p[1]-hh/2;
@@ -6905,7 +6925,7 @@ function sightToMark(s){
           origin:'night:'+((window.NIGHT&&window.NIGHT.date)||''),
           la:s.la,lo:s.lo,src:uniqSrc(s.src),n:Math.max(1,s.n||1),
           t:s.t0||'',size:7+Math.min(6,(s.n||1)*1.5),
-          label:(s.place||CAT_NAME[CAT[kind]||'fix'])
+          label:(s.aim?'курс на ':'')+(s.place||CAT_NAME[CAT[kind]||'fix'])
                 +(uLabel(u)?' · '+uLabel(u):'')+(s.n>1?' ×'+s.n:'')};
 }
 function putSights(){
@@ -6914,9 +6934,11 @@ function putSights(){
   snapshot();
   S.sight=list.map(s=>Object.assign({},s));
   S.sightHover=null;
-  const areas=S.sight.filter(s=>s.area).length;
-  toast(`фіксацій: ${S.sight.length} місць`+(areas?` (з них районів ${areas})`:''));
-  jlog('sights',{n:S.sight.length,areas});
+  const areas=S.sight.filter(s=>s.area&&!s.aim).length;
+  const aims=S.sight.filter(s=>s.aim).length;
+  toast(`фіксацій: ${S.sight.length} місць`+(areas||aims?` (`+[areas?`районів ${areas}`:'',
+        aims?`цілей руху ${aims}`:''].filter(Boolean).join(', ')+')':''));
+  jlog('sights',{n:S.sight.length,areas,aims});
   refresh();
 }
 document.getElementById('sights').onclick=()=>{

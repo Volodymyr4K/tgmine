@@ -63,6 +63,17 @@ class TestBearings(unittest.TestCase):
         self.assertEqual(u["place"], "Унеча")
         self.assertEqual(len(u["src"]), 3)
 
+    def test_sightings_aim_only_when_every_message_is_a_target(self):
+        """«Курс на X» — лише коли ВСІ повідомлення місця кажуть «туди летять»;
+        хоч одне «тут бачили» робить його місцем."""
+        raid = {"events": [
+            self._ev(46.25, 33.29, None, aim=True, url="https://t.me/a/1"),
+            self._ev(46.25, 33.29, None, aim=True, url="https://t.me/a/2"),
+            self._ev(52.85, 32.67, None, aim=True, url="https://t.me/a/3"),
+            self._ev(52.85, 32.67, None, url="https://t.me/a/4")]}
+        out = {s["la"]: s["aim"] for s in self.mk.sightings(raid)}
+        self.assertEqual(out, {46.25: True, 52.85: False})
+
     def test_alerts_onsets_muted_silent(self):
         """Старти тривог: кожна область із тексту, старт після ≥3 год тиші,
         «після відбою», німа область без фіксацій, суцільна — у muted."""

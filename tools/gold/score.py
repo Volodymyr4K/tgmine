@@ -101,6 +101,7 @@ def main():
 
     point = collections.defaultdict(list)
     recall, lp, lr, kind_ok = [], [], [], []
+    extra = collections.defaultdict(list)
     for i in ids:
         p, g, s = posts[i], gold[i], sysr[i]
         w, occ, text = p["w"], p["occ"], p["text"]
@@ -109,6 +110,10 @@ def main():
             r = role_at(tuple(s["point"]), text, g)
             for k in CATS:
                 point[k].append((int(r == k), w, occ))
+        for sp in s.get("places", [])[1:]:
+            r = role_at(tuple(sp), text, g)
+            for k in CATS:
+                extra[k].append((int(r == k), w, occ))
         if g["kind"] in OBS:
             gs = [sp for m, sp in zip(g["mentions"], spans(text, g["mentions"])) if m["role"] == "here" and sp]
             shown = [tuple(x) for x in s.get("places", [])]
@@ -134,6 +139,10 @@ def main():
     for k in CATS:
         print(f"   на {k:10}        ", rate(point[k], k))
     print("повнота here (спост.) ", rate(recall, 0))
+    if extra["here"]:
+        print("додаткові місця (also):")
+        for k in CATS:
+            print(f"   на {k:10}        ", rate(extra[k], k))
     print("ланки: точність       ", rate(lp, 0))
     print("ланки: повнота        ", rate(lr, 0))
 

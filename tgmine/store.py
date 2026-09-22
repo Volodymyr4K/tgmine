@@ -55,7 +55,9 @@ MSK = timezone(timedelta(hours=3))
 # 23: відповідь на власний пост без свого місця успадковує крапку й область
 #     батька (`link_replies`, поле `reply_of`); дубль за текстом — лише під
 #     тим самим батьком.
-PIPELINE_VERSION = 23
+# 24: `also` — інші місця «тут» поста; рядки 2+ у lpr1/vrv/kupol
+#     (`extract.place_lines`) — запасне місце для крапки.
+PIPELINE_VERSION = 24
 
 # Курс, названий словами. 2040 точкових подій (5.6%) кажуть «пролёт БПЛА на
 # северо-восток» або «с юго-запада фиксации», і досі ці слова викидались, а
@@ -749,6 +751,101 @@ def _from_side(text, e):
     return bool(src) and (not dst or src[-1] > dst[-1])
 
 
+def _aim_ids(p, pts, first_pos):
+    """id() сутностей поста, що є ЦІЛЛЮ руху (або джерелом для не-першої)."""
+    def before(e):
+        return p["text"][max(0, e.get("pos", 0) - 24):e.get("pos", 0)]
+    named = [e for e in p.get("entities", []) if "lat" in e]
+    aim = {id(e) for e in named if DIR_BEFORE.search(before(e))
+           or (e in pts and e.get("pos") != first_pos and SRC_BEFORE.search(before(e)))}
+    # Прийменник стоїть лише перед ПЕРШОЮ назвою переліку: «и далее на
+    # Жуковку, Брянск», «в направлении Ялта - Алушта - Судак - Феодосия».
+    # Без цього кроку правило ловило перший пункт, а крапка переїжджала на
+    # другий — виміряно, 168 постів із 1026 (16%). Продовжуємо, поки між
+    # назвами лише роздільники.
+    order = sorted(named, key=lambda e: e.get("pos", 0))
+    for prev, cur in zip(order, order[1:]):
+        if id(prev) in aim and id(cur) not in aim:
+            gap = p["text"][prev.get("pos", 0)
+                            + len(str(prev.get("match") or "")):cur.get("pos", 0)]
+            if ENUM_GAP.fullmatch(gap):
+                aim.add(id(cur))
+    return aim
+
+
+#: Ближче — те саме місце, що вже показане.
+ALSO_SAME_KM = 10.0
+#: Район, у межах якого вже є показане місце, — підпис до нього, а не ще одне
+#: місце («Алымова, Карачевский район»).
+ALSO_AREA_KM = 40.0
+
+
+#: Слово руху раніше в тому ж реченні — назва далі по реченню вже ціль
+#: («пролёт БПЛА на Сагуны, Костомарово», «Возможно далее на
+#: Новокуйбышевск», «траектория на Мирный»). Для крапки події цього
+#: правила нема (там `DIR_BEFORE` упритул), для ДОДАТКОВИХ місць — є:
+#: помилкове додаткове місце гірше за пропущене. «на территории» (РСЧС) —
+#: не рух.
+_MOVE_IN_SENT = re.compile(
+    r"направлени|в\s+сторон|далее|курс\w*|траектори|\bвыход\w*\s+на|подвернуть|"
+    r"\bуйти\b|\bпойд|\bчерез\b|\bв\s+обход|\bна\s+(?!территори)", re.I)
+#: Рядок, що обривається словом руху: наступні рядки-місця — цілі.
+_MOVE_DANGLING = re.compile(r"(?:направлени\w*|далее|сторону|\bна|\bв)\s*:?\s*$", re.I)
+_EVENT_LINE = re.compile(r"тревог|опасн|фиксац|отбой|сбит|\bпво\b|внимани|угроз", re.I)
+
+
+def _moving_to(text, pos):
+    """Назва на позиції `pos` стоїть після слова руху — у реченні чи під
+    обірваним рядком «И далее в направлении»."""
+    start = max(text.rfind(c, 0, pos) for c in ".!?\n") + 1
+    if _MOVE_IN_SENT.search(text[start:pos]):
+        return True
+    ls = text.rfind("\n", 0, pos)
+    while ls > 0:
+        prev_start = text.rfind("\n", 0, ls) + 1
+        prev = text[prev_start:ls]
+        if _MOVE_DANGLING.search(prev):
+            return True
+        if _EVENT_LINE.search(prev):
+            return False
+        ls = prev_start - 1
+    return False
+
+
+def also_places(p, best):
+    """Інші місця поста, де бачили, крім `best` — для карти (поле `also`).
+
+    Пост -> одна крапка губив половину місць: за еталоном (BACKLOG §16.11)
+    карта показувала 40-54% місць «тут». Сюди йдуть усі розвʼязані НП і
+    райони поста, що НЕ є ціллю чи джерелом руху (та сама логіка, що в
+    `point_entity`), не центр області, не успадковані від батька; ближчі за
+    ALSO_SAME_KM до вже взятого — повтор; район поруч із уже взятим місцем
+    — підпис до нього.
+    """
+    if best is None or "lat" not in best:
+        return []
+    ents = [e for e in p.get("entities", []) if "lat" in e and not e.get("inherited")
+            and e.get("geo_conf") not in ("centroid", "region-snap", None)
+            and e.get("pos") is not None]
+    if not ents:
+        return []
+    first_pos = min((e.get("pos", 0) for e in p.get("entities", [])
+                     if e.get("pos") is not None and "lat" in e
+                     and e.get("type") in ("нп", "регіон")), default=None)
+    aim = _aim_ids(p, ents, first_pos)
+    taken = [best]
+    out = []
+    for e in sorted(ents, key=lambda e: (bool(e.get("geo_area")), e.get("pos", 0))):
+        if id(e) in aim or e is best or _moving_to(p["text"], e["pos"]):
+            continue
+        near = min(GC.haversine((e["lat"], e["lon"]), (t["lat"], t["lon"])) for t in taken)
+        if near < ALSO_SAME_KM or (e.get("geo_area") and near < ALSO_AREA_KM):
+            continue
+        taken.append(e)
+        out.append(e)
+    return sorted(out, key=lambda e: e.get("pos", 0))
+
+
 def point_entity(p):
     """Топонім, який дає події координату.
 
@@ -788,6 +885,14 @@ def point_entity(p):
     # Каховку», «От Новороссийска до Геленджика»). Вирішує ОСТАННЄ слово
     # руху перед назвою в її рядку: «от Багерово, Керчь … в сторону Тамань»
     # — Керч теж джерело.
+    #
+    # Місця з рядків 2+ (`extract.place_lines`, lpr1/vrv/kupol) — найнижчі
+    # запасні, нижче навіть за повторний збіг області: крапка події лишається
+    # там, де була, а самі вони йдуть у карту додатковими місцями
+    # (`also_places`). Перша версія відсіювала їх ПІСЛЯ повторного збігу —
+    # і «Керченский полуостров / Керчь / … / Тамань» ставало Таманню.
+    if any(not e.get("lined") for e in pts):
+        pts = [e for e in pts if not e.get("lined")]
     if any(not e.get("extra") for e in pts):
         pts = [e for e in pts if not e.get("extra")]
     else:
@@ -808,21 +913,7 @@ def point_entity(p):
     # області (центроїд, крапкою не буває), і без нього ланцюг не починався,
     # тож Рославль лишався «місцем» і за населенням бив Єршичі (друга
     # рецензія 21 вересня 2026).
-    named = [e for e in p.get("entities", []) if "lat" in e]
-    aim = {id(e) for e in named if DIR_BEFORE.search(before(e))
-           or (e in pts and e.get("pos") != first_pos and SRC_BEFORE.search(before(e)))}
-    # Прийменник стоїть лише перед ПЕРШОЮ назвою переліку: «и далее на
-    # Жуковку, Брянск», «в направлении Ялта - Алушта - Судак - Феодосия».
-    # Без цього кроку правило ловило перший пункт, а крапка переїжджала на
-    # другий — виміряно, 168 постів із 1026 (16%). Продовжуємо, поки між
-    # назвами лише роздільники.
-    order = sorted(named, key=lambda e: e.get("pos", 0))
-    for prev, cur in zip(order, order[1:]):
-        if id(prev) in aim and id(cur) not in aim:
-            gap = p["text"][prev.get("pos", 0)
-                            + len(str(prev.get("match") or "")):cur.get("pos", 0)]
-            if ENUM_GAP.fullmatch(gap):
-                aim.add(id(cur))
+    aim = _aim_ids(p, pts, first_pos)
     # Якщо в пості нема НІЧОГО, крім цілі напрямку, лишаємо як було: краще
     # неточна крапка, ніж мовчазна втрата події. Таких 137 за 15 діб.
     aim_pts = {id(e) for e in pts if id(e) in aim}
@@ -1220,6 +1311,12 @@ class Store:
             # Відповідь, що взяла місце в батька (`link_replies`): id батька.
             # Поле присутнє завжди (test_schema_is_uniform).
             "reply_of": p.get("_reply_of"),
+            # Інші місця «тут» цього поста (`also_places`): [назва, lat, lon,
+            # площа]. Координата події — як і раніше, `lat/lon`.
+            "also": ([[e.get("geo_name") or e.get("value"), e["lat"], e["lon"],
+                       bool(e.get("geo_area"))] for e in also_places(p, best)]
+                     if best and lat and (best or {}).get("geo_conf") not in ("centroid", "region-snap")
+                     else []),
             # Привʼязка до цілі — ЛИШЕ для координат, які справді вказують на
             # місце. Регіональні відкати (centroid/region/region-snap) означають
             # «десь у цій області», а область — це десятки тисяч кв. км. Ставити

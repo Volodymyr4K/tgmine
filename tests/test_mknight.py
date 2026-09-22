@@ -242,3 +242,20 @@ class TestLinkedAlerts(unittest.TestCase):
         e = self._ev("тривога", "Курская область, далее на Орёл", 51.7, 36.2,
                      "2026-07-28T01:04:00+03:00", conf="centroid")
         self.assertEqual(MK._linked_alerts([e]), set())
+
+
+class TestAlsoPlaces(unittest.TestCase):
+    """Інші місця «тут» поста (`also`) — окремі свідчення."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.mk = load_script("mapper/mknight.py")
+
+    def test_each_also_place_is_a_sighting(self):
+        e = {"kind": "фіксація", "scope": "точка", "lat": 51.73, "lon": 36.19,
+             "geo_conf": "region", "place": "Kursk", "t": "2026-09-10T22:00:00+03:00",
+             "hhmm": "22:00", "url": "u", "text": "Курск / Курчатов / Дмитриев / Фиксации",
+             "also": [["Kurchatov", 51.66, 35.65, False], ["Dmitriyev", 52.13, 35.08, False]]}
+        raid = {"events": [e], "_uk": type("N", (), {"place": lambda self, n, a, b: n})()}
+        got = sorted(s["place"] for s in self.mk.sightings(raid))
+        self.assertEqual(got, ["Dmitriyev", "Kurchatov", "Kursk"])

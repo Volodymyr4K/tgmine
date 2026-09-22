@@ -394,3 +394,41 @@ class TestVolzhsk(unittest.TestCase):
                      "Казань, Зеленодольск."]:
             with self.subTest(text=text[:30]):
                 self.assertNotEqual(self.first_region(text), "Волгоградська")
+
+
+class TestPlaceLines(unittest.TestCase):
+    """Місце на рядок (lpr1/vrv/kupol): рядки 2+ теж дають місця."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.cfg = E.Config.load(CFG)
+
+    def _ff(self, text, ch="lpr1_treugolnik"):
+        return [(e["match"], bool(e.get("lined"))) for e in
+                E.enrich([{"text": text, "channel": ch}], self.cfg)[0]["entities"]
+                if e["type"] == "нп"]
+
+    def test_each_place_line_is_read(self):
+        got = self._ff("Курск\nКурчатов\nДмитриев\nИ близлежащие\nТревога по БПЛА\nКурская область")
+        self.assertIn(("Курчатов", True), got)
+        self.assertIn(("Дмитриев", True), got)
+
+    def test_event_lines_are_not_places(self):
+        got = self._ff("Эртильский район\nАннинский район\nВоронежская область\nФиксации БПЛА")
+        self.assertNotIn("Фиксации", [m for m, _ in got])
+
+    def test_other_channels_keep_first_line_only(self):
+        got = self._ff("Курск\nКурчатов\nТревога по БПЛА", ch="locatorru")
+        self.assertNotIn("Курчатов", [m for m, _ in got])
+
+    def test_names_do_not_glue_across_lines(self):
+        got = self._ff("Подо-Калиновка\nКаланчак\nХорлы и близлежащие\nОпасность по БПЛА")
+        self.assertTrue(all("\n" not in m for m, _ in got))
+
+    def test_same_position_as_config_entity_is_not_lined(self):
+        # «Железногорский район»: маркер області з конфігу й район — одна
+        # назва; позначка `lined` зробила б район запасним, і крапка
+        # падала на ціль у наступному рядку.
+        got = self._ff("Студенток\nЖелезногорский район\nИ далее в направлении Железногорск",
+                       ch="kupolrussia")
+        self.assertIn(("Железногорский", False), got)

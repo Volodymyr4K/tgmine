@@ -188,7 +188,47 @@ _ADJ_WORD = re.compile(r"(?:ая|яя|ый|ий|ой|ое|ее|ые|ие|ую|ю
 _REGION_ADJ = re.compile(r"(?:ск|цк)(?:ий|ая|ое|ие|ой|ую|ого|ому|ом|ою|их|им|ими|ых|ым|ей)$", re.I)
 
 
-def freeform_of(text: str, cfg: Config) -> list[dict]:
+#: Канали, що пишуть МІСЦЕ НА РЯДОК: «Курск / Курчатов / Дмитриев / Тревога»,
+#: «Эртильский район / Аннинский район / Воронежская область / Фиксации».
+#: locatorru пише перелік у першому рядку, тож тут його нема. Заміряно
+#: 22.09.2026 (BACKLOG §16.3): 1148 постів за 14 діб мали розвʼязувані місця
+#: в рядках 2+, 750 — lpr1, 313 — vrv.
+LINE_CHANNELS = {"lpr1_treugolnik", "kupolrussia", "vrv_radar"}
+
+#: Малі слова, що можуть стояти в рядку-місці. Будь-яке інше мале слово
+#: («опасность», «фиксации», «с моря», «в направлении») — рядок не є чистим
+#: переліком місць, і з нього нічого не береться: так у рядок-місце не
+#: потрапить ні вид події, ні ціль руху, ні службове слово («Меры»).
+_LINE_OK = {"и", "район", "р-н", "района", "районы", "округ", "го", "мо", "г", "с", "п",
+            "пгт", "близлежащие", "ближайшие", "близлежащих", "ближайших", "окрестности",
+            "город", "села", "поселок", "посёлок", "село", "станица", "ст", "х", "д"}
+_WORD = re.compile(r"[A-Za-zА-ЯЁа-яёІіЇїЄєҐґ][\w\-’'`]*")
+#: Слово події чи засобу в рядку — рядок не є переліком місць, навіть коли
+#: всі слова з великої («Фиксации БПЛА», «Работа ПВО», «Меры Безопасности»).
+_EVENT_WORD = re.compile(
+    r"фиксац|пролет|пролёт|сбит|\bпво\b|меры|опасн|тревог|отбой|угроз|внимани|"
+    r"работа|повторно|продолжа|бпла|\bбп\b|дрон|ракет|авиац|фпв|хорнет|дартс|"
+    r"укрыти|срочно|обстрел|взрыв|прил[её]т|\bрф\b|область|край\b|республик", re.I)
+
+
+def place_lines(text: str) -> list[tuple[int, str]]:
+    """(позиція, рядок) для рядків 2+ поста, що є чистим переліком місць."""
+    out, pos = [], 0
+    for i, line in enumerate(text.split("\n")):
+        start, pos = pos, pos + len(line) + 1
+        if i == 0 or not line.strip():
+            continue
+        words = _WORD.findall(line)
+        if not words or not any(w[0].isupper() for w in words):
+            continue
+        if _EVENT_WORD.search(line):
+            continue
+        if all(w[0].isupper() or w.lower() in _LINE_OK for w in words):
+            out.append((start, line))
+    return out
+
+
+def freeform_of(text: str, cfg: Config, channel: str | None = None) -> list[dict]:
     """Сутності, яких не перелічиш у конфізі — напр. сотні населених пунктів.
 
     Бере збіги за шаблоном (зазвичай — слова з великої літери), відкидає стоплист,
@@ -198,6 +238,23 @@ def freeform_of(text: str, cfg: Config) -> list[dict]:
     for etype, spec in cfg.freeform.items():
         scope = text if not spec["lines"] else "\n".join(
             text.split("\n")[:spec["lines"]])
+        out += _freeform_scope(scope, 0, spec, etype, cfg, seen)
+        # Рядки 2+ — окремо, кожен сам по собі: інакше двослівне вікно
+        # шаблону склеює назви через перенос («Каланчак\nХорлы»). Сутності
+        # позначені `lined`: у крапку події вони йдуть лише запасним місцем
+        # (`store.point_entity`), а в карту — як додаткові місця (`also`).
+        if spec["lines"] and channel in LINE_CHANNELS:
+            for start, line in place_lines(text):
+                for e in _freeform_scope(line, start, spec, etype, cfg, seen):
+                    e["lined"] = True
+                    out.append(e)
+    return out
+
+
+def _freeform_scope(scope, offset, spec, etype, cfg, seen):
+    """Збіги шаблону `freeform` у `scope`; `offset` — його позиція в пості."""
+    out = []
+    if True:
         # Спани вже впізнаного — порівнюємо позиції, а не рядки: "Запорожская"
         # всередині "Запорожская область" належить регіону й не є окремим НП.
         taken = [m.span() for rx in cfg.tags.values() for m in rx.finditer(scope)]
@@ -223,7 +280,7 @@ def freeform_of(text: str, cfg: Config) -> list[dict]:
             if len(val) < spec["min_len"] or low in spec["stoplist"] or low in seen:
                 return
             out.append({"type": etype, "value": val, "match": val,
-                        "modifier": None, "pos": pos})
+                        "modifier": None, "pos": pos + offset})
 
         for m in spec["pattern"].finditer(scope):
             val = m.group(0).strip(" ,.:;!?-")
@@ -348,7 +405,17 @@ def enrich(posts: list[dict], cfg: Config) -> list[dict]:
             if he:
                 p["entities"] = [he]
         if cfg.freeform:
-            p["entities"] = p["entities"] + freeform_of(p["text"], cfg)
+            ff = freeform_of(p["text"], cfg, p.get("channel"))
+            # Назва з рядка 2+ на тій самій позиції, що й сутність конфігу, —
+            # це та сама назва («Железногорский район»: маркер області й
+            # район), а не додаткове місце. Геокод гасить маркер на користь
+            # району, і позначка `lined` робила б із району запасне місце —
+            # крапка падала на ціль «И далее в направлении Железногорск».
+            cfg_pos = {e.get("pos") for e in p["entities"]}
+            for e in ff:
+                if e.get("lined") and e.get("pos") in cfg_pos:
+                    del e["lined"]
+            p["entities"] = p["entities"] + ff
         p["entities"] = p["entities"] + launch_sources(p["text"], p["entities"])
         p["segment"] = segment(p["text"], cfg)
     return posts

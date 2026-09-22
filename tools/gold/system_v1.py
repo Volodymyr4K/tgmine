@@ -3,6 +3,10 @@
 
   python3 tools/gold/system_v1.py [вихід]   # -> tests/data/gold/sys_v1.jsonl
 
+Назва історична: скрипт запускає поточний код. `sys_v1.jsonl` — нуль
+відліку (конвеєр v22); новіші — `sys_v<версія>.jsonl`. `places` — крапка
+події плюс `store.also_places`, якщо вони є в цій версії.
+
 Вибір крапки повторює `Store._event` (пуск -> джерело, інакше
 `point_entity`, далі область поста, далі будь-яка сутність) і відкат за
 санітарною межею 400 км. Ланки — з `vectors.parse` (сирі назви, щоб знайти
@@ -51,7 +55,9 @@ def main(out=None):
         rows.append({"id": p["url"], "kind": k, "scope": ev["scope"], "geo_conf": ev["geo_conf"],
                      "shown": bool(SHOWN(ev)), "aim": ev["aim"], "point": span,
                      "point_text": p["text"][span[0]:span[1]] if span else None,
-                     "places": [span] if span and SHOWN(ev) else [], "legs": legs})
+                     "places": ([span] + [[e["pos"], e["pos"] + len(str(e.get("match") or ""))]
+                                          for e in (ST.also_places(p, best) if hasattr(ST, "also_places") else [])])
+                               if span and SHOWN(ev) else [], "legs": legs})
     dst = Path(out) if out else ROOT / "tests/data/gold/sys_v1.jsonl"
     with open(dst, "w", encoding="utf-8") as f:
         for r in rows:

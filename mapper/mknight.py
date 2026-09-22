@@ -199,9 +199,27 @@ def sightings(raid):
         launch_area = e.get("kind") == "пуск" and e.get("geo_conf") == "centroid"
         if e.get("geo_conf") in ("centroid", "region-snap") and not launch_area:
             continue
-        key = (round(e["lat"], 2), round(e["lon"], 2))
+        # Крапка події і решта місць «тут» того ж поста (`also`, конвеєр
+        # v24): «Курск / Курчатов / Дмитриев / Тревога» — три місця, а не
+        # одне. Кожне — окреме свідчення з тими самими видом, часом і
+        # посиланням.
+        # Тривога привʼязана до руху своєю крапкою (`_linked_alerts`), а решта
+        # міст її переліку окремо не перевірені — тож для тривоги лише крапка.
+        also = [] if id(e) in linked else list(e.get("also") or [])
+        for pt in [None] + also:
+            _add_sighting(by, e, pt, launch_area)
+    return _finish_sightings(raid, by)
+
+
+def _add_sighting(by, e, pt, launch_area):
+    if pt is None:
+        la, lo, place, area = e["lat"], e["lon"], e.get("place") or "", None
+    else:
+        place, la, lo, area = pt[0] or "", pt[1], pt[2], ("район" if pt[3] else None)
+    if True:
+        key = (round(la, 2), round(lo, 2))
         b = by.setdefault(key, {"la": key[0], "lo": key[1], "n": 0,
-                                "place": e.get("place") or "", "lat": e["lat"], "lon": e["lon"],
+                                "place": place, "lat": la, "lon": lo,
                                 "kinds": collections.Counter(), "ts": [],
                                 "types": collections.Counter(),
                                 "degs": collections.Counter(), "src": [],
@@ -209,7 +227,7 @@ def sightings(raid):
         b["n"] += 1
         # Місце — ЦІЛЬ руху, лише якщо так про нього сказано в усіх
         # повідомленнях: хоч одне «тут бачили» робить його місцем.
-        b["aim"] = b.get("aim", True) and bool(e.get("aim"))
+        b["aim"] = b.get("aim", True) and bool(e.get("aim")) and pt is None
         b["kinds"][e["kind"]] += 1
         if e.get("utype"):
             b["types"][e["utype"]] += 1
@@ -220,7 +238,10 @@ def sightings(raid):
         if e.get("url"):
             b["src"].append({"u": e["url"], "t": e.get("hhmm", ""),
                              "k": e.get("kind", ""), "ty": e.get("utype")})
-        if launch_area:
+        if pt is not None:
+            if area or AREA_NAME.search(place):
+                b["area"] = "район"
+        elif launch_area:
             b["area"] = "область"
         # `area` із сховища (конвеєр v20) — район, зокрема розвʼязаний своїм
         # містом; назва — для сховищ, зібраних раніше.
@@ -228,6 +249,9 @@ def sightings(raid):
             b["area"] = "район"
         elif e.get("geo_conf") == "global" and not b["area"]:
             b["area"] = "здогад"
+
+
+def _finish_sightings(raid, by):
     # Ніч іде через північ: 23:45 стоїть ПЕРЕД 00:10. Рядкове сортування
     # ставило їх навпаки, і картка казала «00:01–23:45» про одну ніч.
     # Доба тут — від 12:00 до 12:00, як скрізь у проєкті.

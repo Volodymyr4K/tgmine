@@ -1,0 +1,100 @@
+{"i": 0, "verdict": "ok", "missed": ["Аннинский район"], "note": "two districts listed"}
+{"i": 1, "verdict": "ok", "missed": [], "note": "observation place"}
+{"i": 2, "verdict": "ok", "missed": [], "note": "observation place"}
+{"i": 3, "verdict": "ok", "missed": [], "note": "observation place"}
+{"i": 4, "verdict": "target_only", "missed": [], "note": "'в вашем направлении' addressed to Сызрань; no observation place"}
+{"i": 5, "verdict": "ok", "missed": [], "note": "observation place"}
+{"i": 6, "verdict": "ok", "missed": ["Донецк"], "note": "Донецк, Макеевка both listed"}
+{"i": 7, "verdict": "ok", "missed": [], "note": "observation place"}
+{"i": 8, "verdict": "ok", "missed": [], "note": "observation place"}
+{"i": 9, "verdict": "ok", "missed": [], "note": "observation place"}
+{"i": 10, "verdict": "target", "missed": ["Кольцово", "Нива"], "note": "'между Кольцово-Нива' observed, 'на Евпаторию' heading"}
+{"i": 11, "verdict": "ok", "missed": [], "note": "observation place"}
+{"i": 12, "verdict": "ok", "missed": [], "note": "observation place"}
+{"i": 13, "verdict": "ok", "missed": [], "note": "observation place"}
+{"i": 14, "verdict": "target_only", "missed": [], "note": "'курсом на Красный луч'; Санжаровка is source only"}
+{"i": 15, "verdict": "target", "missed": ["Весёлое"], "note": "Весёлое observed; 'далее возможно на Мелитополь'"}
+{"i": 16, "verdict": "ok", "missed": [], "note": "observation place"}
+{"i": 17, "verdict": "target_only", "missed": [], "note": "'с моря в направлении Севастополя'"}
+{"i": 18, "verdict": "target_only", "missed": [], "note": "'фиксации в вашу сторону' addressed to Кстово"}
+{"i": 19, "verdict": "ok", "missed": ["Шолоховский район", "Чертковский район"], "note": "three districts listed"}
+{"i": 20, "verdict": "ok", "missed": [], "note": "observation place"}
+{"i": 21, "verdict": "target_only", "missed": [], "note": "'в вашем направлении' addressed to Туапсе"}
+{"i": 22, "verdict": "target_only", "missed": [], "note": "'в вашу сторону' addressed to Орел"}
+{"i": 23, "verdict": "ok", "missed": [], "note": "observation place"}
+{"i": 24, "verdict": "ok", "missed": [], "note": "observation place"}
+{"i": 25, "verdict": "ok", "missed": ["Жуковский район", "Малоярославецкий район"], "note": "three districts listed"}
+{"i": 26, "verdict": "ok", "missed": ["Ибресинский район"], "note": "two districts listed"}
+{"i": 27, "verdict": "ok", "missed": [], "note": "observation place"}
+{"i": 28, "verdict": "ok", "missed": [], "note": "observation place"}
+{"i": 29, "verdict": "ok", "missed": ["Армянск", "Перекопский залив"], "note": "Армянск с запада, Перекопский залив also observation"}
+{"i": 30, "verdict": "wrong_other", "missed": [], "note": "Мелитополь is part of road name 'трассы Мелитополь-Приазовское' (heading); Семеновка is source"}
+{"i": 31, "verdict": "ok", "missed": [], "note": "observation place"}
+{"i": 32, "verdict": "ok", "missed": [], "note": "observation place"}
+{"i": 33, "verdict": "ok", "missed": ["машзавод", "Северный", "Сахалин", "Крапивное", "Чураево"], "note": "list of Shebekino-area places"}
+{"i": 34, "verdict": "ok", "missed": [], "note": "observation place"}
+{"i": 35, "verdict": "ok", "missed": [], "note": "observation place"}
+{"i": 36, "verdict": "ok", "missed": ["Андреевка", "Кача", "Угловое"], "note": "Севастополь is region line; specific villages listed"}
+{"i": 37, "verdict": "source", "missed": [], "note": "'От Ливенки в направлении Алексеевки'; no other observation place named"}
+{"i": 38, "verdict": "target_only", "missed": [], "note": "'в Черном море в направлении Тарханкут, Севастополь'"}
+{"i": 39, "verdict": "target", "missed": ["Вилино", "Кочергино", "Маловидное"], "note": "villages observed; 'далее в направлении Бахчисарай/Севастополь'"}
+{"i": 40, "verdict": "ok", "missed": ["Корочанский район"], "note": "Корочанский also danger area"}
+{"i": 41, "verdict": "ok", "missed": ["Таганрогский залив", "Лакедемоновка", "Красный Десант", "Новобессергеневка", "Беглица", "Золотая Коса", "Таганрог", "Бессергеновка", "Семибалки", "Круглое", "Кагальник", "Азов", "Кулешовка", "Ростов-на-Дону", "Новобатайск", "Зерноград", "Егорлыкская", "Сальск"], "note": "long list, Батайск one of many"}
+{"i": 42, "verdict": "ok", "missed": [], "note": "observation place"}
+{"i": 43, "verdict": "ok", "missed": ["Фиолент"], "note": "Фиолент within Севастополь"}
+{"i": 44, "verdict": "ok", "missed": [], "note": "observation place"}
+{"i": 45, "verdict": "ok", "missed": [], "note": "observation place"}
+{"i": 46, "verdict": "ok", "missed": [], "note": "observation place"}
+{"i": 47, "verdict": "ok", "missed": [], "note": "observation place"}
+{"i": 48, "verdict": "ok", "missed": ["Ростов-на-Дону", "Батайск"], "note": "three cities listed"}
+{"i": 49, "verdict": "ok", "missed": [], "note": "observation place"}
+{"i": 50, "verdict": "ok", "missed": ["Иловайск"], "note": "Иловайск, Амвросиевка listed"}
+{"i": 51, "verdict": "target_only", "missed": [], "note": "'от Стерегущее в направлении севернее Евпатория'; only Крым as area"}
+{"i": 52, "verdict": "ok", "missed": [], "note": "observation place"}
+{"i": 53, "verdict": "ok", "missed": [], "note": "observation place"}
+{"i": 54, "verdict": "ok", "missed": [], "note": "observation place"}
+{"i": 55, "verdict": "ok", "missed": [], "note": "observation place"}
+{"i": 56, "verdict": "target_only", "missed": [], "note": "'от Витино ... в направлении севернее Евпатория'"}
+{"i": 57, "verdict": "ok", "missed": [], "note": "observation place"}
+{"i": 58, "verdict": "ok", "missed": [], "note": "observation place"}
+{"i": 59, "verdict": "ok", "missed": [], "note": "observation place"}
+{"i": 60, "verdict": "target_only", "missed": [], "note": "Брянск in 'курс взят на ...'; only sources (Стародубский/Погарский/Трубчевский р-ны) named"}
+{"i": 61, "verdict": "ok", "missed": ["Пронский район"], "note": "two districts listed"}
+{"i": 62, "verdict": "ok", "missed": [], "note": "observation place"}
+{"i": 63, "verdict": "source", "missed": [], "note": "'От Новопокровки в направлении Приморское, Феодосия'; no other observation place"}
+{"i": 64, "verdict": "ok", "missed": [], "note": "observation place"}
+{"i": 65, "verdict": "ok", "missed": [], "note": "observation place"}
+{"i": 66, "verdict": "ok", "missed": ["Климово", "Сураж", "Локоть", "Карачев", "Стародуб", "Унеча", "Погар", "Почеп", "Жирятино", "Клетня", "Мглин", "Сельцо", "Брянск", "Выгоничи"], "note": "long list"}
+{"i": 67, "verdict": "wrong_other", "missed": [], "note": "truncated compound: 'Мариинско' of Мариинско-Посадский район"}
+{"i": 68, "verdict": "source", "missed": [], "note": "'От Котовское в направлении Кировское'; no other observation place"}
+{"i": 69, "verdict": "ok", "missed": [], "note": "observation place"}
+{"i": 70, "verdict": "ok", "missed": [], "note": "observation place"}
+{"i": 71, "verdict": "ok", "missed": [], "note": "observation place"}
+{"i": 72, "verdict": "ok", "missed": [], "note": "observation place"}
+{"i": 73, "verdict": "ok", "missed": [], "note": "observation place"}
+{"i": 74, "verdict": "ok", "missed": ["Сириус", "Адлер"], "note": "three places listed"}
+{"i": 75, "verdict": "ok", "missed": [], "note": "observation place"}
+{"i": 76, "verdict": "ok", "missed": [], "note": "observation place"}
+{"i": 77, "verdict": "source", "missed": ["ЮБК"], "note": "'ЮБК от Севастополя в направлении Ялта'"}
+{"i": 78, "verdict": "ok", "missed": [], "note": "observation place"}
+{"i": 79, "verdict": "target_only", "missed": [], "note": "'От Фруктового пролет на Верхнесадовое'"}
+{"i": 80, "verdict": "source", "missed": [], "note": "'От Нововасильевка в направлении Луначарского кольца'; no other observation place"}
+{"i": 81, "verdict": "target", "missed": ["Толкаевка"], "note": "Толкаевка observed; 'в направлении села Плешанова'"}
+{"i": 82, "verdict": "ok", "missed": [], "note": "Кача is source ('от Качи на юг')"}
+{"i": 83, "verdict": "target_only", "missed": [], "note": "'от ДНР на Матвеев Курган, Покровское, Таганрог'"}
+{"i": 84, "verdict": "ok", "missed": ["Новоселовка", "Кольчугино"], "note": "three villages listed; Симферополь is target"}
+{"i": 85, "verdict": "ok", "missed": ["Чайкино", "Мадеевка"], "note": "three places listed"}
+{"i": 86, "verdict": "ok", "missed": [], "note": "observation place"}
+{"i": 87, "verdict": "target_only", "missed": [], "note": "'в вашем направлении' addressed to Угличский"}
+{"i": 88, "verdict": "target_only", "missed": [], "note": "'в сторону Сельцо от Жирятино'"}
+{"i": 89, "verdict": "target_only", "missed": [], "note": "'Харьковская область в направлении ШБК, Волоконовский, Валуйский'"}
+{"i": 90, "verdict": "ok", "missed": [], "note": "observation place"}
+{"i": 91, "verdict": "ok", "missed": [], "note": "observation place"}
+{"i": 92, "verdict": "ok", "missed": [], "note": "observation place"}
+{"i": 93, "verdict": "ok", "missed": [], "note": "observation place"}
+{"i": 94, "verdict": "ok", "missed": [], "note": "observation place"}
+{"i": 95, "verdict": "ok", "missed": [], "note": "observation place"}
+{"i": 96, "verdict": "target", "missed": ["Ленинское"], "note": "'Ленинское в направлении на Октябрьское'"}
+{"i": 97, "verdict": "ok", "missed": [], "note": "observation place"}
+{"i": 98, "verdict": "ok", "missed": [], "note": "работа ПВО at Тольятти"}
+{"i": 99, "verdict": "ok", "missed": [], "note": "observation place"}

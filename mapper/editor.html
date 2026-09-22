@@ -2871,21 +2871,107 @@ function spline(pts,c,bows,tension){
   }
   return pa;
 }
+// Точка, записана двічі поспіль (у маршрутах з даних ночі таких десятки), для
+// малювання — зайва: відрізок нульової довжини ламає дотичну, і крива з
+// розгону вилітає за кінець маршруту. Сам маршрут не змінюється.
+function dedupePts(pts){
+  return pts.filter((p,i)=>i===0||Math.hypot(p[0]-pts[i-1][0],p[1]-pts[i-1][1])>0.004);
+}
 // Пучок: та сама лінія, зсунута по нормалі. Так на оглядових картах
 // показують групу — не одна лінія й не N окремих маршрутів.
-function bundlePaths(pts,n,spread){
+//
+// Нитки розходяться за ПРОЙДЕНОЮ ВІДСТАННЮ вздовж самої кривої, а не в
+// точках маршруту. Раніше зсув ставився лише у вузлах і за їхнім номером:
+// маршрут «старт, той самий старт, кінець» мав «середину» на старті — нитки
+// розходились віялом у точці вильоту («лист»), а маршрут із двох точок
+// взагалі не мав пучка. Тепер крива спершу розбивається густо (ті самі
+// безьє, що в spline()), і розхил іде рівно від кінця до кінця.
+// Скільки точок густої кривої на відрізок. 8, а не 16: крива через них усе
+// одно малюється безьє, тож гладкість та сама, а SVG маршрутів легший удвічі.
+const SEG_SAMPLES=8;
+function bundlePaths(pts,n,spread,bows,tension){
   if(n<=1) return [pts];
+  // Відрізок із двох точок пучка не мав ніколи (зсув ставився лише у вузлах,
+  // а на кінцях він нульовий) — так і лишається: рішення оператора
+  // 23.09.2026, інакше короткі маршрути з даних ночі обростали «веретенами».
+  if(pts.length<=2) return Array.from({length:n},()=>pts);
+  const tt=(tension===undefined?1:tension);
+  const bowed=!!(bows&&bows.some(Boolean));
+  // Вигнуті оператором відрізки — як були: вигин привʼязаний до номера
+  // відрізка, і густу криву під нього не побудуєш.
+  if(bowed) return bundleByNodes(pts,n,spread);
+  let D=pts;
+  {
+    D=[];
+    for(let i=0;i<pts.length-1;i++){
+      const p0=pts[i-1]||pts[i],p1=pts[i],p2=pts[i+1],p3=pts[i+2]||pts[i+1];
+      const c1=[p1[0]+(p2[0]-p0[0])/6*tt,p1[1]+(p2[1]-p0[1])/6*tt];
+      const c2=[p2[0]-(p3[0]-p1[0])/6*tt,p2[1]-(p3[1]-p1[1])/6*tt];
+      for(let j=0;j<SEG_SAMPLES;j++){
+        const u=j/SEG_SAMPLES,v=1-u;
+        D.push([v*v*v*p1[0]+3*v*v*u*c1[0]+3*v*u*u*c2[0]+u*u*u*p2[0],
+                v*v*v*p1[1]+3*v*v*u*c1[1]+3*v*u*u*c2[1]+u*u*u*p2[1]]);
+      }
+    }
+    D.push(pts[pts.length-1]);
+    D=D.filter((p,i)=>i===0||Math.hypot(p[0]-D[i-1][0],p[1]-D[i-1][1])>1e-6);
+    if(D.length<2) D=pts;
+  }
+  const cum=[0];
+  for(let i=1;i<D.length;i++){
+    const a=D[i-1], b=D[i], cl=Math.cos((a[0]+b[0])/2*Math.PI/180);
+    cum.push(cum[i-1]+Math.hypot(b[0]-a[0],(b[1]-a[1])*cl));
+  }
+  const total=cum[cum.length-1];
+  // Нормаль — по сусідах на пів відрізка в обидва боки, а не по найближчих:
+  // на крутому повороті найближчі розвертали її, і нитка закручувалась
+  // кільцем.
+  const W=Math.max(1,SEG_SAMPLES>>1);
+  // На крутому повороті нитки стискаються: розведені вбік, вони на
+  // розвороті (Воронеж -> X -> Воронеж) описували кола навколо міста. На
+  // прямій множник 1, під прямим кутом ~0.2, на розвороті 0.
+  const bend=D.map((p,i)=>{
+    const a=D[Math.max(0,i-W)], b=D[Math.min(D.length-1,i+W)];
+    const ax=p[0]-a[0], ay=p[1]-a[1], bx=b[0]-p[0], by=b[1]-p[1];
+    const la=Math.hypot(ax,ay), lb=Math.hypot(bx,by);
+    if(!la||!lb) return 1;
+    const c=(ax*bx+ay*by)/(la*lb);
+    return Math.max(0,Math.min(1,(c+0.25)/1.25));
+  });
+  // згладити, щоб стискання не давало зламу нитки
+  const bs=bend.map((_,i)=>{
+    let m=1; for(let j=Math.max(0,i-W);j<=Math.min(bend.length-1,i+W);j++) m=Math.min(m,bend[j]);
+    return m;
+  });
   const out=[];
   for(let k=0;k<n;k++){
     const t=(k/(n-1)-0.5)*2;                 // -1..1
-    out.push(pts.map((p,i)=>{
-      const u=pts.length>1 ? i/(pts.length-1) : 0;
+    out.push(D.map((p,i)=>{
+      const u=total>0 ? cum[i]/total : (D.length>1 ? i/(D.length-1) : 0);
       // Нитки більше не строго паралельні. Рівновіддалені лінії читаються як
       // мотузка, а не як група: у групі апарати сходяться й розходяться.
       // Розкид детермінований (від номера нитки й позиції на шляху), а не
       // випадковий — інакше пучок «кипів» би на кожному перемальовуванні.
       const wander=1+0.35*Math.sin(3.1*u+k*2.4)+0.15*Math.sin(6.7*u+k*1.1);
-      const w=Math.sin(Math.PI*u)*wander;     // на кінцях сходиться в точку
+      const w=Math.sin(Math.PI*u)*wander*bs[i]; // на кінцях сходиться в точку
+      const prev=D[Math.max(0,i-W)], next=D[Math.min(D.length-1,i+W)];
+      const dla=next[0]-prev[0], dlo=next[1]-prev[1];
+      const len=Math.hypot(dla,dlo)||1;
+      return [p[0]+(-dlo/len)*t*spread*w*0.01, p[1]+(dla/len)*t*spread*w*0.01];
+    }));
+  }
+  return out;
+}
+// Пучок по вузлах — алгоритм до 23.09.2026, лишений для маршрутів із
+// вигнутими відрізками.
+function bundleByNodes(pts,n,spread){
+  const out=[];
+  for(let k=0;k<n;k++){
+    const t=(k/(n-1)-0.5)*2;                 // -1..1
+    out.push(pts.map((p,i)=>{
+      const u=pts.length>1 ? i/(pts.length-1) : 0;
+      const wander=1+0.35*Math.sin(3.1*u+k*2.4)+0.15*Math.sin(6.7*u+k*1.1);
+      const w=Math.sin(Math.PI*u)*wander;
       const prev=pts[Math.max(0,i-1)], next=pts[Math.min(pts.length-1,i+1)];
       const dla=next[0]-prev[0], dlo=next[1]-prev[1];
       const len=Math.hypot(dla,dlo)||1;
@@ -2945,7 +3031,15 @@ function drawRoute(o,c,sel){
   // оператору треба розрізняти дві групи «шахедів», і для цього є власний
   // колір обʼєкта. Легенда лишається за типами.
   const col=o.col||(TYPE[o.type]||TYPES[0]).col;
-  const lines=bundlePaths(o.pts,o.count||1,o.spread||0);
+  // Нитки й ореол — по маршруту без точок-дублів (якщо оператор не гнув
+  // відрізків: вигин привʼязаний до номера відрізка, його не чіпаємо).
+  const bowed=!!(o.bows&&o.bows.some(Boolean));
+  // Маршрут, що весь стоїть в одній точці (6 однакових вузлів на карті
+  // 17.09.2026), після склеювання мав би одну точку й зник би — він
+  // малюється як і раніше, світною плямою.
+  const dd=bowed?o.pts:dedupePts(o.pts);
+  const cp=dd.length>=2?dd:o.pts;
+  const lines=bundlePaths(cp,o.count||1,o.spread||0,o.bows,o.tension);
   const A=(o.alpha===undefined?1:o.alpha);
   const w=o.width||1.6;
 
@@ -2957,7 +3051,7 @@ function drawRoute(o,c,sel){
   // ЕКРАННИХ пікселях, тому при експорті ×2.6 давало бруд замість ореолу.
   const halo=S.style.route.halo*A, hw=w*3.2+(o.spread||0)*0.35;
   c.lineJoin='round';c.lineCap='round';c.strokeStyle=col;
-  const hp=spline(o.pts,c,o.bows,o.tension);
+  const hp=spline(cp,c,bowed?o.bows:null,o.tension);
   c.globalAlpha=halo*0.55;c.lineWidth=hw*1.7;c.stroke(hp);
   c.globalAlpha=halo;c.lineWidth=hw;c.stroke(hp);
   c.restore();
@@ -2972,7 +3066,7 @@ function drawRoute(o,c,sel){
     c.strokeStyle=col;
     c.globalAlpha=(lines.length>1 ? (0.80-0.30*edge) : 0.95)*A;
     c.lineWidth=lines.length>1 ? Math.max(0.9,w*0.8) : w;
-    c.stroke(spline(L,c,o.bows,o.tension));
+    c.stroke(spline(L,c,bowed?o.bows:null,o.tension));
   });
   c.restore();
 
@@ -7538,11 +7632,11 @@ document.getElementById('ghost').onclick=()=>{
   // підказок, жирно й напівпрозоро, з вістрям. Клік — звичайна стрілка.
   // Конуси на область — окремий шар зі своєю кнопкою (рішення оператора
   // 23.09.2026): разом із маршрутами вони робили з ночі рожевий туман, а
-  // потрібні не завжди. Тут лише курси словами; конуси — якщо шар увімкнено.
-  for(const b of (window.NIGHT.bearings||[])){
-    if(isConeBearing(b)&&!hadCones) continue;
-    S.ghosts.push(bearingGhost(b));
-  }
+  // потрібні не завжди. Тут вони лише тоді, коли шар уже ввімкнено.
+  // Курсів словами тут нема: їх кладе «Покласти напрямки з тексту», і в
+  // підказках вони малювались другою копією тієї самої стрілки.
+  if(hadCones) for(const b of (window.NIGHT.bearings||[]))
+    if(isConeBearing(b)) S.ghosts.push(bearingGhost(b));
   const c={strong:0,ok:0,weak:0};
   for(const g of S.ghosts) c[g.conf]=(c[g.conf]||0)+1;
   toast(`підказок: ${S.ghosts.length} (впевнених ${c.strong}, слабких ${c.weak})`);

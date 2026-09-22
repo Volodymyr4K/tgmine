@@ -238,6 +238,24 @@ class TestLinkedAlerts(unittest.TestCase):
         got = MK._linked_alerts([fix, near, late, far])
         self.assertEqual(got, {id(near)})
 
+    def test_bare_post_alert_never_links(self):
+        """Голий пост-тривога (`kind_ctx`) у свідчення не йде навіть поруч зі
+        спостереженням: цю ознаку заміряно й відкинуто (BACKLOG, v27)."""
+        fix = self._ev("фіксація", "Азов / фиксация", 47.10, 39.42,
+                       "2026-07-28T04:10:00+03:00", scope="точка")
+        bare = dict(self._ev("тривога", "Азов / Ростовская область", 47.11, 39.43,
+                             "2026-07-28T04:17:00+03:00"), kind_ctx="—")
+        self.assertEqual(MK._linked_alerts([fix, bare]), set())
+
+    def test_bare_post_alert_is_not_an_onset(self):
+        """Одна голa тривога без відбою розтягувала покриття на всю ніч."""
+        ev = {"scope": "область", "kind": "тривога", "t": "2026-09-11T13:54:00+03:00",
+              "hhmm": "13:54", "region": None, "kind_ctx": "—",
+              "text": "Ленинградская область / Санкт-Петербург", "url": "u"}
+        self.assertEqual(MK.alerts({"events": [ev]})["onsets"], [])
+        ev["kind_ctx"] = None
+        self.assertEqual(len(MK.alerts({"events": [ev]})["onsets"]), 1)
+
     def test_region_centre_never_links(self):
         e = self._ev("тривога", "Курская область, далее на Орёл", 51.7, 36.2,
                      "2026-07-28T01:04:00+03:00", conf="centroid")

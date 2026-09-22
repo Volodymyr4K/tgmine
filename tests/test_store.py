@@ -42,40 +42,80 @@ class TestKindNegation(unittest.TestCase):
 
 
 class TestNamedDroneWithoutTrigger(unittest.TestCase):
-    """Апарат названий, тригера нема: присутність — фіксація, підготовка — тривога.
+    """Апарат названий, тригера нема: присутність — фіксація, підліт — тривога.
 
-    Тексти — дослівно зі сховища (серпень–вересень 2026), вид — як їх
-    прочитали обидва незалежні розмітники з контекстом (22.09.2026).
+    Тексти — дослівно зі сховища (серпень–вересень 2026). Вид — як їх
+    прочитали обидва незалежні розмітники з контекстом (22.09.2026), а
+    тактичні дрони — рішення оператора того ж дня.
     """
 
     def test_presence_is_a_sighting(self):
-        for text in ["Енакиево ДНР Баба Яга",
-                     "Каховка БПЛА разведчик\nХерсонская область РФ",
-                     "Трасса Р-280 окрестности Осипенко  высокая активность БПЛА.\n"
-                     "Запорожская область РФ",
-                     "Таганрог\nРостовская область\n2 БПЛА в вашем направлении",
-                     "Кировское ДНР группа БПЛА на юг, ю-в",
-                     "От Строителя на Яковлево по трассе БПЛА\nБелгородская область",
-                     "Погар Дартс подходит к Белевице! Срочно укрытия!\nБрянская область"]:
+        for text in ["Сольцы, Новгородская область - группа БПЛА на север, северо-восток.",
+                     "От Узловая на Новомосковск БПЛА, Тульская область.",
+                     "Электросталь, Московская область - много БПЛА в небе.",
+                     "Симферопольский район, СНТ возле с .Трудовое,очень низко летит БПЛА",
+                     "Орловская область - от Хотынец на Болхов 3 БПЛА.",
+                     "БПЛА над Железнодорожным районом, г.Воронеж.",
+                     "Два БПЛА от Войково на Гвардейское вдоль трассы"]:
             with self.subTest(text=text):
                 self.assertEqual(ST.kind_of(text), "фіксація")
 
-    def test_preparation_is_an_alert(self):
-        for text in ["Мелитополь приготовиться к массовой атаке БПЛА",
-                     "Шебекино и далее\nПриготовиться к волне БПЛА\nБелгородская область",
+    def test_heading_here_is_an_alert(self):
+        """«В вашем направлении» — апарат летить СЮДИ, ще не тут (7 із 10
+        хибних фіксацій першої версії); «возможно», «будет» — ще не тут."""
+        for text in ["Батайск\nРостовская область\n5 БПЛА в вашем направлении",
+                     "Стародуб, Брянская область - в вашу сторону БПЛА с юга.",
+                     "Причерноморье Краснодарский край\nВозможно группа БПЛА в обход Крыма",
+                     "Ярославская область - будет много БПЛА от Ивановской и Владимирской областей.",
+                     "Мелитополь приготовиться к массовой атаке БПЛА",
                      "Южные районы Севастополь готовность к атаке группы БПЛА к 17:55"]:
             with self.subTest(text=text):
                 self.assertEqual(ST.kind_of(text), "тривога")
 
-    def test_trigger_still_wins(self):
-        """Фолбек — лише коли жоден тригер KIND не виграв."""
-        self.assertEqual(ST.kind_of("Боброво тревога по БПЛА Хорнет\nЛНР"), "тривога")
+    def test_tactical_drones_are_not_on_the_map(self):
+        """Рішення оператора 22.09.2026 — і з тригером теж."""
+        for text in ["Енакиево ДНР Баба Яга",
+                     "Каховка БПЛА разведчик\nХерсонская область РФ",
+                     "Трасса Р-280\nВысокая активность БПЛА Хорнет",
+                     "Боброво тревога по БПЛА Хорнет\nЛНР",
+                     "Погар Дартс подходит к Белевице! Срочно укрытия!",
+                     "Токмак\nАктивность Фпв\nЗапорожская область РФ",
+                     "Ромашовка / Валуйский район / БПЛА Шарк"]:
+            with self.subTest(text=text):
+                self.assertEqual(ST.kind_of(text), "інше")
 
-    def test_long_post_needs_more_than_a_model_name(self):
-        """Назва моделі без ознаки присутності — лише в короткому пості."""
-        text = ("Как выжить в многоэтажке во время налёта — советы жителей "
-                "приграничья, где каждый день летают Хорнет" + " и так далее" * 10)
-        self.assertNotEqual(ST.kind_of(text.replace("летают", "бывают")), "фіксація")
+    def test_long_range_types_stay(self):
+        self.assertEqual(ST.kind_of("Карачев опасность по БПЛА лютый"), "тривога")
+
+    def test_launch_is_not_a_sighting_over_the_place(self):
+        for text in ["Возможно пуски 3 БПЛА от Чугуев",
+                     "Выход 2 БПЛА в море от Затоки на восток"]:
+            with self.subTest(text=text):
+                self.assertNotEqual(ST.kind_of(text), "фіксація")
+
+    def test_capital_letter_really_required(self):
+        """«от … на» з малої — не «від місця до місця»: `re.I` робив
+        `[А-ЯЁ]` будь-якою літерою («от БПЛА на сложных участках»)."""
+        self.assertEqual(ST.kind_of("Работают специалисты от БПЛА на сложных участках"),
+                         "інше")
+        self.assertEqual(ST.kind_of("От Яковлево на Прохоровку БПЛА"), "фіксація")
+
+    def test_long_post_is_left_alone(self):
+        """Довше за DRONE_MAXLEN — звернення й огляди, а не спостереження."""
+        body = "Уважаемые жители! Над городом 3 БПЛА. "
+        self.assertEqual(ST.kind_of(body), "фіксація")
+        self.assertEqual(ST.kind_of(body + "Просим не снимать работу ПВО. " * 7), "інше")
+
+    def test_guard_words_block_the_fallback(self):
+        self.assertEqual(ST.kind_of("#Сводка: над городом 3 БПЛА"), "інше")
+
+    def test_trigger_still_wins(self):
+        self.assertEqual(ST.kind_of("Белгород фиксации 3 БПЛА в вашем направлении"),
+                         "фіксація")
+
+    def test_fallback_can_be_switched_off(self):
+        """Дедуплікація дзеркала бачить вид без фолбеку."""
+        self.assertEqual(ST.kind_of("БПЛА над Воронежем", fallback=False), "інше")
 
 
 class TestPlannedLaunchIsNotALaunch(unittest.TestCase):
@@ -1674,6 +1714,90 @@ class TestBarePostKindFromContext(unittest.TestCase):
             ("vrv_radar", 1, "Климовский район\nБрянская область\nФиксация БПЛА", None),
             ("lpr1_treugolnik", 2, "Климово и близлежащие\nБрянская область", None)])
         self.assertEqual(e["kind"], "тривога")
+
+    def test_reply_to_tactical_stays_off_the_map(self):
+        """«Ещё 1.» під «Баба яга» — той самий тактичний дрон, а не тривога."""
+        par, rep = self._events([
+            ("lpr1_treugolnik", 1, "Климово Баба яга\nБрянская область", None),
+            ("lpr1_treugolnik", 2, "Климово и близлежащие\nБрянская область",
+             "https://t.me/lpr1_treugolnik/1")])
+        self.assertEqual((par["kind"], rep["kind"], rep["kind_ctx"]), ("інше", "інше", None))
+
+    def test_reply_takes_parent_type(self):
+        par, rep = self._events([
+            ("locatorru", 1, "Климово, Брянская область - фиксации Фламинго", None),
+            ("locatorru", 2, "Климово, Брянская область",
+             "https://t.me/locatorru/1")])
+        self.assertEqual(rep["utype"], par["utype"])
+        self.assertIsNotNone(rep["utype"])
+
+    def test_parent_outside_the_batch_is_looked_up(self):
+        """Щогодинний `--since 2d` бачить батька лише у своєму вікні."""
+        par, = self._events([("locatorru", 1, "Климово, Брянская область - фиксации БПЛА", None)])
+        st = ST.Store.__new__(ST.Store)
+        rep = ST.Store._event(st, self._posts([("locatorru", 2, "Климово, Брянская область",
+                                                 "https://t.me/locatorru/1")])[0], self.cfg)
+        ST.context_kinds([rep], lookup={par["id"]: par}.get)
+        self.assertEqual((rep["kind"], rep["kind_ctx"]), ("фіксація", par["id"]))
+
+    def test_other_channel_is_not_a_parent(self):
+        _, rep = self._events([
+            ("vrv_radar", 1, "Климово, Брянская область - фиксации БПЛА", None),
+            ("locatorru", 2, "Климово, Брянская область", "https://t.me/vrv_radar/1")])
+        self.assertEqual(rep["kind_ctx"], "—")
+
+    def test_parent_kind_maps_to_a_sighting(self):
+        """ППО у батька — апарат там був: відповідь-продовження — фіксація."""
+        par, rep = self._events([
+            ("vrv_radar", 1, "Брянск\nБрянская область\nРабота ПВО по БПЛА", None),
+            ("vrv_radar", 2, "Брянск\nБрянская область", "https://t.me/vrv_radar/1")])
+        self.assertEqual((par["kind"], rep["kind"]), ("ППО", "фіксація"))
+
+    def test_direction_word_is_not_bare(self):
+        """«На Краснодар.» — ціль, а не місце: «на» не заповнювач."""
+        p, = self._posts([("locatorru", 1, "На Краснодар.", None)])
+        self.assertFalse(ST.is_bare(p))
+
+    def test_area_only_bare_post_is_left_alone(self):
+        e, = self._events([("lpr1_treugolnik", 1, "Брянская область", None)])
+        self.assertEqual((e["kind"], e["kind_ctx"]), ("інше", None))
+
+    def test_weak_geocode_does_not_make_an_event(self):
+        """«Северный Кавказ» -> Severnyy у Москві (global): голий пост не стає
+        тривогою з крапкою там."""
+        e, = self._events([("kupolrussia", 1, "Северный Кавказ", None)])
+        self.assertEqual(e["kind"], "інше")
+
+    def test_fallback_sighting_not_in_ukraine(self):
+        """Крапка фолбеку на підконтрольній Україні території — не подія."""
+        e, = self._events([("locatorru", 1, "Ромны, Сумская область - 3 БПЛА на восток.", None)])
+        self.assertEqual(e["depth"], 0)
+        self.assertEqual(e["kind"], "інше")
+        e, = self._events([("locatorru", 1, "Курск - над городом 3 БПЛА.", None)])
+        self.assertEqual(e["kind"], "фіксація")
+
+    def test_fallback_does_not_rescue_promo_from_noise(self):
+        e, = self._events([("vrv_radar", 1, "Над городом 3 БПЛА.\nПоддержите канал донатом "
+                            "https://pay.cloudtips.ru/p/01396e10", None)])
+        self.assertTrue(e["promo_lines"] > 0)
+        self.assertTrue(e["noise"])
+
+    def test_mirror_pair_stays_one_voice(self):
+        """kupol переписує lpr1 без рядка загрози: копія з фолбеком ставала
+        фіксацією при тривозі-оригіналі, і пара розбивалась (30 пар у v27)."""
+        import tempfile
+        posts = [{"channel": ch, "id": i, "text": text, "reply_to": None,
+                  "date": f"2026-09-10T20:00:{s:02d}+00:00", "url": f"https://t.me/{ch}/{i}"}
+                 for ch, i, s, text in [
+                     ("lpr1_treugolnik", 1, 0, "4 БПЛА на Мелитополь с Запада\nТревога по БПЛА"),
+                     ("kupolrussia", 2, 20, "4 БПЛА на Мелитополь с Запада")]]
+        with tempfile.TemporaryDirectory() as d:
+            st = ST.Store(root=d)
+            st.build(posts, self.cfg, self.gaz, log=lambda *a: None)
+            evs = [json.loads(l) for f in sorted(st.ev.glob("*.jsonl"))
+                   for l in f.read_text(encoding="utf-8").splitlines()]
+        self.assertEqual([e["dup_of"] for e in evs if e["channel"] == "kupolrussia"],
+                         ["lpr1_treugolnik/1"])
 
     def test_worded_post_is_left_alone(self):
         e, = self._events([("lpr1_treugolnik", 1,

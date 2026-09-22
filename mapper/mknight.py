@@ -314,6 +314,11 @@ def _linked_alerts(events):
     for e in events:
         if e.get("kind") != "тривога" or not e.get("lat") or e.get("aim"):
             continue
+        # Голий пост-тривога (`kind_ctx`) сюди не йде: «поруч є
+        # спостереження» як ознака того, що ГОЛИЙ пост — фіксація, заміряно
+        # і відкинуто (розмітка з контекстом: ~40-58% правильних, BACKLOG).
+        if e.get("kind_ctx"):
+            continue
         if e.get("geo_conf") in ("centroid", "region-snap", None):
             continue
         if _MOVE.search(e.get("text") or ""):
@@ -496,6 +501,13 @@ def alerts(raid):
     msgs = collections.defaultdict(list)          # регіон -> [(t, kind, url, hhmm, reminder)]
     for e in raid["events"]:
         if e.get("scope") != "область" or e.get("kind") not in ("тривога", "відбій"):
+            continue
+        # Голий пост («Ленинградская область / Санкт-Петербург»), вид якого
+        # узято з контексту (`store.context_kinds`), — не старт тривоги: одна
+        # ізольована денна «тривога» без відбою розтягувала покриття на всю
+        # ніч, і область ховалась як «суцільна» (рецензія v27: 16 пар
+        # область-ніч).
+        if e.get("kind_ctx"):
             continue
         t = datetime.fromisoformat(e["t"])
         text = e.get("text", "")

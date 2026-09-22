@@ -1418,3 +1418,22 @@ class TestReplyInheritsParentPlace(unittest.TestCase):
         par, rep = self._parent(), self._reply("Ещё фиксации БПЛА.",
                                                to="https://t.me/other/1")
         self.assertEqual(ST.link_replies([par, rep]), 0)
+
+    def test_retraction_does_not_take_parent_place(self):
+        par = self._parent()
+        rep = self._reply("Ложные - на момент написания поста этих фиксаций уже не существовало")
+        self.assertEqual(ST.link_replies([par, rep]), 0)
+
+    def test_launch_parent_gives_its_source_not_target(self):
+        t = "Пуски БПЛА от Днепропетровской области в сторону ЛДНР"
+        par = {"channel": "locatorru", "id": 1, "text": t, "entities": [
+            {"type": "регіон", "value": "Дніпропетровська", "match": "Днепропетровской",
+             "pos": t.index("Днепропетровской"), "lat": 48.4, "lon": 35.0,
+             "geo_conf": "source", "cc": "UA"},
+            {"type": "регіон", "value": "ТОТ_Донецьк", "match": "ЛДНР",
+             "pos": t.index("ЛДНР"), "lat": 48.0, "lon": 37.8, "geo_conf": "centroid"}]}
+        rep = self._reply("Ещё пуски БПЛА, много.")
+        ST.link_replies([par, rep])
+        got = [e["value"] for e in rep["entities"] if e.get("inherited")]
+        # лише джерело: область-ціль батька не успадковується
+        self.assertEqual(got, ["Дніпропетровська"])

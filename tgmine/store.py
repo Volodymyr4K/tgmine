@@ -895,6 +895,9 @@ def point_entity(p):
 
 
 _REPLY_URL = re.compile(r"https?://t\.me/(?:s/)?(\w+)/(\d+)")
+#: Відповідь, що спростовує чи коментує запізнення батька, — не подія на
+#: його місці.
+REPLY_RETRACT = re.compile(r"\bложн|не\s+подтверд|ошибочн|опоздал|уже\s+не\s+существ", re.I)
 
 
 def link_replies(posts):
@@ -927,16 +930,30 @@ def link_replies(posts):
         par = by.get((m.group(1), int(m.group(2))))
         if par is None or any("lat" in e for e in p.get("entities", [])):
             continue
+        # Спростування батька місця не дістає: «Ложные - на момент написания
+        # поста этих фиксаций уже не существовало» інакше ставало фіксацією
+        # на місці тих самих хибних фіксацій (перевірка 22.09.2026).
+        if REPLY_RETRACT.search(p.get("text") or ""):
+            continue
         home = GC.home_region(par)
         reg = next((e for e in par.get("entities", []) if e["type"] == "регіон"
                     and e["value"] == home and "lat" in e), None)
-        best = point_entity(par)
+        # Батько-пуск стоїть на ДЖЕРЕЛІ (`launch_origin`), а не на звичайній
+        # крапці: «Ещё пуски БПЛА, много» під «Пуски БПЛА от
+        # Днепропетровской области в сторону ЛДНР» діставало ціль (Донеччину).
+        origin = launch_origin(par) if kind_of(par.get("text") or "") == "пуск" else None
+        best = origin or point_entity(par)
         # позиція 0: успадковане стоїть «на початку» тексту відповіді, тобто
         # не після слова руху — роль ціль/місце несе `_aim`, узятий у батька
-        inh = [dict(e, pos=0, match="", inherited=True)
-               for e in (reg, best) if e is not None]
-        if best is not None and reg is not None and best is reg:
-            inh = inh[:1]
+        if origin is not None:
+            # Лише джерело: область батька-пуску — це його ЦІЛЬ («в сторону
+            # ЛДНР»), і без джерела відповідь падала б на неї.
+            inh = [dict(origin, pos=0, match="", inherited=True, _origin=True)]
+        else:
+            inh = [dict(e, pos=0, match="", inherited=True)
+                   for e in (reg, best) if e is not None]
+            if best is not None and reg is not None and best is reg:
+                inh = inh[:1]
         if inh:
             p["entities"] = list(p.get("entities", [])) + inh
             p["_reply_of"] = f"{par['channel']}/{par['id']}"
@@ -1113,7 +1130,9 @@ class Store:
         k = kind_of(clean)
         # Пуск стоїть на джерелі; без джерела в тексті — це твердження про
         # ціль, і крапкою пуску воно не малюється (шар області, як тривога).
-        origin = launch_origin(p) if k == "пуск" else None
+        origin = ((launch_origin(p) or next((e for e in p.get("entities", [])
+                                             if e.get("_origin")), None))
+                  if k == "пуск" else None)
         best = origin or point_entity(p)
         if best is None:
             # Крапки нема — беремо площу. Спершу область поста, бо саме її

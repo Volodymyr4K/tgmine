@@ -217,6 +217,9 @@ ALERT_REMINDER = re.compile(r"напоминаем|сохраняется|про
                             r"остаётся|остается|повторно", re.I)
 
 
+_CACHE: dict = {}
+
+
 def alerts(raid):
     """Хронологія стартів тривог у тилу — «куди пішли далі» для оператора.
 
@@ -240,8 +243,12 @@ def alerts(raid):
     from tgmine import extract as E
     import mkreglabels as RL
     root = os.path.dirname(HERE)
-    cfg = E.Config.load(os.path.join(root, "configs", "ru-monitor.yaml"))
-    regions = json.load(open(os.path.join(root, "regions.json"), encoding="utf-8"))
+    # Конфіг, полігони й якорі однакові для всіх ночей; на повній перебудові
+    # архіву (158 ночей) якорі самі коштували ~2 с на ніч.
+    if "cfg" not in _CACHE:
+        _CACHE["cfg"] = E.Config.load(os.path.join(root, "configs", "ru-monitor.yaml"))
+        _CACHE["regions"] = json.load(open(os.path.join(root, "regions.json"), encoding="utf-8"))
+    cfg, regions = _CACHE["cfg"], _CACHE["regions"]
 
     def night_key(hhmm):
         h = int(hhmm[:2])
@@ -338,7 +345,9 @@ def alerts(raid):
             prev, seen_otboy = t, False
         rings = regions.get(reg)
         if rings:
-            pt = RL.anchor(max(rings, key=RL.area))
+            if ("anchor", reg) not in _CACHE:
+                _CACHE[("anchor", reg)] = RL.anchor(max(rings, key=RL.area))
+            pt = _CACHE[("anchor", reg)]
             if pt:
                 anchors[reg] = [round(pt[0], 3), round(pt[1], 3)]
     onsets.sort(key=lambda o: (night_key(o["t"]), o["reg"]))

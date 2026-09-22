@@ -9,8 +9,10 @@
 from __future__ import annotations
 
 import collections
+import hashlib
 import math
 import pathlib
+import pickle
 import re
 import unicodedata
 
@@ -115,6 +117,23 @@ def _load_extra(path) -> dict[str, list[str]]:
     return out
 
 
+_LOADED: dict = {}
+
+
+def _gaz_key(paths, min_pop, classes, extra) -> str:
+    h = hashlib.sha1()
+    h.update(repr((min_pop, tuple(classes))).encode())
+    h.update(pathlib.Path(__file__).read_bytes())
+    for p in (*paths, extra):
+        p = pathlib.Path(p)
+        h.update(str(p.name).encode())
+        if p.exists():
+            with open(p, "rb") as f:
+                for chunk in iter(lambda: f.read(1 << 22), b""):
+                    h.update(chunk)
+    return h.hexdigest()[:16]
+
+
 class Gazetteer:
     def __init__(self):
         self.by_name: dict[str, list[dict]] = collections.defaultdict(list)
@@ -134,6 +153,47 @@ class Gazetteer:
     @classmethod
     def load(cls, *paths, min_pop: int = 0, classes=("P", "A"),
              extra=EXTRA) -> "Gazetteer":
+        """Газетир з файлів GeoNames — один раз на процес і з кешем на диску.
+
+        Розбір 132 МБ коштує 4.6 с локально й ~7.5 с у CI, а до 22.09.2026
+        його робив КОЖЕН запуск: `raid.py` на кожну ніч (158 разів за повну
+        перебудову архіву — більшість із 23.5 хв), `sync.py`, тести. Готовий
+        індекс з pickle вантажиться за 0.8 с. Ключ кешу — вміст файлів
+        газетира й `extra`, аргументи і сам цей модуль: змінив розбір —
+        кеш не підхопиться. Обʼєкт після завантаження не змінюється (лише
+        мемо `_self_roots`), тож ділити його між викликами безпечно.
+        """
+        memo = (tuple(map(str, paths)), min_pop, tuple(classes), str(extra))
+        if memo in _LOADED:
+            return _LOADED[memo]
+        key = _gaz_key(paths, min_pop, classes, extra)
+        cache = pathlib.Path(paths[0]).parent / ".cache" / f"gaz-{key}.pkl" if paths else None
+        if cache is not None and cache.exists():
+            try:
+                with open(cache, "rb") as f:
+                    g = pickle.load(f)
+                _LOADED[memo] = g
+                return g
+            except Exception:
+                pass                      # битий кеш — просто розбираємо наново
+        g = cls._parse(*paths, min_pop=min_pop, classes=classes, extra=extra)
+        _LOADED[memo] = g
+        if cache is not None:
+            try:
+                cache.parent.mkdir(exist_ok=True)
+                for old in cache.parent.glob("gaz-*.pkl"):
+                    old.unlink()          # старі ключі — лише місце на диску
+                tmp = cache.with_suffix(".tmp")
+                with open(tmp, "wb") as f:
+                    pickle.dump(g, f, protocol=pickle.HIGHEST_PROTOCOL)
+                tmp.replace(cache)
+            except OSError:
+                pass
+        return g
+
+    @classmethod
+    def _parse(cls, *paths, min_pop: int = 0, classes=("P", "A"),
+               extra=EXTRA) -> "Gazetteer":
         g = cls()
         extra_names = _load_extra(extra)
         for path in paths:

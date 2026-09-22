@@ -401,6 +401,17 @@ def extend_back(route, events):
     return added
 
 
+def _mode(xs):
+    """Найчастіше значення; при нічиїй — те, що трапилось раніше.
+
+    Було `max(set(xs), key=xs.count)`: нічию вирішував порядок множини, а
+    він залежить від хеш-сіду процесу. Та сама ніч давала різний тип
+    засобу маршруту від запуску до запуску (перевірено 22.09.2026: 6
+    запусків — 3 різні файли ночі), і карта перезбиралась без змін у даних.
+    """
+    return max(dict.fromkeys(xs), key=xs.count) if xs else None
+
+
 def build(raid):
     region_of = {e.get("url"): e.get("region") for e in raid.get("events", [])
                  if e.get("url")}
@@ -479,7 +490,7 @@ def build(raid):
             "km": round(km), "hours": round(span, 1),
             "kmh": round(km / span) if span > 0.3 else None,
             "t0": times[0].strftime("%H:%M"), "t1": times[-1].strftime("%H:%M"),
-            "k": max(set(cls), key=cls.count) if cls else "БПЛА", "n": len(clean)})
+            "k": _mode(cls) or "БПЛА", "n": len(clean)})
 
     # --- добудова назад: звідки група прийшла, якщо це спостерігали ---------
     extended = 0
@@ -495,7 +506,7 @@ def build(raid):
     # голосують. Редактор за нею ставить маршруту тип, а не «як у поточного».
     for r in routes:
         us = [p.get("u") for p in r["pts"] if p.get("u")]
-        r["u"] = max(set(us), key=us.count) if us else None
+        r["u"] = _mode(us)
 
     # --- впевненість -------------------------------------------------------
     for r in routes:

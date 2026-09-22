@@ -39,6 +39,7 @@
 сховища (157 діб), неоднозначних 0. Газетир читається лише в рядках із
 потрібними назвами — це дешево навіть для кожної ночі окремо.
 """
+import collections
 import difflib
 import os
 import re
@@ -690,6 +691,48 @@ def _latin_sim(uk_name, latin):
     return _sim(_lat_norm(_rom(uk_name, _UA_LAT)), _lat_norm(latin))
 
 
+_MEMO: dict = {}
+
+
+def _memo(key, make):
+    if key not in _MEMO:
+        _MEMO[key] = make()
+    return _MEMO[key]
+
+
+def _lines(path, want, ids):
+    """Рядки газетира з назвою з `want` (або id з `ids`) — у порядку файла.
+
+    Ніч редактора просить сотню назв, а скан 132 МБ коштував ~1 с на КОЖНУ
+    ніч (158 разів за повну перебудову архіву). Індекс зміщень будується раз
+    на процес; порядок записів той самий, що в повному скані, тож і
+    `place()` (перший із рівновіддалених) дає те саме.
+    """
+    if ids:                               # базові підписи — повний скан, як було
+        with open(path, encoding="utf-8") as f:
+            yield from f
+        return
+    idx = _memo(("offs", path), lambda: _offsets(path))
+    offs = sorted(o for n in want for o in idx.get(n, ()))
+    with open(path, "rb") as f:
+        for o in offs:
+            f.seek(o)
+            yield f.readline().decode("utf-8")
+
+
+def _offsets(path):
+    idx = collections.defaultdict(list)
+    with open(path, "rb") as f:
+        off = 0
+        for line in f:
+            t1 = line.find(b"\t")
+            t2 = line.find(b"\t", t1 + 1)
+            if t2 > 0:
+                idx[line[t1 + 1:t2].decode("utf-8", "replace")].append(off)
+            off += len(line)
+    return idx
+
+
 class Names:
     """Українські назви для набору місць подій або записів газетира.
 
@@ -700,16 +743,15 @@ class Names:
     def __init__(self, places=(), ids=(), gaz=GAZ, wd_path=WD_UK):
         want = {p[0] for p in places}
         ids = set(ids)
-        self.wd = load_wd(wd_path)
-        self.wd_alias = load_wd(wd_path, col=2)
-        self.extra = GC._load_extra(GC.EXTRA)
+        self.wd = _memo(("wd", wd_path, 1), lambda: load_wd(wd_path))
+        self.wd_alias = _memo(("wd", wd_path, 2), lambda: load_wd(wd_path, col=2))
+        self.extra = _memo(("extra", str(GC.EXTRA)), lambda: GC._load_extra(GC.EXTRA))
         self.recs = {}          # назва -> [(lat, lon, uk)]
         self.by_id = {}
         for path in gaz:
             if not os.path.exists(path):
                 continue
-            with open(path, encoding="utf-8") as f:
-                for line in f:
+            for line in _lines(path, want, ids):
                     head = line.split("\t", 2)
                     if len(head) < 3 or (head[1] not in want and head[0] not in ids):
                         continue

@@ -200,6 +200,18 @@ jobs:
           unzip -oq RU.zip && unzip -oq UA.zip && unzip -oq ne.zip
           rm -f *.zip
 
+      # Готовий індекс газетира (pickle, 31 МБ) — окремий кеш, бо кеш вище
+      # має сталий ключ і нового файла вже не збереже. Розбір 132 МБ коштує
+      # ~7.5 с, pickle — ~1 с; до 22.09.2026 розбір ішов у КОЖНОМУ запуску:
+      # sync.py, raid.py на кожну ніч (158 разів за повну перебудову), тести.
+      # Ключ — код розбору й довідник Wikidata; сам файл у назві несе ще й
+      # хеш вмісту газетира (`geocode._gaz_key`), тож чужий не підхопиться.
+      - name: Кеш індексу газетира
+        uses: actions/cache@v4
+        with:
+          path: gazetteer/.cache
+          key: gazpkl-v1-${{ hashFiles('tgmine/geocode.py', 'refdata/wikidata_ru.tsv') }}
+
       - name: Межі областей
         run: test -f regions.json || python mkregions.py
 
@@ -284,7 +296,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .rank
-          key: rank-v14-${{ steps.cachekey.outputs.day }}
+          key: rank-v15-${{ steps.cachekey.outputs.day }}
 
       - name: Важливість цілей
         run: |
@@ -404,7 +416,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: .rank
-          key: rank-v14-${{ steps.cachekey.outputs.day }}
+          key: rank-v15-${{ steps.cachekey.outputs.day }}
 
       # Пуш бота падав, коли поки прогін ішов, у main зʼявився чужий коміт:
       # `! [rejected] main -> main (fetch first)`. Це не рідкість — прогін

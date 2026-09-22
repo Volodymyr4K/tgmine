@@ -329,3 +329,14 @@ class TestRouteType(unittest.TestCase):
         rs, _ = RT.build(raid([], self._events([None, None, None])))
         self.assertEqual(len(rs), 1)
         self.assertIsNone(rs[0]["u"])
+
+
+class TestModeIsDeterministic(unittest.TestCase):
+    def test_tie_goes_to_first_seen_regardless_of_hash_seed(self):
+        import subprocess, sys
+        code = ("from tgmine.routes import _mode;"
+                "print(_mode(['Хорнет','БпЛА','ФПВ','БпЛА','Хорнет','ФПВ']))")
+        outs = {subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                               env={**__import__("os").environ, "PYTHONHASHSEED": str(s)}).stdout
+                for s in range(8)}
+        self.assertEqual(outs, {"Хорнет\n"})

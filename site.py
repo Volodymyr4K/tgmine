@@ -11,12 +11,16 @@ from __future__ import annotations
 
 import argparse
 import collections
+import contextlib
 import hashlib
+import importlib.util
+import io
 import re
 import html
 import json
+import multiprocessing
+import os
 import shutil
-import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -255,8 +259,9 @@ def day_window(date: str):
 # Памʼятка тримає розібрані події за ключем вікна. Це безпечно рівно тому, що
 # в site.py події лише ЧИТАЮТЬ: `summarize`, `clean`, `day_page` нічого в них
 # не пишуть. `raid.py`, який дописує подіям `hhmm` і перекладає `region`,
-# працює окремим процесом (`subprocess.run`), тож спільних обʼєктів із ним
-# нема. Хто додасть у site.py запис у подію — має спершу прибрати памʼятку
+# з 22.09.2026 працює в цьому ж процесі (`_night_job`), але читає події
+# своїм `ST.Store().window` з диска, а не через цю памʼятку, тож спільних
+# обʼєктів із нею нема. Хто додасть у site.py запис у подію — має спершу прибрати памʼятку
 # або віддавати копії.
 #
 # Ціна — памʼять: увесь архів лишається розібраним у процесі, ~250 МБ на 143
@@ -593,6 +598,73 @@ MAPPER_FILES = ("editor.html", "basemap.js", "targets.js", "labels.js",
                 "font.css", "night.js", "README.md")
 
 
+_SCRIPTS: dict = {}
+
+
+def _script(path):
+    """Скрипт збірки ночі як модуль (raid.py, makeraid.py, mapper/mknight.py)."""
+    if path not in _SCRIPTS:
+        d = str(Path(path).resolve().parent)
+        if d not in sys.path:
+            sys.path.insert(0, d)
+        name = "tgmine_night_" + Path(path).stem
+        spec = importlib.util.spec_from_file_location(name, path)
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[name] = mod
+        spec.loader.exec_module(mod)
+        _SCRIPTS[path] = mod
+    return _SCRIPTS[path]
+
+
+def _night_job(job):
+    """Одна ніч: raid.py -> makeraid.py -> mapper/mknight.py, у цьому процесі.
+
+    Ті самі кроки й аргументи, що й раніше (`NP.NIGHT_ARGV`), лише без
+    окремого процесу на кожен: до 22.09.2026 кожна ніч тричі запускала
+    Python і двічі розбирала довідники (газетир 7.5 с у CI, якорі областей
+    ~2 с) — повна перебудова архіву йшла 23.5 хв.
+    """
+    d, want_page, want_night, night, fp = job
+    argv = [[x.format(d=d, night=night) for x in step] for step in NP.NIGHT_ARGV]
+    res = {"d": d, "fp": fp, "page": want_page, "err": None, "night_err": None}
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            _script(argv[0][0]).main(*argv[0][1:])
+            if want_page:
+                _script(argv[1][0]).main(*argv[1][1:])
+                shutil.move(f"raid_{d}.html", OUT / "raids" / f"{d}.html")
+            if want_night:
+                try:
+                    _script(argv[2][0]).main(*argv[2][1:])
+                except Exception as e:
+                    res["night_err"] = repr(e)
+        Path(f"raid_{d}.json").unlink(missing_ok=True)
+    except Exception as e:
+        res["err"] = repr(e)
+    return res
+
+
+def run_nights(jobs):
+    """Ночі — паралельно на всіх ядрах (fork: довідники, завантажені тут
+    один раз, діляться з робітниками). Результати — у порядку `jobs`.
+    `NIGHT_JOBS=1` — послідовно, для налагодження."""
+    if not jobs:
+        return []
+    from tgmine import geocode as GC
+    GC.Gazetteer.load("gazetteer/RU.txt", "gazetteer/UA.txt")
+    mk = _script(NP.NIGHT_ARGV[2][0])
+    for path in mk.UN.GAZ:
+        if os.path.exists(path):
+            mk.UN._memo(("offs", path), lambda p=path: mk.UN._offsets(p))
+    for step in NP.NIGHT_ARGV[:2]:
+        _script(step[0])
+    n = int(os.environ.get("NIGHT_JOBS") or min(len(jobs), os.cpu_count() or 1, 8))
+    if n <= 1 or "fork" not in multiprocessing.get_all_start_methods():
+        return [_night_job(j) for j in jobs]
+    with multiprocessing.get_context("fork").Pool(n) as pool:
+        return list(pool.imap(_night_job, jobs))
+
+
 def night_index(nights: Path):
     """Список ночей для випадайки в редакторі.
 
@@ -779,6 +851,7 @@ def main():
         prints = NP.load(fp_path)
         code = NP.code_print(Path("."))
         why = collections.Counter()
+        jobs = []
         for r in rows:
             d = r["date"]
             want_page = r["points"] >= PAGE_MIN
@@ -794,31 +867,18 @@ def main():
                 continue
             why["свіжих" if fresh else "відсутніх" if not (done_page and done_night)
                 else "застарілих"] += 1
-            try:
-                # argv — з NP.NIGHT_ARGV: вони ж входять у відбиток ночі
-                argv = [[x.format(d=d, night=nights / f"{d}.js") for x in step]
-                        for step in NP.NIGHT_ARGV]
-                subprocess.run([sys.executable, *argv[0]], check=True,
-                               capture_output=True, timeout=900)
-                if want_page:
-                    subprocess.run([sys.executable, *argv[1]],
-                                   check=True, capture_output=True, timeout=900)
-                    shutil.move(f"raid_{d}.html", OUT / "raids" / f"{d}.html")
-                night_ok = True
-                if want_night:
-                    try:
-                        subprocess.run([sys.executable, *argv[2]],
-                                       check=True, capture_output=True, timeout=900)
-                    except Exception as e:
-                        night_ok = False
-                        print(f"  ! ніч для редактора {d}: {e}")
-                if night_ok:
-                    prints[d] = fp
-                    NP.save(fp_path, prints)
-                Path(f"raid_{d}.json").unlink(missing_ok=True)
-                print(f"  наліт {d} ok" if want_page else f"  ніч {d} ok (тиха доба)")
-            except Exception as e:
-                print(f"  ! наліт {d}: {e}")
+            jobs.append((d, want_page, want_night, str(nights / f"{d}.js"), fp))
+        for res in run_nights(jobs):
+            d = res["d"]
+            if res["err"]:
+                print(f"  ! наліт {d}: {res['err']}")
+                continue
+            if res["night_err"]:
+                print(f"  ! ніч для редактора {d}: {res['night_err']}")
+            else:
+                prints[d] = res["fp"]
+                NP.save(fp_path, prints)
+            print(f"  наліт {d} ok" if res["page"] else f"  ніч {d} ok (тиха доба)")
         # Рядок для логу CI — окремо свіжі (завжди), відсутні (холодний кеш)
         # і застарілі (змінився відбиток). У звичайному прогоні відсутніх і
         # застарілих 0. Перша версія рахувала лише застарілі й на холодному

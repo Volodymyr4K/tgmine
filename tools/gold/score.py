@@ -114,13 +114,20 @@ def main():
             shown = [tuple(x) for x in s.get("places", [])]
             for sp in gs:
                 recall.append((int(any(hit(sp, x) for x in shown)), w, occ))
-        gl = leg_spans(text, g.get("legs", []), True)
+        # Ланка: ціль має бути кінцем ланки еталона, джерело — будь-яким
+        # here/from/via поста або початком ланки еталона (розмітники
+        # розходились у «кожне місце -> ціль» / «останнє -> ціль» / ланцюг,
+        # і це не помилка жодного — merge.py).
+        gsp = spans(text, g["mentions"])
+        byname = {m["text"]: sp for m, sp in zip(g["mentions"], gsp)}
+        ends = [byname.get(y) for _, y in g.get("legs", []) if byname.get(y)]
+        starts = [byname.get(x) for x, _ in g.get("legs", []) if byname.get(x)]
+        starts += [sp for m, sp in zip(g["mentions"], gsp) if sp and m["role"] in ("here", "from", "via")]
         sl = leg_spans(text, s.get("legs", []), False)
         for x in sl:
-            lp.append((int(any(hit(x[0], y[0]) and hit(x[1], y[1]) for y in gl)), w, occ))
-        for y in gl:
-            lr.append((int(any(hit(x[0], y[0]) and hit(x[1], y[1]) for x in sl)), w, occ))
-
+            lp.append((int(any(hit(x[1], e) for e in ends) and any(hit(x[0], b) for b in starts)), w, occ))
+        for e in dict.fromkeys(ends):
+            lr.append((int(any(hit(x[1], e) for x in sl)), w, occ))
     print(f"{a.system}  split={a.split}  постів={len(ids)}")
     print("вид поста збігся      ", rate(kind_ok, 0))
     print("крапка (показані):")

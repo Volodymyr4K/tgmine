@@ -35,7 +35,9 @@ def _namer(raid):
         nm = raid["_uk"] = UN.Names(
             {(e["place"], e["lat"], e["lon"]) for e in raid["events"]
              if e.get("place") and e.get("lat")}
-            | {(a[0], a[1], a[2]) for e in raid["events"] for a in (e.get("also") or []) if a[0]})
+            | {(a[0], a[1], a[2]) for e in raid["events"] for a in (e.get("also") or []) if a[0]}
+            | {(g[0], g[1], g[2]) for e in raid["events"] for g in (e.get("legs") or []) if g[0]}
+            | {(g[4], g[5], g[6]) for e in raid["events"] for g in (e.get("legs") or []) if g[4]})
     return nm
 
 
@@ -117,7 +119,81 @@ def bearings(raid):
         name = nm.place(b["place"], b["lat"], b["lon"])
         out.append({"la": b["la"], "lo": b["lo"], "deg": b["deg"], "n": b["n"],
                     "place": name, "t": b["t"], "src": b["src"][:8]})
+    out += toward_regions(raid)
     out.sort(key=lambda s: (s["t"], -s["n"]))
+    return out
+
+
+#: Довжина стрілки «на область» — символ напрямку, не дальність, як і
+#: 35 км курсу словами; але не довша за половину шляху до якоря області,
+#: щоб вістря не лягало в саму область (інакше крізь сусідню ліг би шлях,
+#: якого ніхто не бачив — BACKLOG §16.10).
+TOWARD_KM = 60.0
+#: Ближче до якоря області — стрілка на область беззмістовна.
+TOWARD_MIN_KM = 40.0
+#: Хвости ближче за це й одна область за ніч — одна стрілка.
+TOWARD_MERGE_KM = 30.0
+
+
+def toward_regions(raid):
+    """Жирні стрілки «звідси — на область» з ланок руху (`legs`, v26).
+
+    Рішення оператора 22.09.2026: невідомий шлях — жирна стрілка напрямку,
+    а не лінія. Ланка «Юдановка … далее на Тамбовскую область» знає місце й
+    ОБЛАСТЬ, але не шлях: стрілка стоїть хвостом на місці з того самого
+    поста, дивиться на якір області (полюс недосяжності, як у чіпів
+    тривог) і до неї не дотягується. Хвіст уже в цій області — стрілки
+    нема. Джерело ланки — ціла область — теж ні: хвіст має бути місцем.
+    """
+    import mkreglabels as RL
+    root = os.path.dirname(HERE)
+    if "regions" not in _CACHE:
+        _CACHE["regions"] = json.load(open(os.path.join(root, "regions.json"), encoding="utf-8"))
+    regions = _CACHE["regions"]
+    from tgmine.labels import region_label
+    by = {}
+    for e in raid["events"]:
+        for sn, sla, slo, sar, dn, dla, dlo, dar in e.get("legs") or []:
+            if not dar or sar:
+                continue
+            rings = regions.get(dn)
+            if rings:
+                if any(RL.inside(sla, slo, r) for r in rings):
+                    continue
+                if ("anchor", dn) not in _CACHE:
+                    _CACHE[("anchor", dn)] = RL.anchor(max(rings, key=RL.area))
+                anc = _CACHE[("anchor", dn)] or (dla, dlo)
+            else:
+                anc = (dla, dlo)
+            dist = RT.hav((sla, slo), tuple(anc))
+            if dist < TOWARD_MIN_KM:
+                continue
+            # Один хвіст (у межах TOWARD_MERGE_KM) і одна область — одна
+            # стрілка з лічильником. Сітка тут не годиться: сусідні села по
+            # різні боки межі клітинки давали три паралельні стрілки «→
+            # Воронезька» (перевірка на ночі 28.07.2026).
+            key = next((k for k, v in by.items() if v["to"] == dn and
+                        RT.hav((v["la"], v["lo"]), (sla, slo)) <= TOWARD_MERGE_KM), None)
+            if key is None:
+                key = (len(by), dn)
+            b = by.setdefault(key, {"la": round(sla, 3), "lo": round(slo, 3), "to": dn,
+                                    "dla": dla, "dlo": dlo,
+                                    "deg": round(RT.bearing((sla, slo), tuple(anc))),
+                                    "km": round(min(TOWARD_KM, dist / 2)), "n": 0,
+                                    "place": sn, "t": e.get("hhmm", ""), "src": []})
+            b["n"] += 1
+            if e.get("url"):
+                b["src"].append({"u": e["url"], "t": e.get("hhmm", ""),
+                                 "k": e.get("kind", ""), "ty": e.get("utype")})
+    out, nm = [], _namer(raid)
+    for b in by.values():
+        # Ключ конфігу («Тамбовська») — таблицею областей; назва GeoNames
+        # («Pskov Oblast», «Kharkiv Oblast») — словником українських назв.
+        to = b["to"]
+        to = region_label(to) if re.search(r"[а-яіїєґ]", to, re.I) else nm.place(to, b["dla"], b["dlo"])
+        out.append({k: v for k, v in b.items() if k not in ("dla", "dlo")}
+                   | {"place": nm.place(b["place"], b["la"], b["lo"]), "to": to,
+                      "src": b["src"][:8]})
     return out
 
 

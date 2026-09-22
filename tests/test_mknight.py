@@ -259,3 +259,40 @@ class TestAlsoPlaces(unittest.TestCase):
         raid = {"events": [e], "_uk": type("N", (), {"place": lambda self, n, a, b: n})()}
         got = sorted(s["place"] for s in self.mk.sightings(raid))
         self.assertEqual(got, ["Dmitriyev", "Kurchatov", "Kursk"])
+
+
+class TestTowardRegions(unittest.TestCase):
+    """Жирна стрілка «звідси — на область» з ланок руху (`legs`)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.mk = load_script("mapper/mknight.py")
+
+    def _raid(self, legs):
+        ev = [{"legs": [g], "url": f"u{i}", "hhmm": "22:00", "kind": "фіксація"}
+              for i, g in enumerate(legs)]
+        return {"events": ev, "_uk": type("N", (), {"place": lambda self, n, a, b: n})()}
+
+    def test_arrow_points_toward_region_and_stops_short(self):
+        # Юдановка (Воронезька) -> Тамбовська
+        r = self._raid([["Yudanovka", 51.2, 40.0, False, "Тамбовська", 52.7, 41.4, True]])
+        a = self.mk.toward_regions(r)
+        self.assertEqual(len(a), 1)
+        self.assertTrue(0 < a[0]["deg"] < 90)         # на північний схід
+        self.assertLessEqual(a[0]["km"], self.mk.TOWARD_KM)
+
+    def test_tail_inside_target_region_gives_no_arrow(self):
+        # старт у Криму, «…в направлении Крыма»
+        r = self._raid([["Dzhankoy", 45.71, 34.39, False, "Крим", 45.3, 34.4, True]])
+        self.assertEqual(self.mk.toward_regions(r), [])
+
+    def test_area_tail_gives_no_arrow(self):
+        r = self._raid([["Ростовська", 47.7, 40.7, True, "Волгоградська", 49.7, 44.0, True]])
+        self.assertEqual(self.mk.toward_regions(r), [])
+
+    def test_near_tails_to_same_region_merge(self):
+        # два сусідні села Воронезької (≤30 км) -> Тамбовська
+        g1 = ["A", 51.20, 40.00, False, "Тамбовська", 52.7, 41.4, True]
+        g2 = ["B", 51.30, 40.15, False, "Тамбовська", 52.7, 41.4, True]
+        a = self.mk.toward_regions(self._raid([g1, g2]))
+        self.assertEqual([x["n"] for x in a], [2])

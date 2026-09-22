@@ -296,8 +296,11 @@ def launch_sources(text: str, known: list[dict]) -> list[dict]:
     """
     if not LAUNCH_WORD.search(text):
         return []
+    # Повторний збіг області (`extra`) позицію не займає: «Херсонская область
+    # РФ / Пуски от Каховки» — Каховка тут джерело пуску, а маркером області
+    # вона лише повторно (критична перевірка 22 вересня, 13 постів).
     taken = [(e["pos"], e["pos"] + len(str(e.get("match") or e["value"])))
-             for e in known if e.get("pos") is not None]
+             for e in known if e.get("pos") is not None and not e.get("extra")]
     out = []
     for m in _SRC_NAME.finditer(text):
         a, b = m.span("n")

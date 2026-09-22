@@ -1279,6 +1279,9 @@ class TestHomeRegion(unittest.TestCase):
                  "Смоленской области\nКалужская область", "Калузька"),
                 ("Козельский район\nУльяновский район\nКалужская область\n"
                  "Фиксация группы БПЛА", "Калузька"),
+                # «на территории» — місце, а не рух
+                ("Фиксации БПЛА на территории Белгородской области\nКурская область",
+                 "Бєлгородська"),
                 # «От X» першим — не завжди своє: Казантип маркер узяв за Казань
                 ("От Казантипа на юго-восток\nФиксация БПЛА\nРеспублика Крым", "Крим"),
                 ("От Орловское (район Воинка) в направлении Первомайское БПЛА. Низко\n"
@@ -1323,6 +1326,31 @@ class TestHomeRegion(unittest.TestCase):
                  "Тревога по БПЛА\nот Кременной\nЛДНР", "ТОТ_Луганськ")):
             with self.subTest(text=text[:40]):
                 self.assertEqual(self._home(text), want)
+
+
+class TestRepeatedMatchAfterFromIsNotATarget(TestRepeatedRegionMatch):
+    """Повторний збіг після «от» — джерело, а не «курс на X» (критична
+    перевірка 22 вересня: 106 нових знаків прицілу, серед них у протилежний
+    бік — «курс на Каховку» з «От Каховки в направлении Чаплынка»)."""
+
+    def test_source_city_is_not_aimed(self):
+        for text, city in (
+                ("Херсонская область РФ\nОт Каховки в направлении Чаплынка, Скадовск и "
+                 "близлежащие\nТревога по БПЛА", "Kakhovka"),
+                ("Краснодарский край - ракетная опасность!\nОт Новороссийска до "
+                 "Геленджика.", "Novorossiysk")):
+            with self.subTest(text=text[:30]):
+                e = self._event(text)
+                self.assertFalse(e["aim"] and e["place"] == city, e["place"])
+
+    def test_repeated_match_does_not_hide_launch_source(self):
+        """Повторний збіг не займає позицію: джерело пуску лишається."""
+        e = self._event("ДНР\nПуски БПЛА от Красноармейска в сторону Донецка")
+        self.assertEqual(e["geo_conf"], "source", e["place"])
+        self.assertEqual(e["scope"], "точка")
+
+    test_city_after_region_name_is_the_place = None
+    test_later_city_does_not_beat_the_first_line = None
 
 
 class TestHomeRegionIsSearchContext(TestRepeatedRegionMatch):

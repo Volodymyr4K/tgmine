@@ -731,6 +731,21 @@ def kind_of(text):
     return "інше"
 
 
+_FROM_WORD = re.compile(r"\bот\b|со\s+стороны|\bиз(?:-под)?\b", re.I)
+_TOWARD_WORD = re.compile(r"в\s+направлени|в\s+сторону|\bдалее\b|\bна\b|\bкурс", re.I)
+
+
+def _from_side(text, e):
+    """Останнє слово руху в рядку перед назвою — «от/из»: назва є джерелом."""
+    pos = e.get("pos")
+    if pos is None:
+        return False
+    line = text[text.rfind("\n", 0, pos) + 1:pos]
+    src = [m.start() for m in _FROM_WORD.finditer(line)]
+    dst = [m.start() for m in _TOWARD_WORD.finditer(line)]
+    return bool(src) and (not dst or src[-1] > dst[-1])
+
+
 def point_entity(p):
     """Топонім, який дає події координату.
 
@@ -763,8 +778,17 @@ def point_entity(p):
     # внимание». За населенням такий маркер перебивав село з першого рядка
     # (126 регресів арбітра «названий район»). Рятує він лише пости, що
     # інакше падали на центр області: «Саратовская область / Энгельс».
+    #
+    # Після «от» повторний збіг — джерело, і запасним місцем бути не може:
+    # правило цілі нижче зробило б із нього «курс на X», тобто знак у
+    # протилежний бік («От Каховки в направлении Чаплынка» — «курс на
+    # Каховку», «От Новороссийска до Геленджика»). Вирішує ОСТАННЄ слово
+    # руху перед назвою в її рядку: «от Багерово, Керчь … в сторону Тамань»
+    # — Керч теж джерело.
     if any(not e.get("extra") for e in pts):
         pts = [e for e in pts if not e.get("extra")]
+    else:
+        pts = [e for e in pts if not (e.get("extra") and _from_side(p["text"], e))]
 
     def before(e):
         return p["text"][max(0, e.get("pos", 0) - 24):e.get("pos", 0)]
@@ -986,8 +1010,7 @@ class Store:
         D.mirror_dups(
             posts,
             kind_of=lambda p: kind_of(strip_promo(p["text"], cfg)[0]),
-            region_of=lambda p: next((e["value"] for e in p.get("entities", [])
-                                      if e["type"] == "регіон"), None))
+            region_of=GC.home_region)
 
         by_date = collections.defaultdict(list)
         for p in posts:

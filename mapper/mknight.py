@@ -254,7 +254,10 @@ def alerts(raid):
             continue
         t = datetime.fromisoformat(e["t"])
         text = e.get("text", "")
-        ents = [x for x in E.entities_of(text, cfg) if x["type"] == "регіон"]
+        # Лише перший збіг кожної області, як до BACKLOG §7: повторний після
+        # «от» ставив відріз і зрізав області тривоги до кінця речення.
+        ents = [x for x in E.entities_of(text, cfg)
+                if x["type"] == "регіон" and not x.get("extra")]
         # «Татарстан — опасность по БПЛА от Ульяновской и Самарской областей»:
         # область після «от», яка не перша в пості, — джерело, а не місце
         # тривоги. Те саме правило, що для крапки (store.SRC_BEFORE);

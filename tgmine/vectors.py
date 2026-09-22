@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import re
 
+from . import geocode as GC
+
 # маркер, після якого йде ціль руху
 TO_MARK = re.compile(
     r"\b(?:в\s+направлени\w+|в\s+сторону|далее\s+на|курс\w*\s+на|"
@@ -109,6 +111,11 @@ def geocode_vectors(posts: list[dict], gaz, region_geo: dict,
             continue
         regions = [e["value"] for e in p.get("entities", [])
                    if e["type"] == "регіон" and e["value"] in region_geo]
+        # своя область поста, як у geocode_posts (BACKLOG §7)
+        home = GC.home_region(p)
+        if home in regions:
+            regions.remove(home)
+            regions.insert(0, home)
         near = region_geo[regions[0]] if regions else None
         a1 = (region_a1 or {}).get(regions[0]) if regions else None
         for v in vs:

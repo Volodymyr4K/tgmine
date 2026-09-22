@@ -71,9 +71,12 @@ class TestInputsAreComplete(unittest.TestCase):
         self.assertFalse([p for p in NP.inputs(ROOT) if p.name == "nightprint.py"])
 
     def test_raid_reads_the_config_and_gazetteer_named_in_inputs(self):
+        # З 22.09.2026 (конвеєр v26) `raid.py` газетир не читає — ланки руху
+        # вже в сховищі; газетир ночі читає `mapper/uknames.py` (підписи).
         src = (ROOT / "raid.py").read_text(encoding="utf-8")
         self.assertIn('"configs/ru-monitor.yaml"', src)
-        self.assertIn('"gazetteer/RU.txt"', src)
+        uk = (ROOT / "mapper" / "uknames.py").read_text(encoding="utf-8")
+        self.assertIn('"gazetteer", "RU.txt"', uk)
 
 
 class TestSensitivity(unittest.TestCase):

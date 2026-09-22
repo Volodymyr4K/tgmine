@@ -60,7 +60,10 @@ MSK = timezone(timedelta(hours=3))
 # 25: крапка — не місце після слова руху в реченні (`_moving_to`: голе «на»,
 #     «далее на», «сторону»; «г.» не рве речення); `also` без підписів-районів
 #     і без пусків; «Примерно» — не назва.
-PIPELINE_VERSION = 25
+# 26: `legs` — усі ланки руху поста тими самими ролями (`legs_of`), з
+#     позначкою площі на кінцях; «курс» — лише «курс(ом) на»; «на Дону»,
+#     «на Кубани», «на границе» — не рух.
+PIPELINE_VERSION = 26
 
 # Курс, названий словами. 2040 точкових подій (5.6%) кажуть «пролёт БПЛА на
 # северо-восток» або «с юго-запада фиксации», і досі ці слова викидались, а
@@ -788,10 +791,16 @@ ALSO_AREA_KM = 40.0
 #: Новокуйбышевск», «траектория на Мирный»). Для крапки події цього
 #: правила нема (там `DIR_BEFORE` упритул), для ДОДАТКОВИХ місць — є:
 #: помилкове додаткове місце гірше за пропущене. «на территории» (РСЧС) —
-#: не рух.
+#: не рух. «курс» — лише «курс(ом) на»: голе `курс\w*` без регістру ловило
+#: «Курская/Курской/Курск», і всі місця після Курщини ставали цілями
+#: (спіймано 22.09.2026 на зведенні МО «над территориями … Курской, …»).
+#: Голе «на» — рух, крім частин назв («Славянск на Кубани», «Калач на Дону»)
+#: і місця дії («на территории», «на границе», «на побережье»).
 _MOVE_IN_SENT = re.compile(
-    r"направлени|(?:\bв\s+)?\bсторон[уы]\b|далее|курс\w*|траектори|\bвыход\w*\s+на|подвернуть|"
-    r"\bуйти\b|\bпойд|\bчерез\b|\bв\s+обход|\bна\s+(?!территори)", re.I)
+    r"направлени|(?:\bв\s+)?\bсторон[уы]\b|далее|\bкурс(?:ом)?\s+на\b|траектори|\bвыход\w*\s+на|подвернуть|"
+    r"\bуйти\b|\bпойд|\bчерез\b|\bв\s+обход|"
+    r"\bна\s+(?!территори|границ|побереж|окраин|Дону\b|Кубани\b|Волге\b|участк|связи|"
+    r"момент|высот|месте|стык)", re.I)
 #: Рядок, що обривається словом руху: наступні рядки-місця — цілі.
 _MOVE_DANGLING = re.compile(r"(?:направлени\w*|далее|сторону|\bна|\bв)\s*:?\s*$", re.I)
 _EVENT_LINE = re.compile(r"тревог|опасн|фиксац|отбой|сбит|\bпво\b|внимани|угроз", re.I)
@@ -843,6 +852,103 @@ def _moving_to(text, pos):
             return False
         ls = prev_start - 1
     return False
+
+
+_CHAIN_GAP = re.compile(r"\bдалее\b|\bзатем\b|\bпотом\b|\bпосле\b|\bс\s+выходом", re.I)
+_VIA_BEFORE = re.compile(r"(?:\bчерез|\bв\s+обход|\bвдоль)\s+(?:г\.\s*)?$", re.I)
+
+
+_SUMMARY = re.compile(r"за\s+прошедш|в\s+течение\s+прошедш|перехвачены\s+и\s+уничтожены|"
+                      r"над\s+территори|#сводка|#обзор|уничтожено\s+\d+", re.I)
+
+
+def _region_label(text, e, regs, ents):
+    """Область-підпис: окремий рядок «Липецкая область» або хвіст «Иловка
+    Белгородская область» одразу після іншої назви — лише уточнює, де
+    сусідні місця, і ні ціллю, ні джерелом не є."""
+    if e.get("type") != "регіон" or e.get("geo_conf") != "centroid":
+        return False
+    ls = text.rfind("\n", 0, e["pos"]) + 1
+    if GC._is_label(text, ls, regs):
+        return True
+    gap_start = max((o["pos"] + len(str(o.get("match") or "")) for o in ents
+                     if o is not e and o.get("pos") is not None and ls <= o["pos"] < e["pos"]),
+                    default=None)
+    return gap_start is not None and re.fullmatch(r"[\s,]*", text[gap_start:e["pos"]]) is not None
+
+
+def legs_of(p, best=None):
+    """Рух, який ЗАЯВИВ пост: [(звідки, куди)] сутностями поста.
+
+    До 22.09.2026 рух читав окремий розбір (`vectors.parse`) зі своїм
+    шаблоном назв: одна ланка на пост, кінці-області відкидались, і за
+    еталоном витягувалась третина заявленого руху (BACKLOG §16.11). Тут —
+    ті самі сутності й ролі, що й для крапки: ціль — `_aim_ids` або слово
+    руху раніше в реченні (`_moving_to`); джерело — «от X»/«со стороны X»;
+    «через X» — проміжна точка; решта — місце «тут».
+
+    Звідки: джерело поста, інакше його крапка (`best`), інакше перше місце.
+    Ціль після «далее/затем» продовжує ланцюг від попередньої цілі
+    («… на Анна, Эртиль и далее на Тамбовскую область»); ціль переліку
+    («в сторону Кирсанов, Умет») — від того самого «звідки». Кінцем може
+    бути ціла область — позначка площі їде далі (жирна стрілка, §16.10).
+    """
+    text = p.get("text") or ""
+    # Зведення МО РФ («уничтожено 512 БПЛА над территориями Белгородской,
+    # Брянской…») — перелік областей, не рух.
+    if _SUMMARY.search(text):
+        return []
+    regs = [e for e in p.get("entities", []) if e.get("type") == "регіон"]
+    ents = sorted((e for e in p.get("entities", [])
+                   if "lat" in e and e.get("pos") is not None and not e.get("inherited")
+                   and not _region_label(text, e, regs, p.get("entities", []))),
+                  key=lambda e: e["pos"])
+    if len(ents) < 2:
+        return []
+
+    def before(e):
+        return text[max(0, e["pos"] - 24):e["pos"]]
+    first_pos = ents[0]["pos"]
+    aim = _aim_ids(p, [e for e in ents if e.get("geo_conf") != "centroid"], first_pos)
+    role = {}
+    for e in ents:
+        if SRC_BEFORE.search(before(e)):
+            role[id(e)] = "from"
+        elif _VIA_BEFORE.search(before(e)):
+            role[id(e)] = "via"
+        elif id(e) in aim or _moving_to(text, e["pos"]):
+            role[id(e)] = "to"
+        else:
+            role[id(e)] = "here"
+    targets = [e for e in ents if role[id(e)] == "to"]
+    if not targets:
+        return []
+    sources = [e for e in ents if role[id(e)] == "from" and e["pos"] < targets[0]["pos"]]
+    here = [e for e in ents if role[id(e)] == "here" and e["pos"] < targets[0]["pos"]]
+    if sources:
+        origin = sources[-1]
+    elif best is not None and role.get(id(best)) == "here":
+        origin = best
+    elif here:
+        origin = here[0]
+    else:
+        return []
+    legs, prev = [], None
+    vias = [e for e in ents if role[id(e)] == "via" and origin["pos"] < e["pos"] < targets[0]["pos"]]
+    cur = origin
+    for v in vias:
+        legs.append((cur, v))
+        cur = v
+    start = cur
+    for t in targets:
+        if prev is not None and _CHAIN_GAP.search(text[prev["pos"]:t["pos"]]):
+            src = prev
+        else:
+            src = start
+        if src is not t and GC.haversine((src["lat"], src["lon"]), (t["lat"], t["lon"])) > 5:
+            legs.append((src, t))
+        prev = t
+    return legs
 
 
 def also_places(p, best):
@@ -1359,6 +1465,15 @@ class Store:
             # Відповідь, що взяла місце в батька (`link_replies`): id батька.
             # Поле присутнє завжди (test_schema_is_uniform).
             "reply_of": p.get("_reply_of"),
+            # Рух, заявлений постом (`legs_of`): [звідки, lat, lon, площа,
+            # куди, lat, lon, площа]. Площа = ціла область (центроїд): шлях
+            # туди невідомий — жирна стрілка, не лінія маршруту (§16.10).
+            # Район площею тут не вважається — 40 км, як і раніше в `routes`.
+            "legs": [[a.get("geo_name") or a.get("value"), a["lat"], a["lon"],
+                      a.get("geo_conf") == "centroid",
+                      b.get("geo_name") or b.get("value"), b["lat"], b["lon"],
+                      b.get("geo_conf") == "centroid"]
+                     for a, b in legs_of(p, best)],
             # Інші місця «тут» цього поста (`also_places`): [назва, lat, lon,
             # площа]. Координата події — як і раніше, `lat/lon`.
             "also": ([[e.get("geo_name") or e.get("value"), e["lat"], e["lon"],

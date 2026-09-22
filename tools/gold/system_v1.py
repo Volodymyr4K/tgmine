@@ -21,6 +21,9 @@ sys.path.insert(0, str(ROOT))
 from tgmine import extract as E, geocode as GC, store as ST, vectors as V  # noqa: E402
 import sync  # noqa: E402
 
+import os
+#: LEGACY_LEGS=1 — ланки старим `vectors.parse`, для порівняння.
+LEGACY_LEGS = os.environ.get("LEGACY_LEGS") == "1"
 SHOWN = lambda ev: ev["scope"] == "точка" and ev["lat"] and ev["geo_conf"] not in ("centroid", "region-snap")
 
 
@@ -48,10 +51,13 @@ def main(out=None):
         if best and best.get("pos") is not None and best.get("match"):
             span = [best["pos"], best["pos"] + len(str(best["match"]))]
         legs = []
-        for v in V.parse(p["text"]):
-            flat = " ".join(l.strip() for l in p["text"].split("\n"))
-            if v["src"] and v["dst"]:
-                legs.append([v["src"][-1], v["dst"][0]])
+        if hasattr(ST, "legs_of") and not LEGACY_LEGS:
+            legs = [[a.get("match"), b.get("match")] for a, b in ST.legs_of(p, best)
+                    if a.get("match") and b.get("match")]
+        else:
+            for v in V.parse(p["text"]):
+                if v["src"] and v["dst"]:
+                    legs.append([v["src"][-1], v["dst"][0]])
         rows.append({"id": p["url"], "kind": k, "scope": ev["scope"], "geo_conf": ev["geo_conf"],
                      "shown": bool(SHOWN(ev)), "aim": ev["aim"], "point": span,
                      "point_text": p["text"][span[0]:span[1]] if span else None,

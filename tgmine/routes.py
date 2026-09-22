@@ -198,7 +198,10 @@ def _hops(vecs, region_of=None, region_geo=None):
             dropped["place"] += 1
             continue                      # ланка «на місці», не рух
         names = f"{v['src_name'] or ''}|{v['dst_name']}".lower()
-        if any(sfx in names for sfx in AREA_SUFFIX):
+        # Кінець-площа (центр області, район) — шлях туди невідомий; такі
+        # ланки — для жирних стрілок, не для ліній маршруту. Позначку дає
+        # розбір (`legs`); назва — для векторів, зібраних раніше.
+        if v.get("src_area") or v.get("dst_area") or any(sfx in names for sfx in AREA_SUFFIX):
             dropped["area"] += 1
             continue                      # кінець — область, а не місце
         if _same_toponym(v.get("src_name"), v.get("dst_name")):

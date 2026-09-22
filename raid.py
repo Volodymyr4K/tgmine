@@ -17,7 +17,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, ".")
-from tgmine import extract as E, geocode as GC, store as ST, territory as T, tracker as TR, vectors as V
+from tgmine import extract as E, geocode as GC, store as ST, territory as T, tracker as TR
 from tgmine.labels import region_label
 
 MSK = timezone(timedelta(hours=3))
@@ -94,17 +94,19 @@ def main(date="2026-07-17", h_from="12", h_to="12", src=None):
         e["hhmm"] = datetime.fromisoformat(e["t"]).strftime("%H:%M")
     events = [e for e in events if e.get("lat")]
 
-    # вектори руху потребують сирого тексту — беремо з тих самих подій
-    gaz = GC.Gazetteer.load("gazetteer/RU.txt", "gazetteer/UA.txt")
-    night = [{"text": e["text"].replace(" / ", "\n"), "date": e["t"],
-              "url": e["url"], "channel": e["channel"],
-              "entities": [{"type": "регіон", "value": e["region"]}] if e.get("region") else []}
-             for e in raw if not e.get("dup_of") and not e.get("noise")]
-
-    vecs = [v for v in V.geocode_vectors(
-                night, gaz, cfg.geo,
-                region_a1=gaz.region_codes(cfg.entities["регіон"], cfg.geo),
-                region_rx=cfg.entities["регіон"]) if v["src"]]
+    # Вектори руху — з ланок, які розбір уже поклав у подію (`legs`,
+    # `store.legs_of`, конвеєр v26). До 22.09.2026 їх читав окремий розбір
+    # (`vectors.geocode_vectors`) — одна ланка на пост, кінці-області
+    # відкинуті; за еталоном повнота ланок 29-38%, точність 43-77%; тепер
+    # 61-73% і 93% (BACKLOG §16.11-16.13).
+    vecs = []
+    for e in raw:
+        if e.get("dup_of") or e.get("noise"):
+            continue
+        for sn, sla, slo, sar, dn, dla, dlo, dar in e.get("legs") or []:
+            vecs.append({"t": e["t"], "url": e["url"], "src_name": sn, "src": [sla, slo],
+                         "dst_name": dn, "dst": [dla, dlo], "src_area": sar, "dst_area": dar,
+                         "marker": "legs", "text": e["text"]})
     for v in vecs:
         v["hhmm"] = datetime.fromisoformat(v["t"]).astimezone(MSK).strftime("%H:%M")
         v["t"] = datetime.fromisoformat(v["t"]).astimezone(MSK).isoformat()

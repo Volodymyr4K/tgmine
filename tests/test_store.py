@@ -1499,3 +1499,20 @@ class TestAlsoPlaces(unittest.TestCase):
         p = self._post("Пуски самолётами от Коротич, Харьков",
                        [("Коротич", 49.95, 36.03), ("Харьков", 49.99, 36.23)])
         self.assertEqual(ST.also_places(p, p["entities"][0]), [])
+
+
+class TestKurskIsNotACourse(unittest.TestCase):
+    def test_kursk_words_are_not_movement(self):
+        t = "Курская область - Льгов, Курчатов, Курск - опасность по БПЛА"
+        for w in ("Льгов", "Курчатов", "Курск -"):
+            self.assertFalse(ST._moving_to(t, t.index(w)), w)
+
+    def test_course_on_is_movement(self):
+        t = "От Санжаровки курсом на Красный луч"
+        self.assertTrue(ST._moving_to(t, t.index("Красный")))
+
+    def test_na_in_compound_names_is_not_movement(self):
+        t = "Славянск на Кубани, Крымск, Абинск / Тревога по БПЛА"
+        self.assertFalse(ST._moving_to(t, t.index("Крымск")))
+        t = "Опасность на побережье: Анапа, Геленджик"
+        self.assertFalse(ST._moving_to(t, t.index("Анапа")))

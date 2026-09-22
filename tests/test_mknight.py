@@ -314,6 +314,40 @@ class TestTowardRegions(unittest.TestCase):
         a = self.mk.toward_regions(r)[0]
         self.assertEqual((a["t"], a["t1"]), ("22:05", "01:40"))
 
+    def test_cone_reaches_the_region_it_names(self):
+        """Конус мусить ДІЙТИ до своєї області, хоч би як далеко вона була.
+
+        Межа довжини 260 км лишала конус, який до названої області не
+        доходив узагалі: замір 22.09.2026 на 122 конусах пʼяти ночей знайшов
+        12 таких («→ Калузька» з Брянщини лежав у Брянській на 84%, у
+        Калузькій на 0%). Тепер обмежена ПЛОЩА, а не довжина."""
+        # область — квадрат 2°×2° за ~600 км на північ від вершини
+        ring = [[56.0, 39.0], [56.0, 41.0], [58.0, 41.0], [58.0, 39.0], [56.0, 39.0]]
+        cone = self.mk._cone(50.0, 40.0, [ring], (57.0, 40.0))
+        arc = cone[1:]
+        far = max(self.mk.RT.hav((50.0, 40.0), tuple(p)) for p in arc)
+        near = min(self.mk.RT.hav((50.0, 40.0), (p[0], p[1])) for r in [ring] for p in r)
+        self.assertGreaterEqual(far, near, "конус не дійшов до своєї області")
+
+    def _cone_area(self, la, lo, cone):
+        import math
+        arc = cone[1:]
+        rad = max(self.mk.RT.hav((la, lo), tuple(p)) for p in arc)
+        half = abs(((self.mk.RT.bearing((la, lo), tuple(arc[-1]))
+                     - self.mk.RT.bearing((la, lo), tuple(arc[0])) + 540) % 360) - 180) / 2
+        return math.pi * rad * rad * (2 * half) / 360.0
+
+    def test_far_wide_region_narrows_instead_of_covering_the_theatre(self):
+        """Широка далека область дістає ВУЗЬКУ довгу стрілку.
+
+        Стеля стоїть на площі: розхил у кутовий розмір області (до 30°) на
+        700 км накрив би 130 тис. км² — пів театру однією підказкою."""
+        wide = [[56.0, 33.0], [56.0, 48.0], [58.0, 48.0], [58.0, 33.0], [56.0, 33.0]]
+        cone = self.mk._cone(50.0, 40.0, [wide], (57.0, 40.0))
+        # Межа ЛІТЕРАЛОМ, а не з модуля: перша версія тесту звіряла зі
+        # самою константою й мовчки проходила, коли стелю піднімали.
+        self.assertLessEqual(self._cone_area(50.0, 40.0, cone), 30000.0)
+
     def test_chain_walk_stops_before_an_area_source(self):
         # «Тамбовская область … через Токарёвский район … на Рязанскую»
         ev = {"url": "u", "hhmm": "22:00", "kind": "фіксація", "legs": [

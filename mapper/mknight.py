@@ -131,8 +131,59 @@ def bearings(raid):
 TOWARD_KM = 60.0
 #: Ближче до якоря області — стрілка на область беззмістовна.
 TOWARD_MIN_KM = 40.0
-#: Хвости ближче за це й одна область за ніч — одна стрілка.
-TOWARD_MERGE_KM = 30.0
+#: Хвости ближче за це й одна область за ніч — один конус. 30 км давало
+#: два десятки конусів на ніч, і вони зливались у суцільну пляму (знімок
+#: 22.09.2026); 100 км лишає по одному на напрямок заходу.
+TOWARD_MERGE_KM = 100.0
+
+
+#: Конус «кудись у цю область»: розхил — кутовий розмір самої області з
+#: місця спостереження, не менший і не більший за ці межі (щоб вузький
+#: язик не читався як «точно туди», а широкий не накривав пів театру).
+CONE_MIN_DEG, CONE_MAX_DEG = 4.0, 30.0
+#: Санітарна межа довжини: далі театру не буває.
+CONE_MAX_KM = 700.0
+#: Площа конуса, км². Обмежувати треба саме ПЛОЩУ, а не довжину: межа
+#: довжини 260 км лишала конус, який до своєї області не доходив узагалі —
+#: замір 22.09.2026 на 122 конусах пʼяти ночей знайшов 12 таких («→ Калузька»
+#: з Брянщини лежав у Брянській на 84% і в Калузькій на 0%). Далека область
+#: тепер дістає довгу ВУЗЬКУ стрілку, а не широкий віяловий обрубок.
+CONE_AREA_KM2 = 26000.0
+
+
+def _cone(la, lo, rings, anc):
+    """[[широта, довгота], …] — многокутник конуса від (la, lo) в бік
+    області: вершина в місці, далі дуга кутовим розміром області.
+
+    Рішення оператора 22.09.2026: невідомий напрямок — не лінія в центр
+    області (це читається як «точно туди»), а конус, що входить в область
+    і накриває її.
+    """
+    if rings:
+        pts = [p for r in rings for p in r]
+    else:
+        pts = [anc]
+    brs = [RT.bearing((la, lo), (p[0], p[1])) for p in pts]
+    c0 = RT.bearing((la, lo), tuple(anc))
+    devs = [((b - c0 + 540) % 360) - 180 for b in brs]
+    mid = c0 + (max(devs) + min(devs)) / 2
+    # Довжина: ДІЙТИ до області й увійти в неї приблизно до середини.
+    far = max(RT.hav((la, lo), (p[0], p[1])) for p in pts) if rings else RT.hav((la, lo), tuple(anc))
+    near = min(RT.hav((la, lo), (p[0], p[1])) for p in pts) if rings else far
+    rad = min(CONE_MAX_KM, max(near * 1.02, near + (far - near) * 0.45))
+    # Розхил: кутовий розмір області, але площа під стелею. Далекий конус
+    # звужується сам — довжину різати не можна, інакше стрілка вказує в
+    # порожнє місце.
+    half = max(CONE_MIN_DEG, min(CONE_MAX_DEG, (max(devs) - min(devs)) / 2))
+    half = max(CONE_MIN_DEG, min(half, CONE_AREA_KM2 * 180.0 / (math.pi * rad * rad)))
+    out = [[round(la, 3), round(lo, 3)]]
+    n = 9
+    for i in range(n + 1):
+        b = math.radians(mid - half + 2 * half * i / n)
+        dla = rad * math.cos(b) / 111.0
+        dlo = rad * math.sin(b) / (111.0 * math.cos(math.radians(la)))
+        out.append([round(la + dla, 3), round(lo + dlo, 3)])
+    return out
 
 
 def toward_regions(raid):
@@ -188,6 +239,7 @@ def toward_regions(raid):
             dist = RT.hav((sla, slo), tuple(anc))
             if dist < TOWARD_MIN_KM:
                 continue
+            cone = _cone(sla, slo, rings, anc)
             # Один хвіст (у межах TOWARD_MERGE_KM) і одна область — одна
             # стрілка з лічильником. Сітка тут не годиться: сусідні села по
             # різні боки межі клітинки давали три паралельні стрілки «→
@@ -199,7 +251,8 @@ def toward_regions(raid):
             b = by.setdefault(key, {"la": round(sla, 3), "lo": round(slo, 3), "to": dn,
                                     "dla": dla, "dlo": dlo,
                                     "deg": round(RT.bearing((sla, slo), tuple(anc))),
-                                    "km": round(min(TOWARD_KM, dist / 2)), "n": 0,
+                                    "km": round(min(TOWARD_KM, dist / 2)),
+                                    "cone": cone, "n": 0,
                                     "place": sn, "t": e.get("hhmm", ""), "ts": [], "src": []})
             b["n"] += 1
             if e.get("hhmm"):
@@ -539,10 +592,46 @@ def alerts(raid):
     return {"onsets": onsets, "muted": sorted(muted), "cover": cover, "anchors": anchors}
 
 
+def with_bridges(raid, rs):
+    """Маршрути ночі, зведені містками «звичний коридор» (`linker`).
+
+    Рішення оператора 22.09.2026: невідома частина шляху — жирним
+    напівпрозорим відрізком у ТІЙ САМІЙ лінії, щоб ніч читалась однією
+    картиною. Місток — ланка `bridge` між кінцем одного фрагмента й
+    початком наступного; `bridges[k] = {"at": i, "nights": n}` — ланка i і
+    у скількох попередніх ночах коридор траплявся. Твердження — «потік ішов
+    звичним коридором», а не «та сама група» (див. `linker`).
+    """
+    from tgmine import linker as LK
+    links = LK.link_corridors(rs, LK.Prior(raid.get("date") or "9999"))
+    if not links:
+        return rs
+    nights = {(i, j): n for i, j, n in links}
+    out = []
+    for ch in LK.chains(len(rs), links):
+        if len(ch) == 1:
+            out.append(rs[ch[0]])
+            continue
+        first, last = rs[ch[0]], rs[ch[-1]]
+        m = dict(first)
+        pts, legs, bridges = list(first["pts"]), list(first.get("legs") or []), []
+        for a, b in zip(ch, ch[1:]):
+            bridges.append({"at": len(pts) - 1, "nights": nights[(a, b)]})
+            legs.append("bridge")
+            pts += rs[b]["pts"]
+            legs += list(rs[b].get("legs") or [])
+        m.update(pts=pts, legs=legs, bridges=bridges, t1=last.get("t1"), n=len(pts),
+                 km=sum(rs[k].get("km") or 0 for k in ch),
+                 claims=max(rs[k].get("claims") or 1 for k in ch))
+        out.append(m)
+    return out
+
+
 def main(src, out=None):
     out = out or os.path.join(os.path.dirname(os.path.abspath(__file__)), "night.js")
     raid = json.load(open(src, encoding="utf-8"))
     rs, meta = RT.build(raid)
+    rs = with_bridges(raid, rs)
     st = strikes(raid)
     br = bearings(raid)
     sg = sightings(raid)

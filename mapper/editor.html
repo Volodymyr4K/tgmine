@@ -1296,6 +1296,44 @@ function topU(types){
 // Підказка -> редагований маршрут. Одна функція на два виклики: одиночний
 // клік по шляху й кнопка «узяти всі». Якби перетворення жило у двох місцях,
 // поле, додане в одному, тихо не потрапляло б у друге.
+// Підказка -> обʼєкти. Фрагменти, звʼязані містками «звичний коридор»,
+// стають окремими маршрутами, а кожен місток — жирною напівпрозорою
+// стрілкою між ними з підписом: оператор править їх незалежно, і на
+// експорті видно, яка частина шляху бачена, а яка — ні.
+function ghostToObjs(g){
+  // Стрілка напрямку — кольором свого типу (у робочому вигляді все
+  // рожеве, і біла стрілка губилась), жирна й напівпрозора: шлях невідомий.
+  if(g.stub&&g.cone&&g.cone.length>2) return [{kind:'cone',
+    origin:'night:'+((window.NIGHT&&window.NIGHT.date)||''),
+    type:typeForU(g.u).id,pts:g.cone.map(p=>[p[0],p[1]]),alpha:0.45,
+    col:(typeForU(g.u)||TYPES[0]).col,src:uniqSrc(g.srcs||[]),n:Math.max(1,g.claims||1),
+    label:g.to?('→ '+g.to):'',t0:g.t0||'',t1:g.t1||''}];
+  if(g.stub) return [{kind:'arrow',bear:true,origin:'night:'+((window.NIGHT&&window.NIGHT.date)||''),
+    pts:[[g.pts[0][0],g.pts[0][1]],[g.pts[1][0],g.pts[1][1]]],width:9,head:16,bow:0,alpha:0.55,
+    col:(typeForU(g.u)||TYPES[0]).col,glow:true,src:uniqSrc(g.srcs||[]),n:Math.max(1,g.claims||1),
+    ...(g.to?{label:'→ '+g.to}:{}),t0:g.t0||'',t1:g.t1||'',place:g.place||''}];
+  const br=(g.legs||[]).map((l,i)=>l==='bridge'?i:-1).filter(i=>i>=0);
+  if(!br.length) return [ghostToRoute(g)];
+  const out=[]; let from=0;
+  const nights={}; for(const b of g.bridges||[]) nights[b.at]=b.nights;
+  const piece=(a,b)=>ghostToRoute(Object.assign({},g,{pts:g.pts.slice(a,b+1),legs:null}));
+  const t=typeForU(g.u);
+  for(const i of br){
+    if(i>from) out.push(piece(from,i));
+    const n=nights[i];
+    // Місток — ТОЙ САМИЙ маршрут, лише широкий і напівпрозорий: у робочому
+    // вигляді («Узяти підказки в роботу») усе рожеве, і біла стрілка там
+    // не читалась. Товщина означає «шлях не бачили», а не впевненість.
+    out.push({kind:'route',type:t.id,u:g.u||null,count:1,spread:0,arrows:0,dash:false,
+      tension:1,width:Math.max(6,(t.width||1.6)*4),alpha:0.35,
+      origin:'night:'+((window.NIGHT&&window.NIGHT.date)||''),
+      pts:[[g.pts[i][0],g.pts[i][1]],[g.pts[i+1][0],g.pts[i+1][1]]],
+      label:'звичний коридор'+(n?` · ${n} ноч.`:''),t0:g.t0,t1:g.t1});
+    from=i+1;
+  }
+  if(from<g.pts.length-1) out.push(piece(from,g.pts.length-1));
+  return out;
+}
 function ghostToRoute(g){
   const t=typeForU(g.u);
   return {kind:'route',type:t.id,u:g.u||null,count:Math.max(t.count||1,g.claims||1),
@@ -1913,6 +1951,10 @@ function objObstacles(c){
       const s=P(o.la,o.lo); O.add(s[0]-10,s[1]-18,30,26,PEN_MARK);
     }else if(o.kind==='target'){
       dot(P(o.la,o.lo),8,PEN_MARK);
+    }else if(o.kind==='cone'){
+      const xs=o.pts.map(p=>P(p[0],p[1])[0]), ys=o.pts.map(p=>P(p[0],p[1])[1]);
+      O.add(Math.min(...xs),Math.min(...ys),Math.max(...xs)-Math.min(...xs),
+            Math.max(...ys)-Math.min(...ys));
     }else if(o.kind==='image'){
       const b=imgBox(o); O.add(b.x,b.y,b.w,b.h);
     }else if(o.kind==='text'){
@@ -3629,7 +3671,45 @@ function drawTarget(o,c,sel){
   if(sel){c.beginPath();c.arc(s2[0],s2[1],14,0,7);c.strokeStyle='#fff';
     c.setLineDash([3,3]);c.lineWidth=1;c.stroke();c.setLineDash([]);}
 }
+// КОНУС «кудись у цю область». Відомо, що потік пішов на область, а шлях
+// туди — ні. Лінія в центр області читалась би як «точно туди» (саме це
+// оператор і забракував 22.09.2026), тому це заливка: вершина — місце, де
+// бачили, розхил — кутовий розмір області звідти (mknight._cone). Прозорість
+// — ручка обʼєкта: невідоме має бути видно, але не забивати карту.
+function conePaint(c,pts,col,a0,a1){
+  // Градієнт від вершини до дуги, а не рівна заливка: конус починається
+  // там, де маршрут скінчився (там ми ЩЕ знаємо, де воно було), і гасне
+  // в області (там не знаємо). Рівна заливка на 20 конусів ночі давала
+  // суцільну рожеву пляму — знімок 22.09.2026.
+  const a=P(pts[0][0],pts[0][1]);
+  const m=pts[Math.floor(pts.length/2)], b=P(m[0],m[1]);
+  const g=c.createLinearGradient(a[0],a[1],b[0],b[1]);
+  g.addColorStop(0,hexa(col,a0));
+  g.addColorStop(0.35,hexa(col,a0*0.55+a1*0.45));
+  g.addColorStop(0.75,hexa(col,a0*0.18+a1*0.82));
+  g.addColorStop(1,hexa(col,a1));
+  return g;
+}
+function drawCone(o,c,sel){
+  const pts=o.pts||[]; if(pts.length<3) return;
+  const col=o.col||(TYPE[o.type]||TYPES[0]).col;
+  const A=(o.alpha===undefined?0.45:o.alpha);
+  c.save();
+  c.beginPath();ringPath(pts,c);
+  c.fillStyle=conePaint(c,pts,col,A*0.6,A*0.03);c.fill();
+  // Обвід — лише на вибраному. Межі в конуса нема: він про невідомість, а
+  // чітка лінія по дузі читалась як зона з кордоном (знімок 22.09.2026).
+  if(sel){ c.strokeStyle=hexa(col,A*0.9);c.lineWidth=2.2;c.stroke(); }
+  if(o.label){
+    const far=P(pts[Math.floor(pts.length/2)][0],pts[Math.floor(pts.length/2)][1]);
+    c.font='600 12px "MapSans",ui-sans-serif,-apple-system,Arial';
+    c.fillStyle=hexa(col,Math.min(1,A+0.35));
+    c.fillText(o.label,far[0]+6,far[1]-6);
+  }
+  c.restore();
+}
 function drawObj(o,c,sel){
+  if(o.kind==='cone') return drawCone(o,c,sel);
   if(o.kind==='image') return drawImageObj(o,c,sel);
   if(o.kind==='arrow') return drawArrow(o,c,sel);
   if(o.kind==='glyph') return drawGlyphObj(o,c,sel);
@@ -4071,6 +4151,45 @@ function draw(){
         for(let i=0;i<g.pts.length-1;i++){
           const seg=spline([g.pts[i],g.pts[i+1]],ctx,null,1);
           const back=g.back&&g.back[i];
+          // Місток «звичний коридор» — невідома частина шляху: жирно й
+          // напівпрозоро, суцільно, у тій самій лінії (рішення оператора
+          // 22.09.2026). Товщина — не впевненість, а «шлях не бачили».
+          if(g.legs[i]==='stub'&&g.cone&&g.cone.length>2){
+            // Підказка «кудись у цю область»: та сама заливка, що й обʼєкт
+            // після кліку, лише блідіша.
+            ctx.setLineDash([]);
+            ctx.beginPath();ringPath(g.cone,ctx);
+            ctx.fillStyle=conePaint(ctx,g.cone,st.col,st.a*0.5,st.a*0.03);ctx.fill();
+            if(g.to){
+              const m=P(g.cone[Math.floor(g.cone.length/2)][0],g.cone[Math.floor(g.cone.length/2)][1]);
+              ctx.globalAlpha=st.a*0.9;ctx.fillStyle=st.col;
+              ctx.font='600 11px "MapSans",ui-sans-serif,-apple-system,Arial';
+              ctx.fillText('→ '+g.to,m[0]+6,m[1]-6);
+            }
+            continue;
+          }
+          if(g.legs[i]==='stub'){
+            ctx.setLineDash([]);ctx.strokeStyle=st.col;
+            ctx.lineWidth=st.w*3.6;ctx.globalAlpha=st.a*0.45;ctx.stroke(seg);
+            // вістря — щоб читалось як напрямок, а не як відрізок
+            const pa=P(g.pts[0][0],g.pts[0][1]), pb=P(g.pts[1][0],g.pts[1][1]);
+            const ang=Math.atan2(pb[1]-pa[1],pb[0]-pa[0]), hl=st.w*6;
+            ctx.beginPath();ctx.moveTo(pb[0]+Math.cos(ang)*hl*0.5,pb[1]+Math.sin(ang)*hl*0.5);
+            ctx.lineTo(pb[0]+Math.cos(ang+2.5)*hl,pb[1]+Math.sin(ang+2.5)*hl);
+            ctx.lineTo(pb[0]+Math.cos(ang-2.5)*hl,pb[1]+Math.sin(ang-2.5)*hl);
+            ctx.closePath();ctx.fillStyle=st.col;ctx.globalAlpha=st.a*0.6;ctx.fill();
+            if(g.to){
+              ctx.globalAlpha=Math.min(1,st.a*0.9);ctx.fillStyle=st.col;
+              ctx.font='600 11px "MapSans",ui-sans-serif,-apple-system,Arial';
+              ctx.fillText('→ '+g.to,pb[0]+6,pb[1]-6);
+            }
+            continue;
+          }
+          if(g.legs[i]==='bridge'){
+            ctx.setLineDash([]);ctx.strokeStyle=st.col;
+            ctx.lineWidth=st.w*3.6;ctx.globalAlpha=st.a*0.35;ctx.stroke(seg);
+            continue;
+          }
           ctx.setLineDash(back?[2,7]:(g.legs[i]==='declared'?st.dash:[4,6]));
           ctx.strokeStyle=st.col;ctx.lineWidth=back?st.w*0.8:st.w;
           ctx.globalAlpha=back?st.a*0.6:st.a;
@@ -4363,6 +4482,15 @@ function SvgCtx(w,h){
                 `transform="${mstr(cur.m)}"${prev}/></clipPath>`);
       cur.clip=cid;
     },
+    createLinearGradient(x0,y0,x1,y1){
+      const gid=uid(); const stops=[];
+      const g={__grad:gid, addColorStop:(o,c)=>{stops.push(`<stop offset="${o}" stop-color="${c}"/>`);}};
+      g.__flush=()=>defs.push(
+        `<linearGradient id="${gid}" gradientUnits="userSpaceOnUse" `+
+        `x1="${x0}" y1="${y0}" x2="${x1}" y2="${y1}">${stops.join('')}</linearGradient>`);
+      grads.push(g);
+      return g;
+    },
     createRadialGradient(x0,y0,r0,x1,y1,r1){
       const gid=uid(); const stops=[];
       const g={__grad:gid, addColorStop:(o,c)=>{stops.push(`<stop offset="${o}" stop-color="${c}"/>`);}};
@@ -4585,6 +4713,13 @@ function hit(sx,sy,skipBase){
            sx<(A[j][0]-A[i][0])*(sy-A[i][1])/((A[j][1]-A[i][1])||1e-9)+A[i][0])
           inside=!inside;
       if(inside) return {o,vertex:-1};
+    }else if(o.kind==='cone'){
+      let ins=false;const A=o.pts.map(p=>P(p[0],p[1]));
+      for(let i=0,j=A.length-1;i<A.length;j=i++)
+        if((A[i][1]>sy)!==(A[j][1]>sy)&&
+           sx<(A[j][0]-A[i][0])*(sy-A[i][1])/((A[j][1]-A[i][1])||1e-9)+A[i][0])
+          ins=!ins;
+      if(ins) return {o,vertex:-1};
     }else if(o.kind==='image'){
       const b=imgBox(o);
       if(sx>=b.x&&sx<=b.x+b.w&&sy>=b.y&&sy<=b.y+b.h) return {o,vertex:-1};
@@ -4718,8 +4853,9 @@ cv.addEventListener('pointerdown',e=>{
     const g=ghostAt(sx,sy);
     if(g){
       snapshot();
-      const o=ghostToRoute(g);
-      S.objs.push(o);S.sel=o;S.selMore=[];jadd(o,'з підказки');
+      const os=ghostToObjs(g);
+      for(const x of os){S.objs.push(x);jadd(x,'з підказки');}
+      const o=os[0];S.sel=o;S.selMore=[];
       S.ghosts=S.ghosts.filter(x=>x!==g);
       toast('підказку взято в роботу — далі веди сам');
       refresh();return;
@@ -5462,6 +5598,14 @@ function refresh(){
       +glyphPicker(o.glyph||'','data-glyph')
       +field('Підпис під знаком',o.label||'','label')
       +field('Розмір',o.size||22,'size','type=number min=8 max=96');
+  }else if(o.kind==='cone'){
+    p.innerHTML=field('Підпис',o.label||'','label')
+      +field('Прозорість 0..1',o.alpha===undefined?0.45:o.alpha,'alpha',
+             'type=number step=0.05 min=0.05 max=1')
+      +'<div class="hint">Конус — «пішли кудись у цю область»: вершина там, '
+      +'де бачили, розхил — розмір області звідти. Шлях усередині невідомий, '
+      +'тому це заливка, а не лінія.</div>'
+      +srcBlock(o);
   }else if(o.kind==='image'){
     p.innerHTML=field('Підпис під картинкою',o.label||'','label')
       +field('Ширина, px',o.w||180,'w','type=number min=24 max=1200')
@@ -5578,7 +5722,8 @@ function refresh(){
     // там, де насправді одинадцять разів працювала ППО, — та сама каша.
     const name=o.kind==='impact' ? CAT_NAME[catOf(o)]
       : {route:'маршрут',launch:'пускова',text:'підпис',zone:'зона',
-         target:'ціль',arrow:'стрілка',image:'зображення',glyph:'знак'}[o.kind];
+         target:'ціль',arrow:'стрілка',image:'зображення',glyph:'знак',
+         cone:'конус'}[o.kind];
     const extra=o.kind==='route'?`${o.pts.length} вузлів${o.count>1?' · пучок '+o.count:''}`
       :(o.label||o.text||'');
     const on=o===S.sel||S.selMore.includes(o);
@@ -6699,6 +6844,8 @@ function loadNight(cb){
     sel.innerHTML=list.map(n=>
       `<option value="${n.date}">${n.date} — підказок ${n.routes}, позначок ${n.strikes}${n.bearings?`, напрямків ${n.bearings}`:''}${n.sightings?`, фіксацій ${n.sightings}`:''}${n.alerts?`, тривог ${n.alerts}`:''}</option>`
     ).join('');
+    // Перша ніч списку — підказки одразу, якщо на екрані ще нема своїх.
+    if(!S.ghosts.length) loadNight(ok=>{ if(ok) document.getElementById('ghost').click(); });
     sel.onchange=()=>{
       // ІНША ДОБА — ЧИСТИЙ АРКУШ. Лишається рівно підкладка: Україна й ТОТ.
       // Вони не належать жодній ночі, їх обводять один раз і використовують
@@ -6721,6 +6868,10 @@ function loadNight(cb){
         if(!ok){toast('ніч не завантажилась');refresh();return;}
         toast('ніч '+sel.value+(drop?` · прибрано з попередньої: ${drop}`:'')
               +(keep.length?` · підкладка лишилась`:''));
+        // Підказки ночі — одразу (рішення оператора 22.09.2026): маршрути з
+        // містками й стрілки напрямку. Це не обʼєкти: в експорт не йдуть,
+        // клік бере в роботу.
+        document.getElementById('ghost').click();
         refresh();
       });
     };
@@ -7205,10 +7356,13 @@ function isBaseZone(o){ return baseRank(o)>0; }
 // одну стрілку над іншою, а не покласти її поверх влучання.
 function layerOf(o){
   if(isBaseZone(o)) return 0;                  // Україна, ТОТ — під усім
-  if(!o) return 3;
+  if(!o) return 4;
   if(o.kind==='zone'||o.kind==='image') return 1;
-  if(o.kind==='route'||o.kind==='arrow') return 2;
-  return 3;                                    // позначки, знаки, підписи
+  // Конус — невідомий напрямок; лежить під маршрутами, щоб тонка лінія
+  // спостереженого шляху читалась поверх заливки.
+  if(o.kind==='cone') return 2;
+  if(o.kind==='route'||o.kind==='arrow') return 3;
+  return 4;                                    // позначки, знаки, підписи
 }
 function zorder(list){
   // Стійке сортування: рівні за шаром лишаються в тому порядку, в якому
@@ -7305,7 +7459,7 @@ document.getElementById('ghostAll').onclick=()=>{
   }
   const hidden=S.ghosts.length-take.length;
   snapshot();                      // один знімок на всю пачку, не на кожну
-  for(const g of take) S.objs.push(ghostToRoute(g));
+  for(const g of take) for(const x of ghostToObjs(g)) S.objs.push(x);
   S.ghosts=S.ghosts.filter(g=>!ghostVisible(g));
   // Виділяти сорок щойно створених маршрутів немає сенсу: будь-яке
   // перетягування зсунуло б усі разом. Знімаємо вибір.
@@ -7329,6 +7483,10 @@ document.getElementById('ghost').onclick=()=>{
   S.ghosts=window.NIGHT.routes.map(r=>({pts:r.pts.map(p=>[p.la,p.lo]),
     t0:r.t0,t1:r.t1,k:r.k,u:r.u||null,conf:r.conf||'ok',claims:r.claims||1,
     legs:r.legs||null,
+    // Містки «звичний коридор» (mknight.with_bridges): ланка i — невідома
+    // частина шляху між двома фрагментами, nights — у скількох попередніх
+    // ночах цей коридор траплявся.
+    bridges:r.bridges||[],
     // Джерела вузлів: адреса повідомлення, час і що саме там сказано. Без
     // цього намальована стрілка — твердження без підстави, і перевірити її
     // оператор не може нічим, крім памʼяті.
@@ -7337,6 +7495,19 @@ document.getElementById('ghost').onclick=()=>{
     // ланка i зʼєднує pts[i] -> pts[i+1]; добудовані вузли стоять СПЕРЕДУ,
     // тому ознаку беремо з лівого кінця ланки, а не з правого
     back:(r.pts||[]).slice(0,-1).map(p=>!!p.back)}));
+  // Невідомий шлях, відомий лише напрямок (курс словами, «далее на
+  // Тамбовскую область» — mknight.bearings/toward_regions): у тому ж шарі
+  // підказок, жирно й напівпрозоро, з вістрям. Клік — звичайна стрілка.
+  for(const b of (window.NIGHT.bearings||[])){
+    const KM=b.km||35, r=b.deg*Math.PI/180;
+    const tip=[b.la+KM/111*Math.cos(r), b.lo+KM/(111*Math.cos(b.la*Math.PI/180))*Math.sin(r)];
+    S.ghosts.push({pts:[[b.la,b.lo],tip],legs:['stub'],stub:true,conf:'ok',claims:b.n||1,
+      // «на цілу область» — конус (mknight._cone), а не лінія в центр:
+      // шлях усередині області невідомий.
+      cone:b.cone||null,
+      t0:b.t||'',t1:b.t1||b.t||'',to:b.to||'',place:b.place||'',
+      srcs:(b.src||[]).map(q=>({u:q.u,t:q.t,k:q.k,ty:q.ty}))});
+  }
   const c={strong:0,ok:0,weak:0};
   for(const g of S.ghosts) c[g.conf]=(c[g.conf]||0)+1;
   toast(`підказок: ${S.ghosts.length} (впевнених ${c.strong}, слабких ${c.weak})`);

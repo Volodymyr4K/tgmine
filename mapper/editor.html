@@ -284,6 +284,7 @@ button.primary{background:rgba(255,62,165,.16);border-color:rgba(255,62,165,.45)
                  style="width:66px" title="Наскільки близько мають бути кінці двох маршрутів, щоб вважати їх одним коридором. 120 км узято з даних: ближче лежать приблизно 5% пар, далі розподіл стрибає">
         </div>
         <button id="strikes" style="margin-top:6px" title="Позначки тієї ночі; повторний клік замінює попередній шар">Покласти збиття / ППО</button>
+        <button id="cones" style="margin-top:6px" title="Напрямок на цілу область («далее на Тамбовскую область») — конусом від місця спостереження в бік області. Окремий шар: без натиску конусів на карті нема. Підказка, не обʼєкт: клік по конусу бере його в роботу. Повторний натиск ховає шар">Показати конуси на область</button>
         <button id="bearings" style="margin-top:6px" title="Жирні стрілки напрямку з тексту: курси словами («пролёт на восток», «с юго-запада») і рух на цілу область («далее на Тамбовскую область» — стрілка в бік області з підписом). Відомий лише напрямок, не шлях. Звичайні стрілки: можна правити й стирати; повторний клік замінює попередній шар">Покласти напрямки з тексту</button>
         <button id="sights" style="margin-top:6px" title="Кожне місце, де тієї ночі щось бачили: крапка тим більша, чим більше повідомлень; порожнє кільце — центр району, не село. Підказка, не обʼєкт: в експорт не йде, клік робить із неї позначку. Повторний клік ховає шар">Показати фіксації ночі</button>
         <div style="display:flex;gap:6px;align-items:center;margin-top:6px">
@@ -5484,6 +5485,8 @@ function refresh(){
   // стерти» й undo міняють S.sight повз кнопку, і напис інакше бреше.
   const sb=document.getElementById('sights');
   if(sb) sb.textContent=S.sight.length?'Сховати фіксації ночі':'Показати фіксації ночі';
+  const cb=document.getElementById('cones');
+  if(cb) cb.textContent=conesShown()?'Сховати конуси на область':'Показати конуси на область';
   const ab=document.getElementById('alerts');
   if(ab) ab.textContent=S.alertsOn?'Сховати тривоги ночі':'Показати тривоги ночі';
   renderAlerts();
@@ -7470,6 +7473,40 @@ document.getElementById('ghostAll').onclick=()=>{
   refresh();
 };
 
+// Стрілка напрямку -> підказка. Одна функція для двох кнопок: маршрути ночі
+// (курси словами) і конуси на область.
+function bearingGhost(b){
+  const KM=b.km||35, r=b.deg*Math.PI/180;
+  const tip=[b.la+KM/111*Math.cos(r), b.lo+KM/(111*Math.cos(b.la*Math.PI/180))*Math.sin(r)];
+  return {pts:[[b.la,b.lo],tip],legs:['stub'],stub:true,conf:'ok',claims:b.n||1,
+    // «на цілу область» — конус (mknight._cone), а не лінія в центр:
+    // шлях усередині області невідомий.
+    cone:b.cone||null,
+    t0:b.t||'',t1:b.t1||b.t||'',to:b.to||'',place:b.place||'',
+    srcs:(b.src||[]).map(q=>({u:q.u,t:q.t,k:q.k,ty:q.ty}))};
+}
+function isConeBearing(b){ return !!(b&&b.cone&&b.cone.length>2); }
+function isConeGhost(g){ return !!(g&&g.stub&&g.cone&&g.cone.length>2); }
+// Стан шару рахується з самих підказок, а не окремим прапорцем: зміна ночі,
+// «усе стерти», undo і «узяти всі» міняють S.ghosts повз кнопку.
+function conesShown(){ return S.ghosts.some(isConeGhost); }
+function putCones(){
+  const list=((window.NIGHT&&window.NIGHT.bearings)||[]).filter(isConeBearing);
+  if(!list.length){ toast('у цій ночі напрямків на область нема'); return; }
+  S.ghosts=S.ghosts.filter(g=>!isConeGhost(g)).concat(list.map(bearingGhost));
+  toast(`конусів на область: ${list.length}`);
+  refresh(); draw();
+}
+document.getElementById('cones').onclick=()=>{
+  if(conesShown()){
+    S.ghosts=S.ghosts.filter(g=>!isConeGhost(g));
+    refresh(); draw(); return;
+  }
+  if(!window.NIGHT){loadNight(ok=>ok?putCones():alert(
+    'Підказок нема. Зроби їх так:\npython3 raid.py <дата>\n'+
+    'python3 mapper/mknight.py raid_<дата>.json'));return;}
+  putCones();
+};
 document.getElementById('ghost').onclick=()=>{
   if(!window.NIGHT){
     loadNight(ok=>{
@@ -7480,6 +7517,7 @@ document.getElementById('ghost').onclick=()=>{
     });
     return;
   }
+  const hadCones=conesShown();
   S.ghosts=window.NIGHT.routes.map(r=>({pts:r.pts.map(p=>[p.la,p.lo]),
     t0:r.t0,t1:r.t1,k:r.k,u:r.u||null,conf:r.conf||'ok',claims:r.claims||1,
     legs:r.legs||null,
@@ -7498,15 +7536,12 @@ document.getElementById('ghost').onclick=()=>{
   // Невідомий шлях, відомий лише напрямок (курс словами, «далее на
   // Тамбовскую область» — mknight.bearings/toward_regions): у тому ж шарі
   // підказок, жирно й напівпрозоро, з вістрям. Клік — звичайна стрілка.
+  // Конуси на область — окремий шар зі своєю кнопкою (рішення оператора
+  // 23.09.2026): разом із маршрутами вони робили з ночі рожевий туман, а
+  // потрібні не завжди. Тут лише курси словами; конуси — якщо шар увімкнено.
   for(const b of (window.NIGHT.bearings||[])){
-    const KM=b.km||35, r=b.deg*Math.PI/180;
-    const tip=[b.la+KM/111*Math.cos(r), b.lo+KM/(111*Math.cos(b.la*Math.PI/180))*Math.sin(r)];
-    S.ghosts.push({pts:[[b.la,b.lo],tip],legs:['stub'],stub:true,conf:'ok',claims:b.n||1,
-      // «на цілу область» — конус (mknight._cone), а не лінія в центр:
-      // шлях усередині області невідомий.
-      cone:b.cone||null,
-      t0:b.t||'',t1:b.t1||b.t||'',to:b.to||'',place:b.place||'',
-      srcs:(b.src||[]).map(q=>({u:q.u,t:q.t,k:q.k,ty:q.ty}))});
+    if(isConeBearing(b)&&!hadCones) continue;
+    S.ghosts.push(bearingGhost(b));
   }
   const c={strong:0,ok:0,weak:0};
   for(const g of S.ghosts) c[g.conf]=(c[g.conf]||0)+1;

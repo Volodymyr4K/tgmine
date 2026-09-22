@@ -829,11 +829,23 @@ def _label_district(text, e, ents):
     («Клименково, Ровеньский район», «Донецк ДНР Пролетарский,
     Буденновский районы»), а не окреме місце."""
     ls = text.rfind("\n", 0, e["pos"]) + 1
-    return any(ls <= o.get("pos", -1) < e["pos"] and not o.get("geo_area")
-               and o.get("type") in ("нп", "регіон") and o.get("geo_conf") != "centroid"
-               or (ls <= o.get("pos", -1) < e["pos"] and o.get("type") == "нп"
-                   and "lat" not in o)
-               for o in ents)
+    for o in ents:
+        op = o.get("pos")
+        if op is None or not (ls <= op < e["pos"]):
+            continue
+        if o.get("geo_area") or o.get("type") not in ("нп", "регіон"):
+            continue
+        if "lat" in o and o.get("geo_conf") == "centroid":
+            continue
+        # Нерозвʼязана назва — лише впритул перед районом («Клименково,
+        # Ровеньский район»): інакше слово на початку речення («Продолжается
+        # пролёт … от Харьковской области») робило підписом саму область.
+        if "lat" not in o:
+            gap = text[op + len(str(o.get("match") or "")):e["pos"]]
+            if not re.fullmatch(r"[\s,]*", gap):
+                continue
+        return True
+    return False
 
 
 def _moving_to(text, pos):
@@ -855,11 +867,22 @@ def _moving_to(text, pos):
 
 
 _CHAIN_GAP = re.compile(r"\bдалее\b|\bзатем\b|\bпотом\b|\bпосле\b|\bс\s+выходом", re.I)
+#: «из Брянской области», «с Белгородской области» — джерело для ОБЛАСТІ
+#: (для НП «с»/«из» надто багатозначні: «с моря», «с юга»).
+_SRC_REGION = re.compile(r"(?:\bиз|\bс)\s+$", re.I)
+#: Назва саме ОБЛАСТІ, а не міста-маркера («Крыма», «Ростовской», а не
+#: «Луганск»): лише така ціль може бути «своєю областю» без змісту.
+_REGION_NAME = re.compile(r"(?:ск|цк)(?:ой|ую|ая|ий|ого|ому|им)$|^Крым|^Республик|^ЛНР$|^ДНР$", re.I)
 _VIA_BEFORE = re.compile(r"(?:\bчерез|\bв\s+обход|\bвдоль)\s+(?:г\.\s*)?$", re.I)
 
 
 _SUMMARY = re.compile(r"за\s+прошедш|в\s+течение\s+прошедш|перехвачены\s+и\s+уничтожены|"
                       r"над\s+территори|#сводка|#обзор|уничтожено\s+\d+", re.I)
+
+
+#: Між назвою й підписом-областю може стояти район: «Кутейниково,
+#: Чертковский район, Ростовская область».
+_LABEL_GAP = re.compile(r"[\s,]*(?:(?:район\w*|р-н|го|мо|округ\w*)[\s,]*)?", re.I)
 
 
 def _region_label(text, e, regs, ents):
@@ -874,7 +897,20 @@ def _region_label(text, e, regs, ents):
     gap_start = max((o["pos"] + len(str(o.get("match") or "")) for o in ents
                      if o is not e and o.get("pos") is not None and ls <= o["pos"] < e["pos"]),
                     default=None)
-    return gap_start is not None and re.fullmatch(r"[\s,]*", text[gap_start:e["pos"]]) is not None
+    return gap_start is not None and _LABEL_GAP.fullmatch(text[gap_start:e["pos"]]) is not None
+
+
+def _right_after_name(text, e, ents):
+    """Назва стоїть упритул після іншої назви в тому ж рядку («Кутейниково,
+    Чертковский район») — тоді район є її підписом, навіть після слова руху."""
+    for o in ents:
+        op = o.get("pos")
+        if op is None or o is e or op >= e["pos"]:
+            continue
+        end = op + len(str(o.get("match") or ""))
+        if end <= e["pos"] and re.fullmatch(r"[ \t,]*", text[end:e["pos"]]):
+            return True
+    return False
 
 
 def legs_of(p, best=None):
@@ -901,7 +937,10 @@ def legs_of(p, best=None):
     regs = [e for e in p.get("entities", []) if e.get("type") == "регіон"]
     ents = sorted((e for e in p.get("entities", [])
                    if "lat" in e and e.get("pos") is not None and not e.get("inherited")
-                   and not _region_label(text, e, regs, p.get("entities", []))),
+                   and not _region_label(text, e, regs, p.get("entities", []))
+                   and not (e.get("geo_area") and _label_district(text, e, p.get("entities", []))
+                            and (not _moving_to(text, e["pos"])
+                                 or _right_after_name(text, e, p.get("entities", []))))),
                   key=lambda e: e["pos"])
     if len(ents) < 2:
         return []
@@ -912,7 +951,7 @@ def legs_of(p, best=None):
     aim = _aim_ids(p, [e for e in ents if e.get("geo_conf") != "centroid"], first_pos)
     role = {}
     for e in ents:
-        if SRC_BEFORE.search(before(e)):
+        if SRC_BEFORE.search(before(e)) or _SRC_REGION.search(before(e)) and e.get("type") == "регіон":
             role[id(e)] = "from"
         elif _VIA_BEFORE.search(before(e)):
             role[id(e)] = "via"
@@ -925,10 +964,16 @@ def legs_of(p, best=None):
         return []
     sources = [e for e in ents if role[id(e)] == "from" and e["pos"] < targets[0]["pos"]]
     here = [e for e in ents if role[id(e)] == "here" and e["pos"] < targets[0]["pos"]]
+    # Ціла область — «звідки», лише коли пост так і каже («от Брянской
+    # области») або іншого місця нема. Підпис «Краснодарский край» у пості
+    # про Керч інакше ставав початком руху (сліпа перевірка 22.09.2026).
+    here_pts = [e for e in here if e.get("geo_conf") != "centroid"]
     if sources:
         origin = sources[-1]
-    elif best is not None and role.get(id(best)) == "here":
+    elif best is not None and role.get(id(best)) == "here" and best.get("geo_conf") != "centroid":
         origin = best
+    elif here_pts:
+        origin = here_pts[0]
     elif here:
         origin = here[0]
     else:
@@ -945,7 +990,15 @@ def legs_of(p, best=None):
             src = prev
         else:
             src = start
-        if src is not t and GC.haversine((src["lat"], src["lon"]), (t["lat"], t["lon"])) > 5:
+        # «…в направлении Крыма» зі старту в Криму — ланка без змісту.
+        same_region = (t.get("geo_conf") == "centroid" and src.get("geo_conf") != "centroid"
+                       and _REGION_NAME.search(str(t.get("match") or ""))
+                       and any(o is not t and o.get("type") == "регіон"
+                               and o.get("value") == t.get("value") and o.get("pos") is not None
+                               and not _moving_to(text, o["pos"])
+                               for o in p.get("entities", [])))
+        if src is not t and not same_region and \
+                GC.haversine((src["lat"], src["lon"]), (t["lat"], t["lon"])) > 5:
             legs.append((src, t))
         prev = t
     return legs

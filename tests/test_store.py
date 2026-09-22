@@ -1516,3 +1516,54 @@ class TestKurskIsNotACourse(unittest.TestCase):
         self.assertFalse(ST._moving_to(t, t.index("Крымск")))
         t = "Опасность на побережье: Анапа, Геленджик"
         self.assertFalse(ST._moving_to(t, t.index("Анапа")))
+
+
+class TestLegs(unittest.TestCase):
+    """Ланки руху поста (`legs_of`) — ті самі ролі, що й для крапки."""
+
+    def _p(self, text, ents):
+        out = []
+        for n, typ, lat, lon, conf, area in ents:
+            out.append({"type": typ, "value": n, "match": n, "pos": text.index(n), "lat": lat,
+                        "lon": lon, "geo_conf": conf, "geo_area": area, "geo_pop": 1000})
+        return {"text": text, "entities": out}
+
+    def _legs(self, p):
+        return [(a["match"], b["match"]) for a, b in ST.legs_of(p, ST.point_entity(p))]
+
+    def test_place_to_target_and_chain(self):
+        t = "Юдановка, Воронежская область - пролёт на Анна, Эртиль и далее на Тамбовскую область"
+        p = self._p(t, [("Юдановка", "нп", 51.3, 40.1, "region", False),
+                        ("Анна", "нп", 51.48, 40.43, "region", False),
+                        ("Эртиль", "нп", 51.83, 40.8, "region", False),
+                        ("Тамбовскую", "регіон", 52.7, 41.4, "centroid", True)])
+        self.assertEqual(self._legs(p), [("Юдановка", "Анна"), ("Юдановка", "Эртиль"),
+                                         ("Эртиль", "Тамбовскую")])
+
+    def test_labels_after_target_are_not_targets(self):
+        t = "Шептуховка и далее направлением на Кутейниково, Чертковский район, Ростовская область"
+        p = self._p(t, [("Шептуховка", "нп", 49.4, 40.2, "region", False),
+                        ("Кутейниково", "нп", 49.6, 40.6, "region", False),
+                        ("Чертковский", "нп", 49.3, 40.2, "region", True),
+                        ("Ростовская", "регіон", 47.7, 40.7, "centroid", True)])
+        self.assertEqual(self._legs(p), [("Шептуховка", "Кутейниково")])
+
+    def test_district_after_movement_is_a_target(self):
+        t = "Верхнее Кузькино, Чернянский район - пролёты БПЛА примерно на Старооскольский район"
+        p = self._p(t, [("Верхнее Кузькино", "нп", 50.9, 37.9, "region", False),
+                        ("Старооскольский", "нп", 51.3, 37.8, "region", True)])
+        self.assertEqual(self._legs(p), [("Верхнее Кузькино", "Старооскольский")])
+
+    def test_word_before_is_not_a_label_owner(self):
+        t = "Продолжается пролёт от Харьковской области в сторону Белгородской области"
+        p = self._p(t, [("Харьковской", "нп", 49.6, 36.5, "centroid", True),
+                        ("Белгородской", "регіон", 50.6, 36.6, "centroid", True)])
+        p["entities"].insert(0, {"type": "нп", "value": "Продолжается", "match": "Продолжается",
+                                 "pos": 0})
+        self.assertEqual(self._legs(p), [("Харьковской", "Белгородской")])
+
+    def test_summary_has_no_legs(self):
+        t = "За прошедшую ночь уничтожено 512 БПЛА над территориями Белгородской, Курской областей"
+        p = self._p(t, [("Белгородской", "регіон", 50.6, 36.6, "centroid", True),
+                        ("Курской", "регіон", 51.7, 36.2, "centroid", True)])
+        self.assertEqual(self._legs(p), [])

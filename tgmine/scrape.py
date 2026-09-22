@@ -32,6 +32,10 @@ class Post:
     reply_to: str | None = None
     forwarded_from: str | None = None
     has_media: bool = False
+    # Цитата поста, на який це відповідь (превʼю Telegram показує її над
+    # текстом). Окремо від `text`, щоб відповідь можна було звʼязати з
+    # батьком, не змішуючи їхні слова.
+    reply_text: str | None = None
 
 
 def channel_name(ref: str) -> str:
@@ -105,7 +109,17 @@ def _parse(soup: BeautifulSoup, channel: str) -> list[dict]:
         if not post:
             continue
         t = w.select_one(".tgme_widget_message_date time")
-        body = w.select_one(".tgme_widget_message_text")
+        # У відповіді ДВА текстові блоки: спершу цитата батька
+        # (`js-message_reply_text` усередині `.tgme_widget_message_reply`),
+        # потім власний текст (`js-message_text`). Перший збіг
+        # `.tgme_widget_message_text` — це цитата, і до 22.09.2026 для
+        # кожної відповіді в сирий шар ішов ТЕКСТ БАТЬКА, а власний губився:
+        # 1463 з 1718 відповідей locatorru дослівно повторювали батька
+        # («Чувашская Республика - опасность…» замість «Предварительно
+        # группа БПЛА ушла на Чувашскую Республику»).
+        body = w.select_one(".tgme_widget_message_text.js-message_text") or next(
+            (t for t in w.select(".tgme_widget_message_text")
+             if not t.find_parent(class_="tgme_widget_message_reply")), None)
         views = w.select_one(".tgme_widget_message_views")
         reply = w.select_one(".tgme_widget_message_reply")
         fwd = w.select_one(".tgme_widget_message_forwarded_from a")
@@ -120,6 +134,9 @@ def _parse(soup: BeautifulSoup, channel: str) -> list[dict]:
             text=body.get_text("\n", strip=True) if body else "",
             reply_to=reply.get("href") if reply and reply.get("href") else None,
             forwarded_from=fwd.get_text(strip=True) if fwd else None,
+            reply_text=(q.get_text("\n", strip=True)
+                        if reply and (q := reply.select_one(".tgme_widget_message_text"))
+                        else None),
             has_media=bool(w.select_one(
                 ".tgme_widget_message_photo, .tgme_widget_message_video, "
                 ".tgme_widget_message_document, .tgme_widget_message_voice")),

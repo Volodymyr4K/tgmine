@@ -58,6 +58,20 @@ class TestRawMerge(unittest.TestCase):
         self.assertEqual(ids, [1, 3, 5])
         self.assertEqual(len(ids), len(set(ids)))
 
+    def test_repaired_reply_beats_stale_copy_on_either_side(self):
+        # Відповідь, відновлена після вади скрапера (22.09.2026), несе
+        # `reply_text`; стара копія з текстом батька — ні. Виправлена має
+        # вигравати з будь-якого боку: у rebase «наша» — опублікована.
+        fixed = {"id": 7, "text": "власний", "reply_text": "батько"}
+        stale = {"id": 7, "text": "батько"}
+        for o, t in ((stale, fixed), (fixed, stale)):
+            ours, theirs = self.dir / "a.jsonl", self.dir / "b.jsonl"
+            write_jsonl(ours, [o])
+            write_jsonl(theirs, [t])
+            run_driver(ours, theirs, "data/chan.jsonl")
+            got = [json.loads(l) for l in ours.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(got, [fixed])
+
     def test_events_keep_time_order(self):
         # Події конвеєр пише за часом, не за id. Інший порядок дав би
         # переставлений файл і величезний беззмістовний diff при кожному злитті.

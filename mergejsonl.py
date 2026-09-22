@@ -68,6 +68,14 @@ def merge_jsonl(ours: Path, theirs: Path, key: str, order: str) -> list[dict]:
     for row in read_jsonl(theirs):
         merged[row[key]] = row
     for row in read_jsonl(ours):
+        # Виняток із «наша виграє»: сирий пост, відновлений після вади
+        # скрапера (22.09.2026, відповідь зберігала текст батька), несе поле
+        # `reply_text`, а стара копія — ні. Без винятку щогодинний `pull` у
+        # CI (у rebase «наша» — це вже опублікована сторона) мовчки повертав
+        # би текст батька.
+        prev = merged.get(row[key])
+        if prev is not None and "reply_text" in prev and "reply_text" not in row:
+            continue
         merged[row[key]] = row
     return sorted(merged.values(), key=lambda r: r[order])
 

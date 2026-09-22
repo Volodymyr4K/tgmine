@@ -52,7 +52,10 @@ MSK = timezone(timedelta(hours=3))
 # 21: `aim` — пост назвав лише ціль руху («в направлении X»), крапка на ній.
 # 22: `region` — своя область поста (`geocode.home_region`), а не перша
 #     названа; повторний збіг області — запасне місце (BACKLOG §7).
-PIPELINE_VERSION = 22
+# 23: відповідь на власний пост без свого місця успадковує крапку й область
+#     батька (`link_replies`, поле `reply_of`); дубль за текстом — лише під
+#     тим самим батьком.
+PIPELINE_VERSION = 23
 
 # Курс, названий словами. 2040 точкових подій (5.6%) кажуть «пролёт БПЛА на
 # северо-восток» або «с юго-запада фиксации», і досі ці слова викидались, а
@@ -891,6 +894,56 @@ def point_entity(p):
         e.get("geo_pop", 0)), default=None)
 
 
+_REPLY_URL = re.compile(r"https?://t\.me/(?:s/)?(\w+)/(\d+)")
+
+
+def link_replies(posts):
+    """Відповідь на власний пост без жодного свого місця дістає місце батька.
+
+    locatorru відповідає на свої ж пости оновленнями: «Продолжаются пролёты
+    БПЛА», «Ещё фиксации БПЛА с моря», «От 5 БПЛА в направлении. НПЗ
+    внимание!» — місце названо лише в батьку. До 22.09.2026 скрапер для
+    відповіді зберігав ЦИТАТУ батька замість власного тексту (див.
+    `scrape._parse`), тож такі пости розбирались як фантомна копія батька з
+    часом відповіді. Після виправлення вони без звʼязку з батьком лишились
+    би без місця взагалі.
+
+    Успадковується те, що батько сам показав би: його крапка
+    (`point_entity`, разом із позначкою цілі `_aim`) і його область
+    (`geocode.home_region`). Вид події — з ВЛАСНОГО тексту відповіді
+    («Отбой» під тривогою — відбій на тому самому місці). Відповідь, що
+    назвала своє місце, не чіпається: вона каже про інше.
+
+    Батько шукається в тому самому пакеті постів; ланцюг відповідей
+    розвʼязується по порядку часу (пакет відсортовано), тож відповідь на
+    відповідь дістає вже успадковане. Повертає кількість звʼязаних.
+    """
+    by = {(p["channel"], p["id"]): p for p in posts}
+    n = 0
+    for p in posts:
+        m = _REPLY_URL.match(p.get("reply_to") or "")
+        if not m or m.group(1) != p["channel"]:
+            continue
+        par = by.get((m.group(1), int(m.group(2))))
+        if par is None or any("lat" in e for e in p.get("entities", [])):
+            continue
+        home = GC.home_region(par)
+        reg = next((e for e in par.get("entities", []) if e["type"] == "регіон"
+                    and e["value"] == home and "lat" in e), None)
+        best = point_entity(par)
+        # позиція 0: успадковане стоїть «на початку» тексту відповіді, тобто
+        # не після слова руху — роль ціль/місце несе `_aim`, узятий у батька
+        inh = [dict(e, pos=0, match="", inherited=True)
+               for e in (reg, best) if e is not None]
+        if best is not None and reg is not None and best is reg:
+            inh = inh[:1]
+        if inh:
+            p["entities"] = list(p.get("entities", [])) + inh
+            p["_reply_of"] = f"{par['channel']}/{par['id']}"
+            n += 1
+    return n
+
+
 def depth_km(pt):
     # відстань до підконтрольної Україні території — див. territory.depth_km;
     # раніше тут була ламана з восьми точок від руки, у трьох копіях
@@ -994,11 +1047,14 @@ class Store:
                          region_a1=gaz.region_codes(cfg.entities.get("регіон", {}),
                                                     cfg.geo))
         self._tidx = TargetIndex(targets["objects"]) if targets else None
+        link_replies(posts)
 
-        # дублікати: однаковий нормалізований текст у вікні 10 хв
+        # дублікати: однаковий нормалізований текст у вікні 10 хв. Для
+        # відповіді з успадкованим місцем ключ — ще й батько: «Ещё фиксации
+        # БПЛА.» під різними постами — різні місця, а не дзеркало.
         seen = {}
         for p in posts:
-            key = D.norm(p["text"])
+            key = D.norm(p["text"]) + ("|" + p["_reply_of"] if p.get("_reply_of") else "")
             t = datetime.fromisoformat(p["date"])
             prev = seen.get(key)
             if prev and (t - prev[1]).total_seconds() <= 600:
@@ -1142,6 +1198,9 @@ class Store:
             "group": bool(GROUP_RE.search(p["text"])),
             "utype": ty,
             "dup_of": p.get("_dup_of"),
+            # Відповідь, що взяла місце в батька (`link_replies`): id батька.
+            # Поле присутнє завжди (test_schema_is_uniform).
+            "reply_of": p.get("_reply_of"),
             # Привʼязка до цілі — ЛИШЕ для координат, які справді вказують на
             # місце. Регіональні відкати (centroid/region/region-snap) означають
             # «десь у цій області», а область — це десятки тисяч кв. км. Ставити

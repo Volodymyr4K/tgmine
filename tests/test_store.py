@@ -1377,3 +1377,44 @@ class TestHomeRegionIsSearchContext(TestRepeatedRegionMatch):
 
     test_city_after_region_name_is_the_place = None
     test_later_city_does_not_beat_the_first_line = None
+
+
+class TestReplyInheritsParentPlace(unittest.TestCase):
+    """Відповідь на власний пост без свого місця — місце батька.
+
+    Тексти — дослівні з locatorru (86704 -> 86705, 84168). Координати —
+    літерали, як у `TestDirectionTargetIsNotThePlace`: тест не тягне газетир.
+    """
+
+    def _parent(self):
+        t = ("Кучуры, Сенгилеевский район, Ульяновская область - ещё пролёты БПЛА "
+             "на восток в сторону Сенгилей")
+        return {"channel": "locatorru", "id": 1, "text": t, "entities": [
+            {"type": "регіон", "value": "Ульяновська", "match": "Ульяновская",
+             "pos": t.index("Ульяновская"), "lat": 54.3, "lon": 48.4, "geo_conf": "centroid"},
+            {"type": "нп", "value": "Кучуры", "match": "Кучуры", "pos": 0,
+             "lat": 54.02, "lon": 48.63, "geo_pop": 300, "geo_conf": "region"}]}
+
+    def _reply(self, text, to="https://t.me/locatorru/1"):
+        return {"channel": "locatorru", "id": 2, "text": text, "reply_to": to,
+                "entities": []}
+
+    def test_placeless_update_takes_parent_point_and_region(self):
+        par, rep = self._parent(), self._reply("Продолжаются пролёты БПЛА.")
+        self.assertEqual(ST.link_replies([par, rep]), 1)
+        self.assertEqual(ST.point_entity(rep)["value"], "Кучуры")
+        self.assertEqual(GC.home_region(rep), "Ульяновська")
+        self.assertEqual(rep["_reply_of"], "locatorru/1")
+
+    def test_reply_with_own_place_is_left_alone(self):
+        par = self._parent()
+        rep = self._reply("Сызрань - опасность")
+        rep["entities"] = [{"type": "нп", "value": "Сызрань", "match": "Сызрань",
+                            "pos": 0, "lat": 53.15, "lon": 48.47, "geo_conf": "region"}]
+        self.assertEqual(ST.link_replies([par, rep]), 0)
+        self.assertEqual(ST.point_entity(rep)["value"], "Сызрань")
+
+    def test_reply_to_other_channel_is_not_linked(self):
+        par, rep = self._parent(), self._reply("Ещё фиксации БПЛА.",
+                                               to="https://t.me/other/1")
+        self.assertEqual(ST.link_replies([par, rep]), 0)

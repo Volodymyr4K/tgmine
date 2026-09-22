@@ -41,6 +41,43 @@ class TestKindNegation(unittest.TestCase):
                          "фіксація")
 
 
+class TestNamedDroneWithoutTrigger(unittest.TestCase):
+    """Апарат названий, тригера нема: присутність — фіксація, підготовка — тривога.
+
+    Тексти — дослівно зі сховища (серпень–вересень 2026), вид — як їх
+    прочитали обидва незалежні розмітники з контекстом (22.09.2026).
+    """
+
+    def test_presence_is_a_sighting(self):
+        for text in ["Енакиево ДНР Баба Яга",
+                     "Каховка БПЛА разведчик\nХерсонская область РФ",
+                     "Трасса Р-280 окрестности Осипенко  высокая активность БПЛА.\n"
+                     "Запорожская область РФ",
+                     "Таганрог\nРостовская область\n2 БПЛА в вашем направлении",
+                     "Кировское ДНР группа БПЛА на юг, ю-в",
+                     "От Строителя на Яковлево по трассе БПЛА\nБелгородская область",
+                     "Погар Дартс подходит к Белевице! Срочно укрытия!\nБрянская область"]:
+            with self.subTest(text=text):
+                self.assertEqual(ST.kind_of(text), "фіксація")
+
+    def test_preparation_is_an_alert(self):
+        for text in ["Мелитополь приготовиться к массовой атаке БПЛА",
+                     "Шебекино и далее\nПриготовиться к волне БПЛА\nБелгородская область",
+                     "Южные районы Севастополь готовность к атаке группы БПЛА к 17:55"]:
+            with self.subTest(text=text):
+                self.assertEqual(ST.kind_of(text), "тривога")
+
+    def test_trigger_still_wins(self):
+        """Фолбек — лише коли жоден тригер KIND не виграв."""
+        self.assertEqual(ST.kind_of("Боброво тревога по БПЛА Хорнет\nЛНР"), "тривога")
+
+    def test_long_post_needs_more_than_a_model_name(self):
+        """Назва моделі без ознаки присутності — лише в короткому пості."""
+        text = ("Как выжить в многоэтажке во время налёта — советы жителей "
+                "приграничья, где каждый день летают Хорнет" + " и так далее" * 10)
+        self.assertNotEqual(ST.kind_of(text.replace("летают", "бывают")), "фіксація")
+
+
 class TestPlannedLaunchIsNotALaunch(unittest.TestCase):
     """«Приготовиться к пускам» — це попередження, а не пуск.
 
@@ -1567,3 +1604,78 @@ class TestLegs(unittest.TestCase):
         p = self._p(t, [("Белгородской", "регіон", 50.6, 36.6, "centroid", True),
                         ("Курской", "регіон", 51.7, 36.2, "centroid", True)])
         self.assertEqual(self._legs(p), [])
+
+
+@needs_gazetteer
+class TestBarePostKindFromContext(unittest.TestCase):
+    """Голий пост (лише місця) — тривога; відповідь — вид батька (v27).
+
+    До 22.09.2026 такий пост ставав «іншим» і на карту не йшов. Розмітка з
+    контекстом (два розмітники, дві вибірки) читає його здебільшого
+    тривогою; фіксацію від сусіда про те саме місце НЕ успадковуємо — на
+    свіжій вибірці 7 правильних і 5 хибних (див. коментар у store.py).
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        from tgmine import extract as E
+        cls.E = E
+        cls.cfg = E.Config.load(str(ROOT / "configs" / "ru-monitor.yaml"))
+        cls.gaz = GC.Gazetteer.load(GAZ / "RU.txt", GAZ / "UA.txt")
+        cls.a1 = cls.gaz.region_codes(cls.cfg.entities["регіон"], cls.cfg.geo)
+
+    def _posts(self, rows):
+        posts = [{"channel": ch, "id": i, "text": text, "reply_to": reply,
+                  "date": f"2026-09-10T20:{i:02d}:00+00:00",
+                  "url": f"https://t.me/{ch}/{i}"} for ch, i, text, reply in rows]
+        posts = self.E.enrich(posts, self.cfg)
+        GC.geocode_posts(posts, self.gaz, self.cfg.geo,
+                         aliases=self.cfg.geo_aliases, region_a1=self.a1)
+        ST.link_replies(posts)
+        return posts
+
+    def _events(self, rows):
+        st = ST.Store.__new__(ST.Store)
+        evs = [ST.Store._event(st, p, self.cfg) for p in self._posts(rows)]
+        ST.context_kinds(evs)
+        return evs
+
+    def test_bare_detection(self):
+        texts = {"Климово и близлежащие\nБрянская область": True,
+                 "Оренбург\nОренбургская область\nМеры безопасности": True,
+                 # «Учения» freeform ловить як назву, але в газетирі її нема
+                 "Феодосия\nРеспублика Крым\nУчения": False,
+                 "Белая Березка обстрел\nБрянская область": False}
+        posts = self._posts([("lpr1_treugolnik", i + 1, t, None)
+                             for i, t in enumerate(texts)])
+        for p, (text, want) in zip(posts, texts.items()):
+            with self.subTest(text=text):
+                self.assertEqual(ST.is_bare(p), want)
+
+    def test_bare_post_is_an_alert(self):
+        e, = self._events([("lpr1_treugolnik", 1,
+                            "Климово и близлежащие\nБрянская область", None)])
+        self.assertEqual((e["kind"], e["scope"], e["kind_ctx"]),
+                         ("тривога", "область", "—"))
+        self.assertNotIn("_bare", e)
+
+    def test_bare_reply_takes_parent_kind(self):
+        par, rep = self._events([
+            ("locatorru", 1, "Климово, Брянская область - фиксации БПЛА", None),
+            ("locatorru", 2, "Климово, Брянская область",
+             "https://t.me/locatorru/1")])
+        self.assertEqual(par["kind"], "фіксація")
+        self.assertEqual((rep["kind"], rep["scope"], rep["kind_ctx"]),
+                         ("фіксація", "точка", par["id"]))
+
+    def test_nearby_sighting_does_not_make_it_a_sighting(self):
+        """Фіксація поруч у часі — не причина ставити крапку «тут бачили»."""
+        _, e = self._events([
+            ("vrv_radar", 1, "Климовский район\nБрянская область\nФиксация БПЛА", None),
+            ("lpr1_treugolnik", 2, "Климово и близлежащие\nБрянская область", None)])
+        self.assertEqual(e["kind"], "тривога")
+
+    def test_worded_post_is_left_alone(self):
+        e, = self._events([("lpr1_treugolnik", 1,
+                            "Феодосия\nРеспублика Крым\nУчения", None)])
+        self.assertEqual((e["kind"], e["kind_ctx"]), ("інше", None))

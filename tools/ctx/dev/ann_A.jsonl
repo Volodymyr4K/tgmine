@@ -1,0 +1,150 @@
+{"n": 0, "id": "kupolrussia/125725", "kind": "тривога", "what": "БпЛА", "basis": "others_near", "conf": "high", "note": "інші канали одночасно: тревога/опасность по БПЛА для Сочі"}
+{"n": 1, "id": "lpr1_treugolnik/271412", "kind": "тривога", "what": "БпЛА", "basis": "text", "conf": "low", "note": "групи в морі, лише напрямок на ці місця"}
+{"n": 2, "id": "kupolrussia/131328", "kind": "фіксація", "what": "БпЛА", "basis": "others_near", "conf": "high", "note": "локатор: пролёты в сторону Липецка, есть фиксации"}
+{"n": 3, "id": "vrv_radar/89386", "kind": "тривога", "what": "невідомо", "basis": "text", "conf": "low", "note": "лише «меры безопасности», контексту по Казані нема"}
+{"n": 4, "id": "kupolrussia/130655", "kind": "тривога", "what": "БпЛА", "basis": "others_near", "conf": "high", "note": "lpr1 за 5 хв: опасность по БПЛА там само"}
+{"n": 5, "id": "lpr1_treugolnik/271117", "kind": "фіксація", "what": "БпЛА", "basis": "text", "conf": "high", "note": "група БПЛА рухається на південь"}
+{"n": 6, "id": "kupolrussia/127107", "kind": "тривога", "what": "БпЛА", "basis": "own_before", "conf": "low", "note": "напрямок загрози з моря, фіксації не сказано"}
+{"n": 7, "id": "lpr1_treugolnik/274102", "kind": "фіксація", "what": "БпЛА", "basis": "text", "conf": "high", "note": "висока активність БПЛА на трасі зараз"}
+{"n": 8, "id": "lpr1_treugolnik/270332", "kind": "фіксація", "what": "БпЛА", "basis": "text", "conf": "high", "note": "розвідувальний БПЛА над Каховкою"}
+{"n": 9, "id": "lpr1_treugolnik/265613", "kind": "фіксація", "what": "БпЛА", "basis": "text", "conf": "high", "note": "велика група БПЛА рухається на південний схід"}
+{"n": 10, "id": "kupolrussia/130283", "kind": "фіксація", "what": "БпЛА", "basis": "others_near", "conf": "high", "note": "vrv: фіксації поруч і робота ППО по Подольску"}
+{"n": 11, "id": "lpr1_treugolnik/268284", "kind": "фіксація", "what": "БпЛА", "basis": "own_before", "conf": "low", "note": "меры безопасности через 16 хв після «ещё фиксации» там само"}
+{"n": 12, "id": "kupolrussia/125079", "kind": "тривога", "what": "БпЛА", "basis": "others_near", "conf": "high", "note": "lpr1 хвилиною раніше: Шебекино тревога по БПЛА"}
+{"n": 13, "id": "lpr1_treugolnik/278771", "kind": "фіксація", "what": "БпЛА", "basis": "text", "conf": "high", "note": "висока активність FPV і БПЛА зараз"}
+{"n": 14, "id": "vrv_radar/87056", "kind": "інше", "what": "БпЛА", "basis": "text", "conf": "low", "note": "попередня фіксація визнана ймовірно хибною"}
+{"n": 15, "id": "lpr1_treugolnik/268538", "kind": "пуск", "what": "БпЛА", "basis": "text", "conf": "low", "note": "підготовка запусків з Одеси, ще не пуск"}
+{"n": 16, "id": "kupolrussia/120387", "kind": "інше", "what": "невідомо", "basis": "others_near", "conf": "high", "note": "lpr1 одночасно: Черноморское учения"}
+{"n": 17, "id": "lpr1_treugolnik/267753", "kind": "фіксація", "what": "БпЛА", "basis": "own_before", "conf": "high", "note": "фіксації з моря тим маршрутом, негайно в укриття"}
+{"n": 18, "id": "lpr1_treugolnik/268242", "kind": "тривога", "what": "БпЛА", "basis": "others_near", "conf": "high", "note": "локатор: опасность по БПЛА Таганрог, без фіксацій"}
+{"n": 19, "id": "vrv_radar/88705", "kind": "фіксація", "what": "БпЛА", "basis": "text", "conf": "high", "note": "два конкретні БПЛА летять сюди, фіксації поруч"}
+{"n": 20, "id": "locatorru/82890", "kind": "фіксація", "what": "БпЛА", "basis": "text", "conf": "high", "note": "багато БПЛА від Лютово в бік НПЗ"}
+{"n": 21, "id": "vrv_radar/90155", "kind": "тривога", "what": "БпЛА", "basis": "others_near", "conf": "low", "note": "тревога сохраняется по району, фіксацій саме тут нема"}
+{"n": 22, "id": "kupolrussia/122736", "kind": "фіксація", "what": "БпЛА", "basis": "others_near", "conf": "low", "note": "перелік міст по ходу нальоту, vrv: збиття в Домодєдово"}
+{"n": 23, "id": "lpr1_treugolnik/267724", "kind": "фіксація", "what": "БпЛА", "basis": "own_after", "conf": "high", "note": "фіксації з моря, далі «ушел БПЛА в сторону ТЦ»"}
+{"n": 24, "id": "kupolrussia/118750", "kind": "тривога", "what": "БпЛА", "basis": "others_near", "conf": "high", "note": "lpr1 одночасно: Джанкой опасность по БПЛА"}
+{"n": 25, "id": "vrv_radar/87601", "kind": "фіксація", "what": "БпЛА", "basis": "own_before", "conf": "low", "note": "за 10 хв робота ППО по Геленджику, наліт триває"}
+{"n": 26, "id": "lpr1_treugolnik/266043", "kind": "фіксація", "what": "невідомо", "basis": "text", "conf": "high", "note": "бачать МРШ з підвісом над Північною стороною"}
+{"n": 27, "id": "vrv_radar/91159", "kind": "тривога", "what": "БпЛА", "basis": "own_before", "conf": "low", "note": "фіксації в сусідніх районах області, у місті ще ні"}
+{"n": 28, "id": "locatorru/85910", "kind": "фіксація", "what": "БпЛА", "basis": "text", "conf": "high", "note": "два реактивні БПЛА над Динською"}
+{"n": 29, "id": "lpr1_treugolnik/269362", "kind": "тривога", "what": "невідомо", "basis": "text", "conf": "low", "note": "лише меры безопасности, контексту по Шебекино нема"}
+{"n": 30, "id": "kupolrussia/131843", "kind": "тривога", "what": "БпЛА", "basis": "others_near", "conf": "high", "note": "lpr1 за 4 хв: Севастополь опасность по БПЛА"}
+{"n": 31, "id": "vrv_radar/88312", "kind": "тривога", "what": "БпЛА", "basis": "own_before", "conf": "low", "note": "опасность по Воронежу/Нововоронежу, фіксації лише за 40+ км"}
+{"n": 32, "id": "lpr1_treugolnik/265947", "kind": "фіксація", "what": "БпЛА", "basis": "text", "conf": "high", "note": "Хорнет уздовж траси Бахмутка"}
+{"n": 33, "id": "lpr1_treugolnik/268028", "kind": "фіксація", "what": "БпЛА", "basis": "text", "conf": "high", "note": "кілька БПЛА літають кругами над районом"}
+{"n": 34, "id": "vrv_radar/87075", "kind": "тривога", "what": "невідомо", "basis": "text", "conf": "low", "note": "лише меры безопасности, фіксацій поруч нема"}
+{"n": 35, "id": "lpr1_treugolnik/276343", "kind": "тривога", "what": "БпЛА", "basis": "own_before", "conf": "low", "note": "тревога по Севастополю, фіксації з моря лише після"}
+{"n": 36, "id": "lpr1_treugolnik/279734", "kind": "фіксація", "what": "БпЛА", "basis": "text", "conf": "high", "note": "розвідувальний БПЛА в прикордонні"}
+{"n": 37, "id": "kupolrussia/123778", "kind": "фіксація", "what": "БпЛА", "basis": "own_before", "conf": "low", "note": "послідовний перелік районів Підмосков'я по ходу нальоту"}
+{"n": 38, "id": "kupolrussia/123038", "kind": "фіксація", "what": "БпЛА", "basis": "text", "conf": "low", "note": "напрямок руху від Ставки на Пантелеймоновку, трек апарата"}
+{"n": 39, "id": "kupolrussia/127118", "kind": "відбій", "what": "БпЛА", "basis": "others_near", "conf": "low", "note": "lpr1 хвилиною раніше: Гвардейское отбой опасности"}
+{"n": 40, "id": "lpr1_treugolnik/268376", "kind": "вибух", "what": "артилерія/РСЗО", "basis": "text", "conf": "high", "note": "обстріл населеного пункту"}
+{"n": 41, "id": "kupolrussia/126236", "kind": "тривога", "what": "БпЛА", "basis": "others_near", "conf": "high", "note": "lpr1 хвилиною раніше: Шебекино тревога по БПЛА"}
+{"n": 42, "id": "kupolrussia/130277", "kind": "фіксація", "what": "БпЛА", "basis": "others_near", "conf": "high", "note": "vrv одночасно: робота ППО по БПЛА над Тулою"}
+{"n": 43, "id": "lpr1_treugolnik/268025", "kind": "тривога", "what": "БпЛА", "basis": "text", "conf": "high", "note": "попередження про хвилю БПЛА"}
+{"n": 44, "id": "lpr1_treugolnik/279606", "kind": "фіксація", "what": "БпЛА", "basis": "text", "conf": "high", "note": "Дартс підходить до Белевиці, негайно в укриття"}
+{"n": 45, "id": "lpr1_treugolnik/269783", "kind": "інше", "what": "невідомо", "basis": "text", "conf": "high", "note": "привітання зі святом"}
+{"n": 46, "id": "lpr1_treugolnik/276631", "kind": "фіксація", "what": "БпЛА", "basis": "text", "conf": "high", "note": "БПЛА рухається трасою від Строителя на Яковлево"}
+{"n": 47, "id": "locatorru/83651", "kind": "тривога", "what": "ракета", "basis": "own_before", "conf": "high", "note": "хвилиною раніше ракетна опасность по Белгородщині"}
+{"n": 48, "id": "vrv_radar/89061", "kind": "фіксація", "what": "БпЛА", "basis": "others_near", "conf": "low", "note": "комбінований наліт БПЛА+БЕК триває, ще фіксації"}
+{"n": 49, "id": "lpr1_treugolnik/272113", "kind": "тривога", "what": "БпЛА", "basis": "own_before", "conf": "low", "note": "тревога від Чайкино, меры безопасности без фіксації тут"}
+{"n": 50, "id": "kupolrussia/130573", "kind": "тривога", "what": "БпЛА", "basis": "others_near", "conf": "high", "note": "lpr1 хвилиною раніше: Илек Кошары тревога по БПЛА"}
+{"n": 51, "id": "lpr1_treugolnik/268731", "kind": "тривога", "what": "БпЛА", "basis": "own_before", "conf": "low", "note": "меры безопасности на тлі тривоги по області, фіксацій нема"}
+{"n": 52, "id": "lpr1_treugolnik/277201", "kind": "відбій", "what": "невідомо", "basis": "text", "conf": "high", "note": "тривога по БЕК знята, режим підвищеної уваги"}
+{"n": 53, "id": "kupolrussia/127697", "kind": "фіксація", "what": "БпЛА", "basis": "others_near", "conf": "low", "note": "тревога повторно, vrv: 2 БПЛА в акваторії, потім ППО"}
+{"n": 54, "id": "lpr1_treugolnik/273362", "kind": "фіксація", "what": "БпЛА", "basis": "text", "conf": "high", "note": "розвідувальний БПЛА рухається трасою"}
+{"n": 55, "id": "kupolrussia/126771", "kind": "тривога", "what": "БпЛА", "basis": "others_near", "conf": "high", "note": "lpr1 і локатор: опасность по БПЛА у районі"}
+{"n": 56, "id": "lpr1_treugolnik/266547", "kind": "тривога", "what": "БпЛА", "basis": "text", "conf": "high", "note": "приготуватися до масованої атаки БПЛА"}
+{"n": 57, "id": "locatorru/84038", "kind": "фіксація", "what": "БпЛА", "basis": "text", "conf": "high", "note": "БПЛА летить від Узловой на Новомосковськ"}
+{"n": 58, "id": "vrv_radar/91899", "kind": "тривога", "what": "невідомо", "basis": "text", "conf": "low", "note": "лише меры безопасности, контексту нема"}
+{"n": 59, "id": "kupolrussia/131305", "kind": "тривога", "what": "БпЛА", "basis": "own_before", "conf": "low", "note": "голе оголошення регіону серед тривог по областях"}
+{"n": 60, "id": "locatorru/82730", "kind": "інше", "what": "невідомо", "basis": "text", "conf": "low", "note": "«уточняем», за хвилину «всё хорошо»"}
+{"n": 61, "id": "vrv_radar/89562", "kind": "фіксація", "what": "БпЛА", "basis": "own_after", "conf": "low", "note": "за хвилину збиття БПЛА над Новомосковськом"}
+{"n": 62, "id": "vrv_radar/86510", "kind": "тривога", "what": "БпЛА", "basis": "others_near", "conf": "low", "note": "опасность по БПЛА в сусідніх пунктах, фіксацій тут нема"}
+{"n": 63, "id": "kupolrussia/122701", "kind": "тривога", "what": "невідомо", "basis": "text", "conf": "low", "note": "голе оголошення міста, контексту нема"}
+{"n": 64, "id": "lpr1_treugolnik/273045", "kind": "фіксація", "what": "БпЛА", "basis": "text", "conf": "high", "note": "«Баба-яга» летить від кордону на Белую Березку"}
+{"n": 65, "id": "kupolrussia/123776", "kind": "фіксація", "what": "БпЛА", "basis": "others_near", "conf": "high", "note": "vrv: збиття і ще фіксації в Серпуховському районі"}
+{"n": 66, "id": "vrv_radar/92381", "kind": "тривога", "what": "невідомо", "basis": "text", "conf": "low", "note": "лише меры безопасности, свіжого контексту нема"}
+{"n": 67, "id": "vrv_radar/85180", "kind": "тривога", "what": "ракета", "basis": "own_before", "conf": "low", "note": "за 2 хв реактивна ціль у напрямку Таганрога, ракетна опасность"}
+{"n": 68, "id": "lpr1_treugolnik/266920", "kind": "тривога", "what": "БпЛА", "basis": "text", "conf": "high", "note": "приготуватися до атаки БПЛА через море"}
+{"n": 69, "id": "lpr1_treugolnik/269610", "kind": "фіксація", "what": "БпЛА", "basis": "own_before", "conf": "low", "note": "треки БПЛА на Гвардейское, терміново в укриття"}
+{"n": 70, "id": "kupolrussia/122401", "kind": "тривога", "what": "невідомо", "basis": "text", "conf": "low", "note": "повторне оголошення по області без деталей"}
+{"n": 71, "id": "lpr1_treugolnik/266058", "kind": "фіксація", "what": "БпЛА", "basis": "text", "conf": "high", "note": "«Баба-яга» над Енакієво"}
+{"n": 72, "id": "lpr1_treugolnik/278907", "kind": "фіксація", "what": "БпЛА", "basis": "text", "conf": "high", "note": "розвідувальний БПЛА над Каховкою"}
+{"n": 73, "id": "kupolrussia/121536", "kind": "тривога", "what": "БпЛА", "basis": "others_near", "conf": "low", "note": "lpr1 раніше: приготуватися, можлива ціль Петербург"}
+{"n": 74, "id": "vrv_radar/90011", "kind": "фіксація", "what": "БпЛА", "basis": "own_after", "conf": "low", "note": "через 3 хв збиття БПЛА над Нижньокамськом"}
+{"n": 75, "id": "lpr1_treugolnik/270899", "kind": "фіксація", "what": "БпЛА", "basis": "others_near", "conf": "low", "note": "щойно фіксації в Євпаторії, терміново в укриття"}
+{"n": 76, "id": "vrv_radar/92698", "kind": "фіксація", "what": "БпЛА", "basis": "own_before", "conf": "high", "note": "хвилиною раніше фіксація БПЛА в цьому районі"}
+{"n": 77, "id": "lpr1_treugolnik/266645", "kind": "тривога", "what": "ракета", "basis": "own_before", "conf": "low", "note": "за 4 хв ракетна опасность, потім тревога по Нептуну"}
+{"n": 78, "id": "lpr1_treugolnik/278117", "kind": "фіксація", "what": "БпЛА", "basis": "text", "conf": "high", "note": "Хорнет над Боброво, Капитаново"}
+{"n": 79, "id": "kupolrussia/127682", "kind": "тривога", "what": "БпЛА", "basis": "others_near", "conf": "high", "note": "lpr1 одночасно: опасность по БПЛА, апарати ще в морі"}
+{"n": 80, "id": "vrv_radar/91506", "kind": "тривога", "what": "БпЛА", "basis": "text", "conf": "low", "note": "меры безопасности, фіксації лише в інших районах"}
+{"n": 81, "id": "kupolrussia/131785", "kind": "тривога", "what": "невідомо", "basis": "none", "conf": "low", "note": "голий топонім фронтової зони, суть не видно"}
+{"n": 82, "id": "vrv_radar/90077", "kind": "фіксація", "what": "БпЛА", "basis": "own_before", "conf": "high", "note": "щойно збиття над Нижньокамськом, фіксації тривають"}
+{"n": 83, "id": "kupolrussia/125998", "kind": "тривога", "what": "БпЛА", "basis": "others_near", "conf": "high", "note": "lpr1 одночасно: Волоконовский район опасность по БПЛА"}
+{"n": 84, "id": "kupolrussia/123261", "kind": "фіксація", "what": "БпЛА", "basis": "others_near", "conf": "high", "note": "vrv: фіксація 2 БПЛА за 9 км, наліт на Підмосков'я"}
+{"n": 85, "id": "kupolrussia/124679", "kind": "тривога", "what": "БпЛА", "basis": "others_near", "conf": "high", "note": "lpr1 за 2 хв: Шебекино тревога по БПЛА"}
+{"n": 86, "id": "vrv_radar/89901", "kind": "фіксація", "what": "БпЛА", "basis": "text", "conf": "high", "note": "багато БПЛА летить сюди, щойно фіксації в Борисоглебську"}
+{"n": 87, "id": "lpr1_treugolnik/279157", "kind": "фіксація", "what": "БпЛА", "basis": "others_near", "conf": "low", "note": "максимальні заходи; локатор: ще фіксації в бік Єйська"}
+{"n": 88, "id": "kupolrussia/123470", "kind": "фіксація", "what": "БпЛА", "basis": "own_before", "conf": "low", "note": "щойно фіксації з моря в Севастопольській бухті поруч"}
+{"n": 89, "id": "lpr1_treugolnik/267630", "kind": "фіксація", "what": "БпЛА", "basis": "text", "conf": "high", "note": "активність БПЛА в районі зараз"}
+{"n": 90, "id": "vrv_radar/85207", "kind": "фіксація", "what": "БпЛА", "basis": "own_after", "conf": "low", "note": "за хвилину фіксація 3 БПЛА, потім збиття"}
+{"n": 91, "id": "lpr1_treugolnik/277123", "kind": "фіксація", "what": "БпЛА", "basis": "text", "conf": "high", "note": "у небі над містом Хорнет, всім в укриття"}
+{"n": 92, "id": "vrv_radar/91911", "kind": "тривога", "what": "невідомо", "basis": "text", "conf": "low", "note": "лише меры безопасности, свіжих фіксацій тут нема"}
+{"n": 93, "id": "kupolrussia/121297", "kind": "тривога", "what": "УАБ/авіація", "basis": "others_near", "conf": "high", "note": "lpr1: авіаційна ракетна бомбова тривога по Рильському району"}
+{"n": 94, "id": "locatorru/82731", "kind": "відбій", "what": "невідомо", "basis": "own_before", "conf": "low", "note": "після «уточняем» — «всё хорошо», загрози нема"}
+{"n": 95, "id": "vrv_radar/92729", "kind": "фіксація", "what": "БпЛА", "basis": "others_near", "conf": "low", "note": "локатор: фіксації БПЛА за 18 км курсом на Воронеж"}
+{"n": 96, "id": "vrv_radar/88131", "kind": "тривога", "what": "БпЛА", "basis": "own_before", "conf": "low", "note": "меры безопасности, останні фіксації пів години тому"}
+{"n": 97, "id": "lpr1_treugolnik/276146", "kind": "тривога", "what": "БпЛА", "basis": "own_before", "conf": "low", "note": "опасность по Тарханкуту, фіксації в напрямку лише згодом"}
+{"n": 98, "id": "lpr1_treugolnik/266060", "kind": "фіксація", "what": "БпЛА", "basis": "text", "conf": "high", "note": "Хорнет над трасою біля Славяносербська"}
+{"n": 99, "id": "lpr1_treugolnik/273544", "kind": "пуск", "what": "БпЛА", "basis": "text", "conf": "low", "note": "підготовка масового запуску з Кривого Рогу"}
+{"n": 100, "id": "lpr1_treugolnik/280792", "kind": "фіксація", "what": "БпЛА", "basis": "text", "conf": "high", "note": "висока активність FPV зараз"}
+{"n": 101, "id": "vrv_radar/90406", "kind": "тривога", "what": "БпЛА", "basis": "others_near", "conf": "high", "note": "lpr1 за 5 хв: Зерноград опасность по БПЛА"}
+{"n": 102, "id": "vrv_radar/86000", "kind": "тривога", "what": "БпЛА", "basis": "others_near", "conf": "high", "note": "локатор: опасность по БПЛА для Павловского Посада"}
+{"n": 103, "id": "vrv_radar/89272", "kind": "тривога", "what": "БпЛА", "basis": "others_near", "conf": "high", "note": "lpr1 і купол: Смоленск опасность по БПЛА"}
+{"n": 104, "id": "vrv_radar/88864", "kind": "тривога", "what": "ракета", "basis": "others_near", "conf": "low", "note": "щойно ракетна тривога по Фламінго для Новоросійська"}
+{"n": 105, "id": "vrv_radar/90404", "kind": "тривога", "what": "БпЛА", "basis": "own_before", "conf": "low", "note": "меры безопасности, фіксації лише в сусідніх районах"}
+{"n": 106, "id": "lpr1_treugolnik/279434", "kind": "тривога", "what": "БпЛА", "basis": "text", "conf": "high", "note": "приготуватися до масованої атаки"}
+{"n": 107, "id": "kupolrussia/120580", "kind": "тривога", "what": "БпЛА", "basis": "others_near", "conf": "high", "note": "lpr1 одночасно: Туапсе тревога по БПЛА повторно"}
+{"n": 108, "id": "kupolrussia/119348", "kind": "тривога", "what": "БпЛА", "basis": "others_near", "conf": "high", "note": "lpr1 хвилиною раніше: Мелитополь тревога по БПЛА"}
+{"n": 109, "id": "lpr1_treugolnik/267409", "kind": "фіксація", "what": "БпЛА", "basis": "text", "conf": "high", "note": "«Баба-яга» над Осипенко/Бердянськом"}
+{"n": 110, "id": "locatorru/83847", "kind": "фіксація", "what": "БпЛА", "basis": "parent", "conf": "high", "note": "ще один проліт тим самим курсом, що в батьківському"}
+{"n": 111, "id": "kupolrussia/130368", "kind": "тривога", "what": "БпЛА", "basis": "others_near", "conf": "high", "note": "lpr1 одночасно: Приморско-Ахтарск опасность по БПЛА"}
+{"n": 112, "id": "lpr1_treugolnik/280460", "kind": "тривога", "what": "БпЛА", "basis": "text", "conf": "high", "note": "приготуватися до атаки з моря у разі прориву"}
+{"n": 113, "id": "kupolrussia/129821", "kind": "тривога", "what": "ракета", "basis": "others_near", "conf": "high", "note": "lpr1 хвилиною раніше: Таганрог ракетная опасность"}
+{"n": 114, "id": "vrv_radar/85224", "kind": "тривога", "what": "БпЛА", "basis": "own_before", "conf": "low", "note": "ППО в сусідньому районі, по Адигейську лише меры"}
+{"n": 115, "id": "locatorru/84375", "kind": "фіксація", "what": "БпЛА", "basis": "others_near", "conf": "low", "note": "масований наліт триває, фіксації курсом на Новоросійськ"}
+{"n": 116, "id": "lpr1_treugolnik/270367", "kind": "тривога", "what": "ракета", "basis": "own_before", "conf": "high", "note": "одночасно ракетна опасность по Бєлгороду"}
+{"n": 117, "id": "kupolrussia/131628", "kind": "фіксація", "what": "БпЛА", "basis": "others_near", "conf": "high", "note": "трек «и далее на восток», vrv: фіксація БПЛА в Майкопі"}
+{"n": 118, "id": "lpr1_treugolnik/278919", "kind": "інше", "what": "невідомо", "basis": "text", "conf": "high", "note": "перекриття траси, дорожня інформація"}
+{"n": 119, "id": "lpr1_treugolnik/274380", "kind": "пуск", "what": "ракета", "basis": "text", "conf": "low", "note": "можливі пуски Нептунів з Одеси"}
+{"n": 120, "id": "kupolrussia/121191", "kind": "тривога", "what": "БпЛА", "basis": "others_near", "conf": "high", "note": "vrv і РСЧС: опасность/угроза атаки БПЛА на Казань"}
+{"n": 121, "id": "kupolrussia/121502", "kind": "тривога", "what": "БпЛА", "basis": "own_before", "conf": "high", "note": "той самий канал щойно: Смоленск тревога по БПЛА"}
+{"n": 122, "id": "lpr1_treugolnik/270688", "kind": "вибух", "what": "артилерія/РСЗО", "basis": "text", "conf": "high", "note": "обстріл Белой Берёзки"}
+{"n": 123, "id": "kupolrussia/130155", "kind": "фіксація", "what": "БпЛА", "basis": "others_near", "conf": "low", "note": "vrv: меры по Алексину, за 5 хв збиття БПЛА"}
+{"n": 124, "id": "vrv_radar/89104", "kind": "тривога", "what": "невідомо", "basis": "text", "conf": "low", "note": "лише меры безопасности, контексту нема"}
+{"n": 125, "id": "lpr1_treugolnik/267714", "kind": "фіксація", "what": "БпЛА", "basis": "own_before", "conf": "high", "note": "за 4 хв ще фіксації з моря в Камишовій бухті"}
+{"n": 126, "id": "vrv_radar/85867", "kind": "тривога", "what": "БпЛА", "basis": "own_before", "conf": "low", "note": "меры безопасности, фіксації в області давно й деінде"}
+{"n": 127, "id": "lpr1_treugolnik/279794", "kind": "вибух", "what": "артилерія/РСЗО", "basis": "text", "conf": "high", "note": "обстріл Нової Таволжанки"}
+{"n": 128, "id": "lpr1_treugolnik/280776", "kind": "тривога", "what": "ракета", "basis": "own_before", "conf": "high", "note": "одночасно ракетна опасность по Бєлгороду"}
+{"n": 129, "id": "lpr1_treugolnik/278958", "kind": "тривога", "what": "БпЛА", "basis": "text", "conf": "low", "note": "«возможно» БПЛА зі скидами, фіксації не сказано"}
+{"n": 130, "id": "lpr1_treugolnik/271281", "kind": "фіксація", "what": "БпЛА", "basis": "others_near", "conf": "high", "note": "vrv: над Адлером робота ППО і ще фіксації"}
+{"n": 131, "id": "kupolrussia/127001", "kind": "тривога", "what": "БпЛА", "basis": "text", "conf": "low", "note": "повторне оголошення по Липецьку без фіксацій поруч"}
+{"n": 132, "id": "kupolrussia/131314", "kind": "тривога", "what": "невідомо", "basis": "none", "conf": "low", "note": "голий перелік міст, контексту немає"}
+{"n": 133, "id": "kupolrussia/129868", "kind": "тривога", "what": "БпЛА", "basis": "text", "conf": "high", "note": "приготуватися до атаки БПЛА"}
+{"n": 134, "id": "kupolrussia/120948", "kind": "тривога", "what": "БпЛА", "basis": "others_near", "conf": "high", "note": "lpr1 одночасно: Джанкой тревога по БПЛА"}
+{"n": 135, "id": "kupolrussia/120341", "kind": "тривога", "what": "БпЛА", "basis": "others_near", "conf": "high", "note": "lpr1 за 4 хв: тревога по БПЛА з моря з заходу"}
+{"n": 136, "id": "kupolrussia/119628", "kind": "тривога", "what": "БпЛА", "basis": "others_near", "conf": "high", "note": "lpr1 одночасно: з моря опасность по БПЛА"}
+{"n": 137, "id": "lpr1_treugolnik/278960", "kind": "тривога", "what": "БпЛА", "basis": "text", "conf": "high", "note": "приготуватися до масованої атаки з Азовського моря"}
+{"n": 138, "id": "vrv_radar/89378", "kind": "тривога", "what": "невідомо", "basis": "text", "conf": "low", "note": "меры безопасности без фіксацій по Тольятті"}
+{"n": 139, "id": "kupolrussia/130245", "kind": "інше", "what": "невідомо", "basis": "others_near", "conf": "high", "note": "тривоги нема; vrv: звуки в небі не несуть загрози"}
+{"n": 140, "id": "vrv_radar/89859", "kind": "фіксація", "what": "БпЛА", "basis": "others_near", "conf": "low", "note": "локатор за 14 хв: фіксації в бік Кашар за 10 км"}
+{"n": 141, "id": "vrv_radar/87933", "kind": "тривога", "what": "БпЛА", "basis": "own_before", "conf": "low", "note": "фіксація лише в сусідньому Воскресенську"}
+{"n": 142, "id": "lpr1_treugolnik/272521", "kind": "фіксація", "what": "БпЛА", "basis": "text", "conf": "high", "note": "БПЛА «Чаклун» рухається на південний схід"}
+{"n": 143, "id": "locatorru/86097", "kind": "фіксація", "what": "БпЛА", "basis": "text", "conf": "low", "note": "«возможно» група БПЛА на схід"}
+{"n": 144, "id": "vrv_radar/91828", "kind": "фіксація", "what": "БпЛА", "basis": "own_before", "conf": "high", "note": "за 5 хв робота ППО по БПЛА над Майкопом"}
+{"n": 145, "id": "lpr1_treugolnik/274741", "kind": "фіксація", "what": "БпЛА", "basis": "text", "conf": "high", "note": "розвідувальний «Шарк» над Корочею"}
+{"n": 146, "id": "locatorru/84630", "kind": "фіксація", "what": "БпЛА", "basis": "text", "conf": "high", "note": "група БПЛА з північного заходу курсом на Матвеев Курган"}
+{"n": 147, "id": "lpr1_treugolnik/276393", "kind": "фіксація", "what": "БпЛА", "basis": "text", "conf": "high", "note": "висока активність БПЛА на трасі біля Осипенко"}
+{"n": 148, "id": "locatorru/85824", "kind": "вибух", "what": "артилерія/РСЗО", "basis": "text", "conf": "high", "note": "обстріл Принцевки, поруч БПЛА-коригувальник"}
+{"n": 149, "id": "locatorru/82736", "kind": "фіксація", "what": "БпЛА", "basis": "text", "conf": "high", "note": "активність БПЛА противника в Шебекино зараз"}

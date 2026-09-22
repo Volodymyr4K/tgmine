@@ -42,9 +42,11 @@ def main(out=None):
     GC.geocode_posts(posts, gaz, cfg.geo, aliases=cfg.geo_aliases,
                      region_a1=gaz.region_codes(cfg.entities.get("регіон", {}), cfg.geo))
     st = ST.Store.__new__(ST.Store)
+    evs = [st._event(p, cfg) for p in posts]
+    if hasattr(ST, "context_kinds"):
+        ST.context_kinds(evs)
     rows = []
-    for p in posts:
-        ev = st._event(p, cfg)
+    for p, ev in zip(posts, evs):
         k = ev["kind"]
         best = (ST.launch_origin(p) if k == "пуск" else None) or ST.point_entity(p)
         span = None

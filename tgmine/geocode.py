@@ -764,6 +764,119 @@ _ANY_ADJ = re.compile(r"(?:ый|ий|ой|ая|яя|ое|ее|ого|его|ом
 # «города Тюмени» — усе цілі.
 _DIR_BEFORE_ANY = re.compile(
     r"(?:в\s+направлени\w*|в\s+сторону|курс\w*\s+на|далее\s+на|\bна)\s+$", re.I)
+# Область поста — не обовʼязково перша названа (BACKLOG §7). «Скородное
+# Губкинский ГО фиксации БПЛА на Губкин, и далее возможно на Воронежскую
+# область. / Белгородская область» — перша тут ціль, а своя стоїть рядком
+# підпису. Перша область-ціль бралась і міткою події, і контекстом пошуку НП,
+# тож село шукалось біля чужого центру.
+#
+# Слова руху: після будь-якого з них до кінця рядка йде ціль, джерело чи
+# маршрут, а не місце. Граматичний ланцюг («прийменник і далі перелік»)
+# пробувався й рвався на кожному новому звороті: «и далее Смоленская
+# область», «по стыкам Смоленской», «Херсонской области РФ и Крыма».
+_MOVE_WORD = re.compile(
+    r"в\s+направлени|в\s+сторону|\bдалее\b|\bдальше\b|\bкурс|\bна\s|\bот\s|"
+    r"\bиз\s|\bиз-под|со\s+стороны|\bчерез\b|\bстык|\bобход|\bвдоль\b|\bк\s", re.I)
+# Рядок підпису: лише назви областей і родові слова («Белгородская область»,
+# «Запорожская - Херсонская область РФ», «ЛНР»). Підпис — саме НАЗВА області,
+# а не місто-маркер сам у рядку («… в направлении Мариуполь / Новоазовск /
+# Таганрог» — Таганрог ціль); «ЛДНР» — дві області разом, підписом не є.
+_LABEL_WORDS = re.compile(r"област\w*|обл\.?|кра[йяюе]\w*|республик\w*|\bРФ\b|\bАР\b|"
+                          r"[\s,;\-–—/.:!()🔻]+", re.I)
+# Попередній рядок обірвано на напрямку: kupolrussia пише «от Брянской
+# области в направлении / Смоленская область», і наступний рядок — ціль.
+# Так само, коли рядок закінчується ціллю в називному без розділового знака:
+# «в направлении Калужская область / Смоленская область / Тульская область».
+_DIR_DANGLING = re.compile(
+    r"(?:в\s+направлени\w*|в\s+сторону|\bна|\bдалее(?:\s+на)?)"
+    r"(?:\s+[А-ЯЁ][а-яё\-]+(?:ая|ий|ое)\s+(?:область|край|район))?\s*:?\s*$"
+    # і рядок, що обривається комою: «И далее на Геническ, Арбатскую Стрелку,»
+    r"|,\s*$", re.I)
+_REGION_WORD = re.compile(r"област|\bобл\b|\bкра[йяюе]|республик", re.I)
+_ABBR = re.compile(r"(?:ЛНР|ДНР)")
+# Непрямий відмінок назви: підпис пишуть у називному («Белгородская область»),
+# «Курской области» в окремому рядку — хвіст переліку.
+_OBLIQUE = re.compile(r"(?:ой|ей|ого|его|ому|ему|ом|ую|юю)$", re.I)
+
+
+def _line_at(text: str, start: int) -> str:
+    end = text.find("\n", start)
+    return text[start:end if end >= 0 else len(text)]
+
+
+def _is_label(text: str, start: int, regs: list[dict]) -> bool:
+    """Рядок — лише назви областей і родові слова."""
+    line = _line_at(text, start)
+    rest = line
+    for x in regs:
+        if x.get("pos") is not None and start <= x["pos"] < start + len(line):
+            rest = rest.replace(str(x.get("match") or ""), " ")
+    return rest != line and not _LABEL_WORDS.sub("", rest)
+
+
+def _continues(text: str, start: int, regs: list[dict]) -> bool:
+    """Рядок продовжує напрямок, обірваний вище: «в направлении / Тульская
+    область / Калужская область и далее / Московская область» — усі три цілі."""
+    while start > 0:
+        pstart = text.rfind("\n", 0, start - 1) + 1
+        prev = text[pstart:start - 1]
+        if _DIR_DANGLING.search(prev):
+            return True
+        if not (_is_label(text, pstart, regs) or not re.search(r"\w", prev)):
+            return False
+        start = pstart
+    return False
+
+
+def home_region(p: dict) -> str | None:
+    """Область поста: перша названа, що стоїть МІСЦЕМ, а не ціллю руху.
+
+    Місце — назва в першому рядку до будь-якого слова руху, або в іншому
+    рядку без слова руху, не в непрямому відмінку й не продовженням
+    обірваного вище напрямку. Якщо перше таке місце — рядок підпису («/
+    Белгородская область»), мітка його; якщо ні — лишається перша названа.
+
+    Якщо місця нема, лишається перша названа, як було: «Трубчевск и далее в
+    направлении Брянск» — напрямок указує на ту саму область, і інша мітка
+    була б вигадкою (заміряно в `store.point_entity`: так у 361 зі 422).
+    """
+    regs = sorted((e for e in p.get("entities", []) if e.get("type") == "регіон"),
+                  key=lambda e: e.get("pos") or 0)
+    if not regs:
+        return None
+    text = p.get("text") or ""
+    for e in regs:
+        pos = e.get("pos")
+        if pos is None:
+            break
+        word = str(e.get("match") or "").split()
+        # «Ульяновский район» у Калузькій — прикметник району, який маркер
+        # області зловив як свою ознаку; місцем області він не є.
+        if DISTRICT_AFTER.match(text[pos + len(str(e.get("match") or "")):]):
+            continue
+        start = text.rfind("\n", 0, pos) + 1
+        line = text[start:pos]
+        # «От X» на початку теж слово руху: пробувався виняток «перший рядок —
+        # місце», і з 11 постів, де він щось міняв, у 8 перший топонім був
+        # чужим тезкою («От Орловское … / Республика Крым», «От Казантипа»).
+        if start == 0:
+            if not _MOVE_WORD.search(line):
+                return e["value"]
+            continue
+        if (_MOVE_WORD.search(line) or (word and _OBLIQUE.search(word[0]))
+                or _continues(text, start, regs)):
+            continue
+        # Перша область, що стоїть місцем. Рядок підпису — беремо; будь-що
+        # інше («Керчь», «Смоленская область, Калужская область — опасность»)
+        # означає, що пост уже має свою географію або перелічує загрозу, і
+        # підпис нижче може стосуватись іншого блоку («Керчь … / Тамань … /
+        # Краснодарский край»). Тоді лишається перша названа.
+        label = _is_label(text, start, regs) and (
+            _REGION_WORD.search(_line_at(text, start)) or (word and _ABBR.fullmatch(word[0])))
+        return e["value"] if label else regs[0]["value"]
+    return regs[0]["value"]
+
+
 _PLACE_BEFORE_MARKER = re.compile(
     r"(?:(?:^|\n)\s*|\b(?:от|из-под|из|со\s+стороны|у|возле|около|недалеко\s+от|"
     r"в\s+районе|район[еа]?|севернее|южнее|западнее|восточнее)\s+(?:г\.\s*)?)$", re.I)
@@ -935,8 +1048,13 @@ def geocode_posts(posts: list[dict], gaz: Gazetteer, region_geo: dict,
     for p in posts:
         regions = [e["value"] for e in p.get("entities", [])
                    if e["type"] == "регіон" and e["value"] in region_geo]
+        # Область поста — `home_region`, а не перша названа: та сама, яку
+        # store.py бере міткою `region` (BACKLOG §7).
+        home = home_region(p)
+        if home in regions:
+            regions.remove(home)
+            regions.insert(0, home)
         near = region_geo[regions[0]] if regions else None
-        # код області з ПЕРШОЇ згаданої: саме її бере store.py як region
         a1 = (region_a1 or {}).get(regions[0]) if regions else None
         consensus = None
         if near is None:

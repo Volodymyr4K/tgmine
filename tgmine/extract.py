@@ -162,12 +162,23 @@ def entities_of(text: str, cfg: Config) -> list[dict]:
                     continue          # це джерело, не ціль
                 lo = max((e for e in spans if e <= m.start()), default=0)
                 mod = _modifier(seg, m, lo, cfg)
-                key = (etype, value, mod)
+                # Ключ — з САМИМ збігом, а не лише зі значенням. Інакше з поста
+                # лишався тільки перший збіг області, і місто-маркер після
+                # назви області губилось: «Республика Крым / Севастополь»,
+                # «Курская область / Курск» падали на центр області (BACKLOG §7).
+                # Повторний збіг — `extra`: місцем він буває лише тоді, коли
+                # іншого нема (див. store.point_entity).
+                key = (etype, value, mod, m.group(0).lower())
                 if key in seen:
                     continue
+                extra = (etype, value, mod) in seen
                 seen.add(key)
-                out.append({"type": etype, "value": value, "match": m.group(0),
-                            "modifier": mod, "pos": m.start()})
+                seen.add((etype, value, mod))
+                ent = {"type": etype, "value": value, "match": m.group(0),
+                       "modifier": mod, "pos": m.start()}
+                if extra:
+                    ent["extra"] = True
+                out.append(ent)
     return sorted(out, key=lambda e: e["pos"])
 
 

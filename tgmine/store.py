@@ -50,7 +50,9 @@ MSK = timezone(timedelta(hours=3))
 #     реактивным БПЛА» — БпЛА); «копии Герань» — не «Шахед».
 # 20: `area` — крапка є площею (район); геокод 21 вересня 2026 (BACKLOG §15).
 # 21: `aim` — пост назвав лише ціль руху («в направлении X»), крапка на ній.
-PIPELINE_VERSION = 21
+# 22: `region` — своя область поста (`geocode.home_region`), а не перша
+#     названа; повторний збіг області — запасне місце (BACKLOG §7).
+PIPELINE_VERSION = 22
 
 # Курс, названий словами. 2040 точкових подій (5.6%) кажуть «пролёт БПЛА на
 # северо-восток» або «с юго-запада фиксации», і досі ці слова викидались, а
@@ -755,6 +757,14 @@ def point_entity(p):
     """
     pts = [e for e in p.get("entities", [])
            if "lat" in e and e.get("geo_conf") != "centroid"]
+    # Повторний збіг області (`extra`, BACKLOG §7) — лише запасне місце. Далі
+    # в пості він здебільшого ціль чи перелік під загрозою: «Лобановка,
+    # Климовский район … могут пройти через Клинцы», «/ Котовск, Тамбов —
+    # внимание». За населенням такий маркер перебивав село з першого рядка
+    # (126 регресів арбітра «названий район»). Рятує він лише пости, що
+    # інакше падали на центр області: «Саратовская область / Энгельс».
+    if any(not e.get("extra") for e in pts):
+        pts = [e for e in pts if not e.get("extra")]
 
     def before(e):
         return p["text"][max(0, e.get("pos", 0) - 24):e.get("pos", 0)]
@@ -798,8 +808,10 @@ def point_entity(p):
         # «Курская — в сторону Орла» не має ставати крапкою в Орлі (третя
         # рецензія 21 вересня 2026, 7 подій). Чи ставити ціль крапкою взагалі —
         # окреме рішення оператора (BACKLOG §15.4).
-        area = next((e for e in p.get("entities", []) if e["type"] == "регіон"
-                     and e.get("geo_conf") == "centroid" and "lat" in e), None)
+        home = GC.home_region(p)
+        areas = [e for e in p.get("entities", []) if e["type"] == "регіон"
+                 and e.get("geo_conf") == "centroid" and "lat" in e]
+        area = next((e for e in areas if e["value"] == home), None) or next(iter(areas), None)
         if area is not None and all(e.get("geo_morph") or not e.get("geo_in_region", True)
                                     for e in pts):
             return area
@@ -1030,8 +1042,9 @@ class Store:
             # пост про цілий субʼєкт, якого нема в конфізі («Республика
             # Чувашия», «Республика Адыгея» — 1321 пост у вікні сховища),
             # лишився б узагалі без координат.
-            best = next((e for e in p.get("entities", [])
-                         if e["type"] == "регіон" and "lat" in e), None)
+            home = GC.home_region(p)
+            regs = [e for e in p.get("entities", []) if e["type"] == "регіон" and "lat" in e]
+            best = next((e for e in regs if e["value"] == home), None) or next(iter(regs), None)
         if best is None:
             best = next((e for e in p.get("entities", []) if "lat" in e), None)
         # Реклама й збори. Раніше умовою було «після чистки не лишилось нічого
@@ -1051,8 +1064,9 @@ class Store:
         noise = dropped > 0 and (len(clean) < 25 or k == "інше")
         m = drones_of(clean)
         ty = utype_of(clean)
-        region = next((e["value"] for e in p.get("entities", [])
-                       if e["type"] == "регіон"), None)
+        # Не перша названа, а своя: перша часто ціль («… далее на Воронежскую
+        # область. / Белгородская область»), BACKLOG §7.
+        region = GC.home_region(p)
         lat = best["lat"] if best else None
         lon = best["lon"] if best else None
         # Санітарна перевірка: НП не може бути за 1000 км від власної області.

@@ -620,9 +620,23 @@ def with_bridges(raid, rs):
             legs.append("bridge")
             pts += rs[b]["pts"]
             legs += list(rs[b].get("legs") or [])
+        # Поля цілого маршруту — з УСІХ фрагментів, а не з першого: перша
+        # версія брала `conf` і тип першого, і в 22 із 65 ланцюгів пʼяти ночей
+        # сильний фрагмент ховався фільтром «без слабких», бо першим стояв
+        # слабкий. Упевненість — найсильніша (підказку не ховаємо, якщо в ній
+        # є сильна частина; ланки зберігають свій вигляд), тип — перша
+        # названа модель, бо `LK.compatible` не пускає двох різних.
+        parts = [rs[k] for k in ch]
+        typed = next((r for r in parts if r.get("u") not in LK.GENERIC_U),
+                     next((r for r in parts if r.get("u")), first))
         m.update(pts=pts, legs=legs, bridges=bridges, t1=last.get("t1"), n=len(pts),
-                 km=sum(rs[k].get("km") or 0 for k in ch),
-                 claims=max(rs[k].get("claims") or 1 for k in ch))
+                 km=sum(r.get("km") or 0 for r in parts),
+                 claims=max(r.get("claims") or 1 for r in parts),
+                 conf=max((r.get("conf") or "ok" for r in parts),
+                          key={"weak": 0, "ok": 1, "strong": 2}.get),
+                 u=typed.get("u"), k=typed.get("k", first.get("k")),
+                 extended=any(r.get("extended") for r in parts),
+                 hours=round(sum(r.get("hours") or 0 for r in parts), 1), kmh=None)
         out.append(m)
     return out
 

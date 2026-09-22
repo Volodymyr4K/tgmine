@@ -355,3 +355,27 @@ class TestTowardRegions(unittest.TestCase):
             ["Tokarevskiy", 51.9, 41.2, False, "Рязанська", 54.4, 40.6, True]]}
         r = {"events": [ev], "_uk": type("N", (), {"place": lambda self, n, a, b: n})()}
         self.assertEqual([x["place"] for x in self.mk.toward_regions(r)], ["Tokarevskiy"])
+
+
+class TestBridgedRouteFields(unittest.TestCase):
+    """Зведений містком маршрут бере поля з УСІХ фрагментів."""
+
+    def test_strongest_conf_and_named_type_win(self):
+        mk = load_script("mapper/mknight.py")
+        from tgmine import linker as LK
+        old = LK.link_corridors
+        LK.link_corridors = lambda rs, prior: [(0, 1, 5)]
+        try:
+            pt = lambda la, t: {"la": la, "lo": 40.0, "hhmm": t}
+            rs = [{"pts": [pt(49.0, "22:00"), pt(50.0, "23:00")], "legs": ["seen"],
+                   "conf": "weak", "u": "БпЛА", "k": "БПЛА", "km": 111, "t1": "23:00"},
+                  {"pts": [pt(51.0, "23:40"), pt(52.0, "00:30")], "legs": ["seen"],
+                   "conf": "strong", "u": "Дартс", "k": "БПЛА", "km": 111, "t1": "00:30"}]
+            out = mk.with_bridges({"date": "2026-09-21"}, rs)
+        finally:
+            LK.link_corridors = old
+        self.assertEqual(len(out), 1)
+        m = out[0]
+        self.assertEqual((m["conf"], m["u"], m["t1"]), ("strong", "Дартс", "00:30"))
+        self.assertEqual(m["legs"], ["seen", "bridge", "seen"])
+        self.assertEqual(m["bridges"], [{"at": 1, "nights": 5}])

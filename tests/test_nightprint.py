@@ -119,6 +119,17 @@ class TestSensitivity(unittest.TestCase):
             (self.root / "store" / "events" / f"{d}.jsonl").write_text("changed")
         self.assertEqual(self.fp(), base)
 
+    def test_corridor_memory_before_the_night_changes_the_print(self):
+        """Містки ночі спираються на ВСЮ історію до неї (`linker.Prior`):
+        нова ланка в давнішому дні мусить перебудувати ніч, а зміна того
+        дня без ланок — ні."""
+        base = self.fp()
+        f = self.root / "store" / "events" / "2026-09-09.jsonl"
+        f.write_text('{"id": 1, "legs": []}\n')
+        self.assertEqual(self.fp(), base)
+        f.write_text('{"id": 1, "legs": [["A", 50.0, 40.0, false, "C", 51.0, 41.0, false]]}\n')
+        self.assertNotEqual(self.fp(), base)
+
     def test_every_code_and_data_input_changes_the_print(self):
         base = self.fp()
         for pat in NP.CODE + NP.DATA:

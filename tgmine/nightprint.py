@@ -85,13 +85,47 @@ def code_print(root: Path) -> str:
     return h.hexdigest()
 
 
+def prior_print(root: Path, day: str) -> str:
+    """Відбиток памʼяті коридорів ночі `day` (`linker.Prior`): пари клітинок
+    усіх днів СУВОРО до неї.
+
+    Містки ночі залежать не лише від її вікна, а від усієї історії до неї.
+    Без цього відбиток лишав би ніч старою, коли змінився давніший день, і
+    повна перебудова давала б інше, ніж накопичений кеш. Береться саме набір
+    пар, а не байти файлів: пізній пост без нової ланки ночей не перебудовує."""
+    from . import linker
+    days = linker.day_counts(root / "store")
+    if _PRIOR.get("days") is not days:
+        # Накопичувальний хеш по днях — один прохід на прогін, а не на ніч
+        # (158 ночей × 158 днів коштували 1.3 с щогодини).
+        acc, h = {}, hashlib.sha256()
+        for d, c in sorted(days.items()):
+            acc[d] = h.copy().hexdigest()          # усе СУВОРО до d
+            h.update(f"{d}\0{sorted(c)!r}\n".encode())
+        _PRIOR.clear()
+        _PRIOR.update(days=days, acc=acc)
+    if day in _PRIOR["acc"]:
+        return _PRIOR["acc"][day]
+    # Ночі без власного файлу сховища: усе, що раніше за неї.
+    h = hashlib.sha256()
+    for d, c in sorted(days.items()):
+        if d >= day:
+            break
+        h.update(f"{d}\0{sorted(c)!r}\n".encode())
+    return h.hexdigest()
+
+
+_PRIOR: dict = {}
+
+
 def night_print(root: Path, day: str, code: str) -> str:
-    """Відбиток однієї ночі: код + файли сховища її вікна."""
+    """Відбиток однієї ночі: код + файли сховища її вікна + памʼять коридорів."""
     d0 = date.fromisoformat(day)
     h = hashlib.sha256(code.encode())
     for k in WINDOW:
         d = (d0 + timedelta(days=k)).isoformat()
         h.update(f"{d}\0{_file_hash(root / 'store' / 'events' / f'{d}.jsonl')}\n".encode())
+    h.update(f"prior\0{prior_print(root, day)}\n".encode())
     return h.hexdigest()
 
 

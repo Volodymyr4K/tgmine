@@ -27,7 +27,7 @@ DT_MIN, DT_MAX = 10, 180  # хв між кінцем A й початком B
 V_NOM = 160.0
 D_MIN, D_MAX = 5.0, 350.0
 
-_DAYS: dict | None = None
+_DAYS: dict = {}
 
 
 def cell(la, lo):
@@ -37,14 +37,23 @@ def cell(la, lo):
 def day_counts(root="store") -> dict:
     """{день: Counter[(клітинка A, клітинка B)]} — унікальні за день ланки
     «місце -> місце» з поля `legs` (кінці не площі), без дублів і шуму.
-    Рахується раз на процес."""
-    global _DAYS
-    if _DAYS is None:
+
+    Памʼять процесу — за станом файлів (імʼя, mtime, розмір): відбиток ночей
+    (`nightprint`) рахує її в батьківському процесі, і воркери збірки ночей
+    дістають уже готову через fork, а змінений файл читається наново."""
+    evd = Path(root, "events")
+    files = sorted(evd.glob("*.jsonl"))
+    key = (str(evd.resolve()),
+           tuple((f.name, f.stat().st_mtime_ns, f.stat().st_size) for f in files))
+    if key not in _DAYS:
+        _DAYS.clear()
         out = {}
-        for f in sorted(Path(root, "events").glob("*.jsonl")):
+        for f in files:
             pairs = set()
             for line in f.read_text(encoding="utf-8").splitlines():
-                if not line.strip():
+                # Ланки має ~10% подій; розбирати JSON решти — 1.8 с із 2.3
+                # на кожен процес збірки ночей (замір 22.09.2026).
+                if '"legs": [[' not in line and '"legs":[[' not in line:
                     continue
                 e = json.loads(line)
                 if e.get("dup_of") or e.get("noise"):
@@ -53,31 +62,39 @@ def day_counts(root="store") -> dict:
                     if not g[3] and not g[7]:
                         pairs.add((cell(g[1], g[2]), cell(g[5], g[6])))
             out[f.stem] = collections.Counter(pairs)
-        _DAYS = out
-    return _DAYS
+        _DAYS[key] = out
+    return _DAYS[key]
 
 
 class Prior:
     """Памʼять коридорів з днів СУВОРО до `day`.
 
-    `trans` — у скількох днях траплялась пара клітинок (лічильники днів
-    унікальні, тож це саме «ночей», а не повідомлень)."""
+    `days[пара клітинок]` — бітова маска днів, у які пара траплялась."""
 
     def __init__(self, day, root="store"):
-        self.trans = collections.Counter()
-        for d, c in day_counts(root).items():
+        self.days = {}
+        for k, (d, c) in enumerate(sorted(day_counts(root).items())):
             if d < day:
-                self.trans.update(c)
+                for pair in c:
+                    self.days[pair] = self.days.get(pair, 0) | (1 << k)
 
     def nights(self, a, c):
-        """Скільки разів у попередніх ночах був коридор із клітинки `a` (чи
+        """У скількох РІЗНИХ попередніх ночах був коридор із клітинки `a` (чи
         сусідньої) у клітинку `c` (чи сусідню). Сусідні — з обох боків: кінці
         маршрутів — села поруч із місцями заявлених ланок, і точна клітинка
-        0.5° відсікала 3/4 пар (перевірка 22.09.2026)."""
+        0.5° відсікала 3/4 пар (перевірка 22.09.2026).
+
+        Саме різних ночей: перша версія СУМУВАЛА лічильники 81 пари сусідніх
+        клітинок, і місток підписувався «звичний коридор · 224 ноч.», коли
+        попередніх ночей у сховищі було 156."""
         ca, cc = cell(*a), cell(*c)
-        return sum(self.trans[((ca[0] + ax, ca[1] + ay), (cc[0] + dx, cc[1] + dy))]
-                   for ax in (-1, 0, 1) for ay in (-1, 0, 1)
-                   for dx in (-1, 0, 1) for dy in (-1, 0, 1))
+        m = 0
+        for ax in (-1, 0, 1):
+            for ay in (-1, 0, 1):
+                for dx in (-1, 0, 1):
+                    for dy in (-1, 0, 1):
+                        m |= self.days.get(((ca[0] + ax, ca[1] + ay), (cc[0] + dx, cc[1] + dy)), 0)
+        return bin(m).count("1")
 
 
 def _mins(hhmm):
@@ -115,6 +132,21 @@ CV_MIN, CV_MAX = 80.0, 230.0
 BRIDGE_MAX_KM = 200.0
 
 
+#: Тип без моделі — «який завгодно»: оператор просив фолбекати до БпЛА,
+#: тож фрагмент без типу чи з голим «БпЛА» звʼязується з будь-яким дроном.
+GENERIC_U = (None, "", "БпЛА")
+
+
+def compatible(a, b):
+    """Чи може місток звʼязати маршрути a і b за типом засобу: той самий клас
+    (`k`: БпЛА / ракета) і не дві РІЗНІ моделі. Без цього «ракета» лягала б
+    містком на дрон (перевірка 22.09.2026)."""
+    if a.get("k") and b.get("k") and a["k"] != b["k"]:
+        return False
+    ua, ub = a.get("u"), b.get("u")
+    return ua in GENERIC_U or ub in GENERIC_U or ua == ub
+
+
 def link_corridors(routes, prior: Prior):
     """[(i, j, ночей)] — кінець маршруту i продовжено початком маршруту j
     ЗВИЧНИМ КОРИДОРОМ (рішення оператора 22.09.2026, BACKLOG §16.13).
@@ -137,7 +169,7 @@ def link_corridors(routes, prior: Prior):
     props = []
     for i, a, ta in ends:
         for j, c, tc in starts:
-            if j == i:
+            if j == i or not compatible(routes[i], routes[j]):
                 continue
             dt = tc - ta
             if not (DT_MIN <= dt <= DT_MAX):

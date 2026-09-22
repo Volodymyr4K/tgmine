@@ -6922,7 +6922,10 @@ function sightToMark(s){
   const CAT={'ППО':'ppo','збиття':'downed','влучання':'impact',
              'вибух':'boom','пуск':'launch','фіксація':'fix'};
   const kind=sightTop(s);
-  const u=topU(s.types);
+  // Тип не названо — БпЛА, а не тип, що зараз вибрано в панелі: ракет і
+  // реактивних за ніч одиниці, і небезпека, привʼязана до руху
+  // (mknight._linked_alerts), — це дрони (рішення оператора 22.09.2026).
+  const u=topU(s.types)||'БпЛА';
   return {kind:'impact',cat:CAT[kind]||'fix',type:typeForU(u).id,u:u,sight:true,
           origin:'night:'+((window.NIGHT&&window.NIGHT.date)||''),
           la:s.la,lo:s.lo,src:uniqSrc(s.src),n:Math.max(1,s.n||1),

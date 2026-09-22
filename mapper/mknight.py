@@ -11,9 +11,11 @@
 """
 import collections
 import json
+import math
 import os
 import re
 import sys
+from datetime import datetime
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
@@ -121,6 +123,50 @@ AREA_NAME = re.compile(r"\b(?:rayon|raion|district|okrug|oblast|miskrada|hromada
                        r"округ|район|\bГО\b", re.I)
 
 
+#: Тривога в названому місці — свідчення, коли вона звʼязана з рухом.
+#: Заміряно на 61 добі (18 214 тривог із місцем, не центр області):
+#: справжня фіксація в межах 20 км і ±30 хв є у 23%, а при зсуві часу на
+#: 6 год — у 3.9%, тобто ~17% таких звʼязків випадкові. Ширші пороги
+#: (30 км/45 хв — 23% випадкових, 40/60 — 29%) тягнуть шум.
+ALERT_LINK_KM, ALERT_LINK_MIN = 20.0, 30.0
+_MOVE = re.compile(r"направлени|в\s+сторону|далее|курсом|\bна\s+(?:север|юг|запад|восток)", re.I)
+
+
+def _linked_alerts(events):
+    """id() тривог, що йдуть у шар свідчень: місце — НП чи район (не центр
+    області), і або сам пост каже, куди летить («Выгоничский район в
+    направлении Брянск опасность»), або поруч у часі й просторі є справжнє
+    спостереження. Рішення оператора 22.09.2026: небезпеку не виносити
+    окремою позначкою, а звʼязувати з картиною дронів — у редакторі вона
+    стає тією ж «фіксацією», тип за замовчуванням БпЛА."""
+    obs = [e for e in events if e.get("scope") == "точка" and e.get("lat") and e.get("t")
+           and e.get("kind") in ("фіксація", "ППО", "збиття", "вибух")
+           and e.get("geo_conf") not in ("centroid", "region-snap")]
+    for o in obs:
+        o["_dt"] = datetime.fromisoformat(o["t"])
+    out = set()
+    for e in events:
+        if e.get("kind") != "тривога" or not e.get("lat") or e.get("aim"):
+            continue
+        if e.get("geo_conf") in ("centroid", "region-snap", None):
+            continue
+        if _MOVE.search(e.get("text") or ""):
+            out.add(id(e))
+            continue
+        if not e.get("t"):
+            continue
+        t = datetime.fromisoformat(e["t"])
+        k = math.cos(math.radians(e["lat"]))
+        for o in obs:
+            if abs((o["_dt"] - t).total_seconds()) <= ALERT_LINK_MIN * 60 and \
+                    111.2 * math.hypot(o["lat"] - e["lat"], (o["lon"] - e["lon"]) * k) <= ALERT_LINK_KM:
+                out.add(id(e))
+                break
+    for o in obs:
+        o.pop("_dt", None)
+    return out
+
+
 def sightings(raid):
     """Усі фіксації ночі, згорнуті по місцю — шар свідчень для оператора.
 
@@ -138,10 +184,12 @@ def sightings(raid):
     кільцем, а не крапкою.
     """
     by = {}
+    linked = _linked_alerts(raid["events"])
     for e in raid["events"]:
-        if e.get("scope") != "точка" or not e.get("lat"):
+        if not e.get("lat"):
             continue
-        if e.get("kind") not in ("фіксація", "пуск", "ППО", "збиття", "вибух"):
+        if id(e) not in linked and (e.get("scope") != "точка" or e.get("kind") not in (
+                "фіксація", "пуск", "ППО", "збиття", "вибух")):
             continue
         # Центр області крапкою бреше, тож такі місця сюди не йдуть — КРІМ
         # пуску. Пуск стоїть на джерелі, і найчастіше джерело — ціла область:

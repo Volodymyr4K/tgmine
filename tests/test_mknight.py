@@ -206,3 +206,39 @@ class TestLabelsUk(unittest.TestCase):
         """Аліас «Бельбек» транслітом ставав порожнім підписом."""
         from mapper.labels import uk
         self.assertEqual(uk("Бельбек"), "Бельбек")
+
+
+class TestLinkedAlerts(unittest.TestCase):
+    """Тривога в місці йде у свідчення, лише коли звʼязана з рухом."""
+
+    @classmethod
+    def setUpClass(cls):
+        global MK
+        MK = load_script("mapper/mknight.py")
+
+    def _ev(self, kind, text, lat, lon, t, scope="область", conf="region"):
+        return {"kind": kind, "text": text, "lat": lat, "lon": lon, "t": t,
+                "scope": scope, "geo_conf": conf, "hhmm": t[11:16], "place": "X",
+                "url": "u", "aim": False}
+
+    def test_declared_movement_links(self):
+        e = self._ev("тривога", "Кромы и далее на Орёл тревога по БПЛА", 52.69, 35.79,
+                     "2026-07-28T01:04:00+03:00")
+        self.assertIn(id(e), MK._linked_alerts([e]))
+
+    def test_nearby_observation_links_far_one_does_not(self):
+        fix = self._ev("фіксація", "Азов / фиксация", 47.10, 39.42,
+                       "2026-07-28T04:10:00+03:00", scope="точка")
+        near = self._ev("тривога", "Азов - опасность по БПЛА", 47.11, 39.43,
+                        "2026-07-28T04:17:00+03:00")
+        late = self._ev("тривога", "Азов - опасность по БПЛА", 47.11, 39.43,
+                        "2026-07-28T06:17:00+03:00")
+        far = self._ev("тривога", "Сальск - опасность по БПЛА", 46.47, 41.54,
+                       "2026-07-28T04:17:00+03:00")
+        got = MK._linked_alerts([fix, near, late, far])
+        self.assertEqual(got, {id(near)})
+
+    def test_region_centre_never_links(self):
+        e = self._ev("тривога", "Курская область, далее на Орёл", 51.7, 36.2,
+                     "2026-07-28T01:04:00+03:00", conf="centroid")
+        self.assertEqual(MK._linked_alerts([e]), set())

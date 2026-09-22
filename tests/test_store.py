@@ -1437,3 +1437,65 @@ class TestReplyInheritsParentPlace(unittest.TestCase):
         got = [e["value"] for e in rep["entities"] if e.get("inherited")]
         # лише джерело: область-ціль батька не успадковується
         self.assertEqual(got, ["Дніпропетровська"])
+
+
+class TestMovingWordInSentence(unittest.TestCase):
+    """Слово руху раніше в реченні — ціль, навіть не впритул (§16.2)."""
+
+    def _post(self, text, names):
+        ents = []
+        for n, lat, lon, pop in names:
+            ents.append({"type": "нп", "value": n, "match": n, "pos": text.index(n),
+                         "lat": lat, "lon": lon, "geo_pop": pop, "geo_conf": "region"})
+        return {"text": text, "entities": ents}
+
+    def test_bare_na_after_from_is_target(self):
+        p = self._post("От Вилино на Бахчисарай фиксация БПЛА",
+                       [("Вилино", 44.85, 33.63, 1500), ("Бахчисарай", 44.75, 33.86, 27000)])
+        self.assertEqual(ST.point_entity(p)["value"], "Вилино")
+
+    def test_flight_na_is_target(self):
+        p = self._post("Новая Мельница - пролёт БПЛА на Острогожск.",
+                       [("Новая Мельница", 50.93, 39.1, 300), ("Острогожск", 50.86, 39.08, 33000)])
+        self.assertEqual(ST.point_entity(p)["value"], "Новая Мельница")
+
+    def test_city_abbreviation_does_not_end_sentence(self):
+        t = "Нижний Поселок - пролёты далее на г.Ярославль."
+        self.assertTrue(ST._moving_to(t, t.index("Ярославль")))
+
+    def test_territory_is_not_movement(self):
+        t = "БЕСПИЛОТНАЯ ОПАСНОСТЬ на территории муниципальных образований: г. Анапа"
+        self.assertFalse(ST._moving_to(t, t.index("Анапа")))
+
+    def test_line_under_dangling_direction_is_target(self):
+        t = "Вилино\nТревога по БПЛА\nИ далее в направлении\nБахчисарай"
+        self.assertTrue(ST._moving_to(t, t.index("Бахчисарай")))
+        self.assertFalse(ST._moving_to(t, t.index("Вилино")))
+
+
+class TestAlsoPlaces(unittest.TestCase):
+    def _post(self, text, names, area=()):
+        ents = []
+        for n, lat, lon in names:
+            ents.append({"type": "нп", "value": n, "match": n, "pos": text.index(n),
+                         "lat": lat, "lon": lon, "geo_pop": 1000, "geo_conf": "region",
+                         "geo_area": n in area})
+        return {"text": text, "entities": ents}
+
+    def test_list_gives_other_places(self):
+        p = self._post("Шацк, Сасово, Касимов - опасность по БПЛА",
+                       [("Шацк", 54.02, 41.7), ("Сасово", 54.35, 41.92), ("Касимов", 54.94, 41.39)])
+        got = [e["value"] for e in ST.also_places(p, p["entities"][0])]
+        self.assertEqual(got, ["Сасово", "Касимов"])
+
+    def test_district_after_place_is_a_label(self):
+        p = self._post("Клименково, Ровеньский район - пролёты БПЛА",
+                       [("Клименково", 50.05, 38.9), ("Ровеньский", 49.9, 38.88)], area=("Ровеньский",))
+        # у самого Клименкового крапка; район — підпис, навіть якщо далі 40 км
+        p["entities"][1]["lat"] = 49.5
+        self.assertEqual(ST.also_places(p, p["entities"][0]), [])
+
+    def test_launch_post_has_no_also(self):
+        p = self._post("Пуски самолётами от Коротич, Харьков",
+                       [("Коротич", 49.95, 36.03), ("Харьков", 49.99, 36.23)])
+        self.assertEqual(ST.also_places(p, p["entities"][0]), [])

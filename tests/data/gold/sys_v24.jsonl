@@ -1,7 +1,7 @@
 {"id": "https://t.me/kupolrussia/118354", "kind": "відбій", "scope": "область", "geo_conf": "centroid", "shown": false, "aim": false, "point": null, "point_text": null, "places": [], "legs": []}
 {"id": "https://t.me/kupolrussia/118687", "kind": "тривога", "scope": "область", "geo_conf": "centroid", "shown": false, "aim": false, "point": null, "point_text": null, "places": [], "legs": []}
 {"id": "https://t.me/kupolrussia/118788", "kind": "фіксація", "scope": "точка", "geo_conf": "region", "shown": true, "aim": false, "point": [0, 12], "point_text": "Новотроицкий", "places": [[0, 12], [20, 30]], "legs": [["Генический", "Азовского"]]}
-{"id": "https://t.me/kupolrussia/118789", "kind": "фіксація", "scope": "точка", "geo_conf": "consensus", "shown": true, "aim": false, "point": [43, 58], "point_text": "Красноперекопск", "places": [[43, 58], [0, 5]], "legs": [["Хорлы", "Армянск"]]}
+{"id": "https://t.me/kupolrussia/118789", "kind": "фіксація", "scope": "точка", "geo_conf": "alias", "shown": true, "aim": false, "point": [0, 5], "point_text": "Хорлы", "places": [[0, 5]], "legs": [["Хорлы", "Армянск"]]}
 {"id": "https://t.me/kupolrussia/119261", "kind": "тривога", "scope": "область", "geo_conf": "city-marker", "shown": false, "aim": false, "point": [0, 8], "point_text": "Горловка", "places": [], "legs": []}
 {"id": "https://t.me/kupolrussia/119577", "kind": "пуск", "scope": "область", "geo_conf": "centroid", "shown": false, "aim": false, "point": null, "point_text": null, "places": [], "legs": []}
 {"id": "https://t.me/kupolrussia/119694", "kind": "тривога", "scope": "область", "geo_conf": "centroid", "shown": false, "aim": false, "point": null, "point_text": null, "places": [], "legs": []}
@@ -54,7 +54,7 @@
 {"id": "https://t.me/locatorru/82273", "kind": "інше", "scope": "область", "geo_conf": "city-marker", "shown": false, "aim": false, "point": [14, 26], "point_text": "Невинномысск", "places": [], "legs": []}
 {"id": "https://t.me/locatorru/82348", "kind": "тривога", "scope": "область", "geo_conf": "centroid", "shown": false, "aim": false, "point": null, "point_text": null, "places": [], "legs": []}
 {"id": "https://t.me/locatorru/82416", "kind": "відбій", "scope": "область", "geo_conf": "centroid", "shown": false, "aim": false, "point": null, "point_text": null, "places": [], "legs": []}
-{"id": "https://t.me/locatorru/82439", "kind": "фіксація", "scope": "точка", "geo_conf": "region", "shown": true, "aim": false, "point": [0, 12], "point_text": "Алексеевский", "places": [[0, 12], [20, 30], [38, 47], [78, 90], [114, 125]], "legs": []}
+{"id": "https://t.me/locatorru/82439", "kind": "фіксація", "scope": "точка", "geo_conf": "region", "shown": true, "aim": false, "point": [0, 12], "point_text": "Алексеевский", "places": [[0, 12], [20, 30], [38, 47], [78, 90]], "legs": []}
 {"id": "https://t.me/locatorru/82490", "kind": "тривога", "scope": "область", "geo_conf": "centroid", "shown": false, "aim": false, "point": null, "point_text": null, "places": [], "legs": []}
 {"id": "https://t.me/locatorru/82515", "kind": "фіксація", "scope": "точка", "geo_conf": "region", "shown": true, "aim": false, "point": [0, 8], "point_text": "Чаплыгин", "places": [[0, 8]], "legs": []}
 {"id": "https://t.me/locatorru/82559", "kind": "інше", "scope": "область", "geo_conf": "centroid", "shown": false, "aim": false, "point": null, "point_text": null, "places": [], "legs": []}
@@ -62,7 +62,7 @@
 {"id": "https://t.me/locatorru/82610", "kind": "фіксація", "scope": "точка", "geo_conf": "centroid", "shown": false, "aim": false, "point": null, "point_text": null, "places": [], "legs": [["Харьковской", "Белгородской"]]}
 {"id": "https://t.me/locatorru/82618", "kind": "тривога", "scope": "область", "geo_conf": "region", "shown": false, "aim": false, "point": [8, 19], "point_text": "Новый Оскол", "places": [], "legs": []}
 {"id": "https://t.me/locatorru/82749", "kind": "фіксація", "scope": "точка", "geo_conf": "centroid", "shown": false, "aim": false, "point": null, "point_text": null, "places": [], "legs": []}
-{"id": "https://t.me/locatorru/82834", "kind": "фіксація", "scope": "точка", "geo_conf": "city-marker", "shown": true, "aim": false, "point": [0, 8], "point_text": "Троицкое", "places": [[0, 8], [10, 23]], "legs": [["Воронежская", "Борисоглебск"]]}
+{"id": "https://t.me/locatorru/82834", "kind": "фіксація", "scope": "точка", "geo_conf": "city-marker", "shown": true, "aim": false, "point": [0, 8], "point_text": "Троицкое", "places": [[0, 8]], "legs": [["Воронежская", "Борисоглебск"]]}
 {"id": "https://t.me/locatorru/82915", "kind": "збиття", "scope": "точка", "geo_conf": "centroid", "shown": false, "aim": false, "point": null, "point_text": null, "places": [], "legs": []}
 {"id": "https://t.me/locatorru/82944", "kind": "збиття", "scope": "точка", "geo_conf": "centroid", "shown": false, "aim": false, "point": null, "point_text": null, "places": [], "legs": []}
 {"id": "https://t.me/locatorru/83025", "kind": "інше", "scope": "область", "geo_conf": "region", "shown": false, "aim": false, "point": [0, 7], "point_text": "Жуковка", "places": [], "legs": []}
@@ -100,7 +100,7 @@
 {"id": "https://t.me/locatorru/84589", "kind": "збиття", "scope": "точка", "geo_conf": "centroid", "shown": false, "aim": false, "point": null, "point_text": null, "places": [], "legs": []}
 {"id": "https://t.me/lpr1_treugolnik/264795", "kind": "інше", "scope": "область", "geo_conf": "city-marker", "shown": false, "aim": false, "point": [0, 8], "point_text": "Феодосия", "places": [], "legs": []}
 {"id": "https://t.me/lpr1_treugolnik/264838", "kind": "фіксація", "scope": "точка", "geo_conf": "city-marker", "shown": true, "aim": false, "point": [0, 4], "point_text": "Ейск", "places": [[0, 4]], "legs": []}
-{"id": "https://t.me/lpr1_treugolnik/264948", "kind": "фіксація", "scope": "точка", "geo_conf": "city-marker", "shown": true, "aim": false, "point": [49, 55], "point_text": "Брянск", "places": [[49, 55], [57, 64], [86, 96]], "legs": [["Навлинский", "Орловской"]]}
+{"id": "https://t.me/lpr1_treugolnik/264948", "kind": "фіксація", "scope": "точка", "geo_conf": "city-marker", "shown": true, "aim": false, "point": [49, 55], "point_text": "Брянск", "places": [[49, 55], [57, 64]], "legs": [["Навлинский", "Орловской"]]}
 {"id": "https://t.me/lpr1_treugolnik/264987", "kind": "тривога", "scope": "область", "geo_conf": "city-marker", "shown": false, "aim": false, "point": [0, 10], "point_text": "Мелитополь", "places": [], "legs": []}
 {"id": "https://t.me/lpr1_treugolnik/265001", "kind": "тривога", "scope": "область", "geo_conf": "consensus", "shown": false, "aim": false, "point": [0, 9], "point_text": "Балаклава", "places": [], "legs": []}
 {"id": "https://t.me/lpr1_treugolnik/265087", "kind": "тривога", "scope": "область", "geo_conf": "global", "shown": false, "aim": false, "point": [0, 9], "point_text": "Тарханкут", "places": [], "legs": []}
@@ -113,7 +113,7 @@
 {"id": "https://t.me/lpr1_treugolnik/266083", "kind": "фіксація", "scope": "точка", "geo_conf": "city-marker", "shown": true, "aim": false, "point": [0, 8], "point_text": "Горловка", "places": [[0, 8]], "legs": []}
 {"id": "https://t.me/lpr1_treugolnik/266113", "kind": "фіксація", "scope": "точка", "geo_conf": "region", "shown": true, "aim": false, "point": [30, 45], "point_text": "Пантелеймоновка", "places": [[30, 45], [8, 16], [18, 28], [47, 55], [57, 65]], "legs": []}
 {"id": "https://t.me/lpr1_treugolnik/266153", "kind": "фіксація", "scope": "точка", "geo_conf": "city-marker", "shown": true, "aim": false, "point": [0, 8], "point_text": "Горловка", "places": [[0, 8]], "legs": []}
-{"id": "https://t.me/lpr1_treugolnik/266279", "kind": "тривога", "scope": "область", "geo_conf": "city-marker", "shown": false, "aim": false, "point": [20, 26], "point_text": "Крымск", "places": [], "legs": []}
+{"id": "https://t.me/lpr1_treugolnik/266279", "kind": "тривога", "scope": "область", "geo_conf": "region", "shown": false, "aim": false, "point": [0, 8], "point_text": "Славянск", "places": [], "legs": []}
 {"id": "https://t.me/lpr1_treugolnik/266432", "kind": "тривога", "scope": "область", "geo_conf": "region", "shown": false, "aim": false, "point": [0, 8], "point_text": "Осипенко", "places": [], "legs": []}
 {"id": "https://t.me/lpr1_treugolnik/266443", "kind": "інше", "scope": "область", "geo_conf": "centroid", "shown": false, "aim": false, "point": null, "point_text": null, "places": [], "legs": [["Харьковской", "Белгородской"]]}
 {"id": "https://t.me/lpr1_treugolnik/266529", "kind": "тривога", "scope": "область", "geo_conf": "city-marker", "shown": false, "aim": false, "point": [6, 14], "point_text": "Крымское", "places": [], "legs": []}
@@ -127,7 +127,7 @@
 {"id": "https://t.me/lpr1_treugolnik/266810", "kind": "фіксація", "scope": "точка", "geo_conf": "centroid", "shown": false, "aim": false, "point": null, "point_text": null, "places": [], "legs": []}
 {"id": "https://t.me/lpr1_treugolnik/266888", "kind": "тривога", "scope": "область", "geo_conf": "city-marker", "shown": false, "aim": false, "point": [0, 11], "point_text": "Севастополь", "places": [], "legs": []}
 {"id": "https://t.me/lpr1_treugolnik/266889", "kind": "тривога", "scope": "область", "geo_conf": "region", "shown": false, "aim": false, "point": [0, 16], "point_text": "Щекино Рыльского", "places": [], "legs": []}
-{"id": "https://t.me/lpr1_treugolnik/267074", "kind": "тривога", "scope": "область", "geo_conf": "region", "shown": false, "aim": false, "point": [19, 26], "point_text": "Богучар", "places": [], "legs": []}
+{"id": "https://t.me/lpr1_treugolnik/267074", "kind": "тривога", "scope": "область", "geo_conf": "region", "shown": false, "aim": false, "point": [3, 15], "point_text": "Кантемировки", "places": [], "legs": []}
 {"id": "https://t.me/lpr1_treugolnik/267184", "kind": "тривога", "scope": "область", "geo_conf": "region", "shown": false, "aim": false, "point": [0, 8], "point_text": "Оленевка", "places": [], "legs": []}
 {"id": "https://t.me/lpr1_treugolnik/267336", "kind": "фіксація", "scope": "точка", "geo_conf": "city-marker", "shown": true, "aim": false, "point": [18, 29], "point_text": "Севастополь", "places": [[18, 29], [0, 8], [10, 17]], "legs": []}
 {"id": "https://t.me/lpr1_treugolnik/267435", "kind": "відбій", "scope": "область", "geo_conf": "centroid", "shown": false, "aim": false, "point": null, "point_text": null, "places": [], "legs": []}
@@ -331,7 +331,7 @@
 {"id": "https://t.me/lpr1_treugolnik/277496", "kind": "фіксація", "scope": "точка", "geo_conf": "region", "shown": true, "aim": false, "point": [10, 17], "point_text": "Уразово", "places": [[10, 17], [0, 8]], "legs": []}
 {"id": "https://t.me/lpr1_treugolnik/277505", "kind": "фіксація", "scope": "точка", "geo_conf": "city-marker", "shown": true, "aim": false, "point": [14, 25], "point_text": "Севастополя", "places": [[14, 25]], "legs": []}
 {"id": "https://t.me/lpr1_treugolnik/277636", "kind": "фіксація", "scope": "точка", "geo_conf": "city-marker", "shown": true, "aim": false, "point": [22, 33], "point_text": "Севастополь", "places": [[22, 33], [0, 12], [14, 21]], "legs": []}
-{"id": "https://t.me/lpr1_treugolnik/277704", "kind": "фіксація", "scope": "точка", "geo_conf": "region", "shown": true, "aim": false, "point": [76, 87], "point_text": "Гвардейское", "places": [[76, 87], [0, 7]], "legs": [["Войково", "Октябрьское"]]}
+{"id": "https://t.me/lpr1_treugolnik/277704", "kind": "фіксація", "scope": "точка", "geo_conf": "region", "shown": true, "aim": false, "point": [0, 7], "point_text": "Войково", "places": [[0, 7]], "legs": [["Войково", "Октябрьское"]]}
 {"id": "https://t.me/lpr1_treugolnik/277776", "kind": "фіксація", "scope": "точка", "geo_conf": "region", "shown": true, "aim": false, "point": [0, 15], "point_text": "Красногвардейск", "places": [[0, 15]], "legs": []}
 {"id": "https://t.me/lpr1_treugolnik/277814", "kind": "тривога", "scope": "область", "geo_conf": "region", "shown": false, "aim": false, "point": [0, 12], "point_text": "Новопетровка", "places": [], "legs": []}
 {"id": "https://t.me/lpr1_treugolnik/278128", "kind": "тривога", "scope": "область", "geo_conf": "centroid", "shown": false, "aim": false, "point": null, "point_text": null, "places": [], "legs": []}

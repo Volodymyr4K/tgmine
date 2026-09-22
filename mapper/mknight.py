@@ -29,8 +29,13 @@ def _namer(raid):
     для збиттів, курсів і фіксацій (`mapper/uknames.py`)."""
     nm = raid.get("_uk")
     if nm is None:
-        nm = raid["_uk"] = UN.Names({(e["place"], e["lat"], e["lon"]) for e in raid["events"]
-                                     if e.get("place") and e.get("lat")})
+        # Разом з іншими місцями поста (`also`): без них їхні підписи йшли
+        # запасними правилами, а не з Wikidata — перевірка 22.09.2026: 59 з
+        # 268 назв ночі гірші («Можаиський район», «Гулькевічи»).
+        nm = raid["_uk"] = UN.Names(
+            {(e["place"], e["lat"], e["lon"]) for e in raid["events"]
+             if e.get("place") and e.get("lat")}
+            | {(a[0], a[1], a[2]) for e in raid["events"] for a in (e.get("also") or []) if a[0]})
     return nm
 
 

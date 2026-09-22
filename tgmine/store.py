@@ -57,7 +57,10 @@ MSK = timezone(timedelta(hours=3))
 #     тим самим батьком.
 # 24: `also` — інші місця «тут» поста; рядки 2+ у lpr1/vrv/kupol
 #     (`extract.place_lines`) — запасне місце для крапки.
-PIPELINE_VERSION = 24
+# 25: крапка — не місце після слова руху в реченні (`_moving_to`: голе «на»,
+#     «далее на», «сторону»; «г.» не рве речення); `also` без підписів-районів
+#     і без пусків; «Примерно» — не назва.
+PIPELINE_VERSION = 25
 
 # Курс, названий словами. 2040 точкових подій (5.6%) кажуть «пролёт БПЛА на
 # северо-восток» або «с юго-запада фиксации», і досі ці слова викидались, а
@@ -787,17 +790,47 @@ ALSO_AREA_KM = 40.0
 #: помилкове додаткове місце гірше за пропущене. «на территории» (РСЧС) —
 #: не рух.
 _MOVE_IN_SENT = re.compile(
-    r"направлени|в\s+сторон|далее|курс\w*|траектори|\bвыход\w*\s+на|подвернуть|"
+    r"направлени|(?:\bв\s+)?\bсторон[уы]\b|далее|курс\w*|траектори|\bвыход\w*\s+на|подвернуть|"
     r"\bуйти\b|\bпойд|\bчерез\b|\bв\s+обход|\bна\s+(?!территори)", re.I)
 #: Рядок, що обривається словом руху: наступні рядки-місця — цілі.
 _MOVE_DANGLING = re.compile(r"(?:направлени\w*|далее|сторону|\bна|\bв)\s*:?\s*$", re.I)
 _EVENT_LINE = re.compile(r"тревог|опасн|фиксац|отбой|сбит|\bпво\b|внимани|угроз", re.I)
 
 
+#: Крапка після скорочення («г.», «с.», «пгт.», «ст.») — не кінець речення:
+#: «далее … на г.Ярославль» інакше рвало речення перед Ярославлем, і ціль
+#: ставала місцем (сліпа перевірка 22.09.2026).
+_ABBR_DOT = re.compile(r"(?:^|[\s,(])(?:г|с|п|д|х|ст|пгт|пос|р-н|обл|с/п)\.$", re.I)
+
+
+def _sent_start(text, pos):
+    i = pos
+    while True:
+        j = max(text.rfind(c, 0, i) for c in ".!?\n")
+        if j < 0:
+            return 0
+        if text[j] == "." and _ABBR_DOT.search(text[max(0, j - 5):j + 1]):
+            i = j
+            continue
+        return j + 1
+
+
+def _label_district(text, e, ents):
+    """Район одразу після іншої назви в тому ж рядку — підпис до неї
+    («Клименково, Ровеньский район», «Донецк ДНР Пролетарский,
+    Буденновский районы»), а не окреме місце."""
+    ls = text.rfind("\n", 0, e["pos"]) + 1
+    return any(ls <= o.get("pos", -1) < e["pos"] and not o.get("geo_area")
+               and o.get("type") in ("нп", "регіон") and o.get("geo_conf") != "centroid"
+               or (ls <= o.get("pos", -1) < e["pos"] and o.get("type") == "нп"
+                   and "lat" not in o)
+               for o in ents)
+
+
 def _moving_to(text, pos):
     """Назва на позиції `pos` стоїть після слова руху — у реченні чи під
     обірваним рядком «И далее в направлении»."""
-    start = max(text.rfind(c, 0, pos) for c in ".!?\n") + 1
+    start = _sent_start(text, pos)
     if _MOVE_IN_SENT.search(text[start:pos]):
         return True
     ls = text.rfind("\n", 0, pos)
@@ -824,6 +857,9 @@ def also_places(p, best):
     """
     if best is None or "lat" not in best:
         return []
+    # Пуск стоїть на джерелі; решта місць поста про пуск — цілі й траси.
+    if kind_of(p.get("text") or "") == "пуск":
+        return []
     ents = [e for e in p.get("entities", []) if "lat" in e and not e.get("inherited")
             and e.get("geo_conf") not in ("centroid", "region-snap", None)
             and e.get("pos") is not None]
@@ -837,6 +873,8 @@ def also_places(p, best):
     out = []
     for e in sorted(ents, key=lambda e: (bool(e.get("geo_area")), e.get("pos", 0))):
         if id(e) in aim or e is best or _moving_to(p["text"], e["pos"]):
+            continue
+        if e.get("geo_area") and _label_district(p["text"], e, p.get("entities", [])):
             continue
         near = min(GC.haversine((e["lat"], e["lon"]), (t["lat"], t["lon"])) for t in taken)
         if near < ALSO_SAME_KM or (e.get("geo_area") and near < ALSO_AREA_KM):
@@ -914,6 +952,16 @@ def point_entity(p):
     # тож Рославль лишався «місцем» і за населенням бив Єршичі (друга
     # рецензія 21 вересня 2026).
     aim = _aim_ids(p, pts, first_pos)
+    # Слово руху раніше в реченні (не лише впритул, як `DIR_BEFORE`): «От
+    # Вилино на Бахчисарай», «Калач на Дону и далее в направлении на
+    # Волгоград», «пролёт БПЛА на Острогожск». Без цього за населенням
+    # вигравала ціль — більше місто (BACKLOG §16.2). Те саме правило, що
+    # відсіює цілі з додаткових місць (`_moving_to`); лише коли після нього
+    # лишається хоч одне місце.
+    moving = {id(e) for e in pts if e.get("pos") is not None and not e.get("inherited")
+              and _moving_to(p["text"], e["pos"])}
+    if moving and len(moving) < len(pts):
+        pts = [e for e in pts if id(e) not in moving]
     # Якщо в пості нема НІЧОГО, крім цілі напрямку, лишаємо як було: краще
     # неточна крапка, ніж мовчазна втрата події. Таких 137 за 15 діб.
     aim_pts = {id(e) for e in pts if id(e) in aim}

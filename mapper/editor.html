@@ -6763,7 +6763,7 @@ function putBearings(){
       col:'#e8f2fc',glow:true,src:uniqSrc(b.src),n:Math.max(1,b.n||1),
       ...(b.to?{label:'→ '+b.to}:{}),
       // час — щоб стрілка слухалась фільтра за годинами, як маршрути
-      t0:b.t||'',t1:b.t||'',place:b.place||''});
+      t0:b.t||'',t1:b.t1||b.t||'',place:b.place||''});
   }
   toast(`напрямків з тексту: ${list.length}`+(replaced?` (замінено ${replaced})`:''));
   jlog('bearings',{n:list.length,replaced});

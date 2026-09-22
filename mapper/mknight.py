@@ -153,8 +153,28 @@ def toward_regions(raid):
     from tgmine.labels import region_label
     by = {}
     for e in raid["events"]:
-        for sn, sla, slo, sar, dn, dla, dlo, dar in e.get("legs") or []:
-            if not dar or sar:
+        legs = e.get("legs") or []
+        dst_of = {(round(g[5], 4), round(g[6], 4)): g for g in legs}
+        for sn, sla, slo, sar, dn, dla, dlo, dar in legs:
+            if not dar:
+                continue
+            # Хвіст — місце, де бачили, а не ціль попередньої ланки: у
+            # ланцюзі «X … на Анна, далее на Тамбовскую область» ланка до
+            # області починається з Анни, де нікого не бачили. Ідемо ланцюгом
+            # назад до кореня (X); корінь — ціла область — стрілки нема.
+            # Перевірка 22.09.2026: так стояло 39 з 373 стрілок.
+            # Назад — лише доки попередній старт є МІСЦЕМ: «Тамбовская
+            # область … через Токарёвский район … на Рязанскую» — перше
+            # місце тут Токарьовський район, і дійти до області означало б
+            # прибрати правильну стрілку.
+            seen = set()
+            while (round(sla, 4), round(slo, 4)) in dst_of and (sla, slo) not in seen:
+                seen.add((sla, slo))
+                g = dst_of[(round(sla, 4), round(slo, 4))]
+                if g[3]:
+                    break
+                sn, sla, slo, sar = g[0], g[1], g[2], g[3]
+            if sar:
                 continue
             rings = regions.get(dn)
             if rings:
@@ -180,13 +200,25 @@ def toward_regions(raid):
                                     "dla": dla, "dlo": dlo,
                                     "deg": round(RT.bearing((sla, slo), tuple(anc))),
                                     "km": round(min(TOWARD_KM, dist / 2)), "n": 0,
-                                    "place": sn, "t": e.get("hhmm", ""), "src": []})
+                                    "place": sn, "t": e.get("hhmm", ""), "ts": [], "src": []})
             b["n"] += 1
+            if e.get("hhmm"):
+                b["ts"].append(e["hhmm"])
             if e.get("url"):
                 b["src"].append({"u": e["url"], "t": e.get("hhmm", ""),
                                  "k": e.get("kind", ""), "ty": e.get("utype")})
+
+    def night_key(hhmm):
+        h = int(hhmm[:2])
+        return (h + 24 if h < 12 else h, hhmm)
     out, nm = [], _namer(raid)
     for b in by.values():
+        # Злита стрілка живе від першого до останнього повідомлення: фільтр
+        # годин у редакторі дивиться на t0..t1, і з одним часом стрілка
+        # ховалась у пізніші години (48 з 81 злитих охоплювали кілька годин).
+        ts = sorted(b.pop("ts"), key=night_key)
+        if ts:
+            b["t"], b["t1"] = ts[0], ts[-1]
         # Ключ конфігу («Тамбовська») — таблицею областей; назва GeoNames
         # («Pskov Oblast», «Kharkiv Oblast») — словником українських назв.
         to = b["to"]

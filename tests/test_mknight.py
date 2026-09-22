@@ -296,3 +296,28 @@ class TestTowardRegions(unittest.TestCase):
         g2 = ["B", 51.30, 40.15, False, "Тамбовська", 52.7, 41.4, True]
         a = self.mk.toward_regions(self._raid([g1, g2]))
         self.assertEqual([x["n"] for x in a], [2])
+
+    def test_chain_tail_moves_to_the_observed_root(self):
+        # «Юдановка … на Анна, далее на Тамбовскую область»: хвіст — Юдановка
+        ev = {"url": "u", "hhmm": "22:00", "kind": "фіксація", "legs": [
+            ["Yudanovka", 51.2, 40.0, False, "Anna", 51.48, 40.43, False],
+            ["Anna", 51.48, 40.43, False, "Тамбовська", 52.7, 41.4, True]]}
+        r = {"events": [ev], "_uk": type("N", (), {"place": lambda self, n, a, b: n})()}
+        a = self.mk.toward_regions(r)
+        self.assertEqual([(x["place"], x["la"]) for x in a], [("Yudanovka", 51.2)])
+
+    def test_merged_arrow_spans_all_its_hours(self):
+        g = ["A", 51.2, 40.0, False, "Тамбовська", 52.7, 41.4, True]
+        ev = [{"url": f"u{i}", "hhmm": t, "kind": "фіксація", "legs": [g]}
+              for i, t in enumerate(["23:10", "01:40", "22:05"])]
+        r = {"events": ev, "_uk": type("N", (), {"place": lambda self, n, a, b: n})()}
+        a = self.mk.toward_regions(r)[0]
+        self.assertEqual((a["t"], a["t1"]), ("22:05", "01:40"))
+
+    def test_chain_walk_stops_before_an_area_source(self):
+        # «Тамбовская область … через Токарёвский район … на Рязанскую»
+        ev = {"url": "u", "hhmm": "22:00", "kind": "фіксація", "legs": [
+            ["Тамбовська", 52.7, 41.4, True, "Tokarevskiy", 51.9, 41.2, False],
+            ["Tokarevskiy", 51.9, 41.2, False, "Рязанська", 54.4, 40.6, True]]}
+        r = {"events": [ev], "_uk": type("N", (), {"place": lambda self, n, a, b: n})()}
+        self.assertEqual([x["place"] for x in self.mk.toward_regions(r)], ["Tokarevskiy"])

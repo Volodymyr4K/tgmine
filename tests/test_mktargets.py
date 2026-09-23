@@ -45,5 +45,27 @@ class TestBoxFollowsBasemap(unittest.TestCase):
         self.assertEqual([i["n"] for i in items], ["Склад БК (Voronezh)", "Орський НПЗ"])
 
 
+class TestUnrankedObjects(unittest.TestCase):
+    """Щойно дозбираний обʼєкт (fetch_targets.py --tiles) ще без `tier`:
+    `i["tier"]` валив збірку сайту (рецензія 23.09.2026)."""
+
+    def test_tier_copy_matches_rank(self):
+        sys.path.insert(0, str(ROOT))
+        import rank_targets as RT
+        self.assertEqual(MT.TIER, RT.TIER)
+
+    def test_object_without_tier_gets_its_type_tier(self):
+        objs = [{"name": "Авіабаза Оленья", "lat": 68.15, "lon": 33.46,
+                 "cat": "airfield"},
+                {"name": "Військовий обʼєкт", "lat": 68.1, "lon": 33.4,
+                 "cat": "military_base"}]
+        with tempfile.TemporaryDirectory() as d:
+            src, out = Path(d) / "targets.json", Path(d) / "targets.js"
+            src.write_text(json.dumps({"objects": objs, "colors": {}}), encoding="utf-8")
+            MT.main(str(src), str(out))
+            items = json.loads(out.read_text(encoding="utf-8")[len("window.TARGETS="):-2])["items"]
+        self.assertEqual([(i["n"], i["t"]) for i in items], [("Авіабаза Оленья", 1)])
+
+
 if __name__ == "__main__":
     unittest.main()

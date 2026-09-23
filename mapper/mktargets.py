@@ -17,6 +17,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 
 
+# Ярус за типом — копія rank_targets.TIER: імпорт кореневого скрипта звідси
+# тягнув би tgmine.store і газетир у збірку сайту заради словника.
+TIER = {"refinery": 1, "defense_plant": 1, "ammo_depot": 1, "airfield": 1,
+        "chemical": 1, "fuel_depot": 2, "naval": 2, "military_base": 3, "range": 3}
+
+
 def base_box(path=os.path.join(HERE, "basemap.js")):
     """Рамка — та, що в самої підкладки (`BASE.box`), а не власна копія числа.
 
@@ -41,6 +47,11 @@ def main(src=None, out=None):
     with open(src, encoding="utf-8") as f:
         t = json.load(f)
     items, colors = t["objects"], t["colors"]
+    # Ярус дописує rank_targets.py. Щойно дозбираний обʼєкт його ще не має
+    # (fetch_targets.py --tiles), і `i["tier"]` валив збірку сайту — тоді ярус
+    # за типом, той самий, що дав би rank (рецензія 23.09.2026).
+    for i in items:
+        i.setdefault("tier", TIER.get(i["cat"], 3))
     keep = [i for i in items if i["tier"] <= 2
             and box[0] <= i["lat"] <= box[1] and box[2] <= i["lon"] <= box[3]]
     keep.sort(key=lambda i: -i.get("hits", 0))

@@ -48,6 +48,16 @@ class TestNoUkrainianTargets(unittest.TestCase):
         kept = filter_objects([kyiv, melitopol], self.borders, log=lambda *a: None)
         self.assertEqual([o["osm"] for o in kept], ["w146508255"])
 
+    def test_filter_drops_other_countries(self):
+        # Плитки Overpass прямокутні: у переліку лежали 96 обʼєктів Білорусі
+        # й 29 Казахстану (23.09.2026). Бєлгород і Крим лишаються.
+        objs = [{"osm": "zyabrovka", "lat": 52.31, "lon": 31.16},   # BLR
+                {"osm": "kaz", "lat": 52.10, "lon": 67.47},         # KAZ
+                {"osm": "belgorod", "lat": 50.60, "lon": 36.59},    # RUS
+                {"osm": "saky", "lat": 45.09, "lon": 33.58}]        # Крим
+        kept = filter_objects(objs, self.borders, log=lambda *a: None)
+        self.assertEqual([o["osm"] for o in kept], ["belgorod", "saky"])
+
     def test_manual_exclusions_are_still_reachable(self):
         # EXCLUDE_OSM — знімок на дату, а не правило. Якщо перезбір змінить id,
         # список тихо перестане діяти, і Чорнобаївка повернеться на карту.

@@ -1462,14 +1462,16 @@ function tilesReady(bias,ms=8000){
 // копію — та сама картинка. Копія перераховується, коли змінився фільтр
 // (повзунки кольору) або джерело тайла.
 //
-// Лише для екрана: експорт малює старим шляхом, як і малював.
-// Копії — звичайні полотна, браузер їх не вивантажує сам, тому кеш
-// обмежений: найдавніше використані викидаються. Стеля росте разом із
-// кількістю тайлів на екрані, щоб великий монітор не перефільтровував
-// щокадру.
-// Тайл 256×256 — це 256 КБ; 160 копій ≈ 40 МБ. На екрані 1600×1000 видно
-// ~60 тайлів обох шарів разом.
-const PRE={on:true, map:new Map(), max:160};
+// Лише для екрана і лише в звичайній деталізації: експорт (і екран, поки
+// йде експорт з S.bias>0) малює старим шляхом, як і малював.
+// Копії — звичайні полотна, браузер їх не вивантажує сам. Тому після
+// кожного кадру кеш ріжеться вдвічі понад те, що цей кадр справді малював:
+// тайл 256×256 — 256 КБ, на екрані 1600×1000 це до ~40 МБ. Стеля
+// не накопичується: попередня версія тримала стелю від найбільшого кадру
+// назавжди, і після експорту (екран у подвійній деталізації) кеш міг
+// сягати сотень МБ — знайшла рецензія 23.09.2026. Шари тайлів вимкнено або
+// йде експорт — кеш порожній.
+const PRE={on:true, map:new Map(), need:0};
 function preTile(im,filter){
   let e=PRE.map.get(im);
   if(e&&e.f===filter&&e.src===im.src){
@@ -1477,16 +1479,44 @@ function preTile(im,filter){
     return e.cv;
   }
   const w=im.naturalWidth, h=im.naturalHeight;
-  const cv2=(e&&e.cv.width===w&&e.cv.height===h)?e.cv:document.createElement('canvas');
+  let cv2=(e&&e.cv.width===w&&e.cv.height===h)?e.cv:null;
+  if(!cv2){
+    cv2=document.createElement('canvas');
+    // Збій відеокарти (сон/пробудження, скидання драйвера) стирає вміст
+    // полотен на GPU. Зображення тайла браузер відновлює сам, а копію —
+    // ні: без цього тайл лишився б порожнім до руху повзунка.
+    const drop=()=>{
+      const e2=PRE.map.get(im);
+      if(e2&&e2.cv===cv2) PRE.map.delete(im);
+      clearTimeout(TILE.redraw); TILE.redraw=setTimeout(draw,60);
+    };
+    cv2.addEventListener('contextlost',drop);
+    cv2.addEventListener('contextrestored',drop);
+  }
   cv2.width=w;cv2.height=h;                          // заодно й очищує
   const g=cv2.getContext('2d');
+  // Відеокарта ще лежить — копія вийшла б порожньою. Не кешуємо, пробуємо
+  // знову трохи згодом (екран у цей час однаково не малюється).
+  if(g.isContextLost&&g.isContextLost()){
+    PRE.map.delete(im);
+    clearTimeout(TILE.redraw); TILE.redraw=setTimeout(draw,250);
+    return cv2;
+  }
   g.filter=filter;g.drawImage(im,0,0);
   PRE.map.delete(im);PRE.map.set(im,{f:filter,src:im.src,cv:cv2});
-  while(PRE.map.size>PRE.max) PRE.map.delete(PRE.map.keys().next().value);
   return cv2;
 }
+// Після кадру: лишаються копії, які цей кадр малював, і ще стільки ж —
+// попередній рівень тайлів, щоб колесо туди-сюди через межу рівня не
+// фарбувало все наново на кожному кроці. Викидання лише тут, а не посеред
+// кадру, — тож тайл, щойно намальований, не може бути викинутий і
+// перефільтрований у тому самому кадрі.
+function trimPre(){
+  const max=PRE.need?PRE.need*2+32:0;
+  while(PRE.map.size>max) PRE.map.delete(PRE.map.keys().next().value);
+}
 function drawTiles(c,kind,alpha,filter,comp,bias){
-  const pre=!!filter&&PRE.on&&c===ctx;
+  const pre=!!filter&&PRE.on&&c===ctx&&!bias;
   // Без цього браузер масштабує тайли найдешевшим фільтром — на експорті
   // це видно як мило. На екрані — 'medium': 'high' у Chrome з відеокартою
   // коштує ~100 мс на кадр, щойно фільтра на drawImage нема (з фільтром ця
@@ -1501,8 +1531,7 @@ function drawTiles(c,kind,alpha,filter,comp,bias){
   const x0=Math.max(0,Math.floor(a[0]/sc)), x1=Math.min(n-1,Math.ceil(b[0]/sc));
   const y0=Math.max(0,Math.floor(a[1]/sc)), y1=Math.min(n-1,Math.ceil(b[1]/sc));
   if((x1-x0)*(y1-y0)>900) return;                    // запобіжник від лавини
-  // два шари тайлів і перехід між зумами — з запасом учетверо
-  if(pre) PRE.max=Math.max(PRE.max,(x1-x0+1)*(y1-y0+1)*4);
+  if(pre) PRE.need+=(x1-x0+1)*(y1-y0+1);
   c.save();
   if(pre) c.imageSmoothingQuality='medium';
   if(filter&&!pre) c.filter=filter;
@@ -1634,6 +1663,7 @@ function path(g,to){to.beginPath();for(let i=0;i<g.length;i++){
 let NOBG=false;
 function drawBase(c){
   const L=S.layers, ST=S.style;
+  if(c===ctx) PRE.need=0;
   c.save();
   if(!NOBG){ c.fillStyle=ST.base.bg||'#04070c';c.fillRect(0,0,Wp,Hp); }
   // 1. супутник, притемнений і знебарвлений просто на льоту: те саме, що
@@ -1725,6 +1755,7 @@ function drawBase(c){
   }
   drawLabels(c);
   c.restore();
+  if(c===ctx) trimPre();
 }
 // Кордони держав беруться з окремого шару Natural Earth admin-0
 // (`countries` у basemap). Спроба «розчинити» внутрішні межі в admin-1 була

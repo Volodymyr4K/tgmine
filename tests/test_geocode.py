@@ -35,6 +35,10 @@ class TestRegionCodes(unittest.TestCase):
                           ("Орловська", {("RU", "56")}),
                           ("Костромська", {("RU", "37")}),
                           ("Татарстан", {("RU", "73")}),
+                          # без міста Санкт-Петербург (RU.66): маркер міста в
+                          # конфізі є, але субʼєкт області не віддає — інакше
+                          # «Кировский район, Ленинградская область» ставав
+                          # Кіровським районом міста (А/Б 23.09.2026)
                           ("Ленінградська", {("RU", "42")}),
                           # округи за Уралом: центроїд стоїть не в столиці,
                           # і збіг має йти за назвою, не за відстанню
@@ -315,7 +319,10 @@ class TestHomonymFixture(unittest.TestCase):
     def _hit(self, row):
         """(відстань у км до еталона, підпис) або (None, причина)."""
         for e in self.by_text[row["text"]].get("entities", []):
-            if e["type"] != "нп":
+            # Назва, яку конфіг знає як область, приходить сутністю-регіоном,
+            # а не НП: «Вологодская», «Псковская» — з 23.09.2026. Охорона та
+            # сама — координата не має піти до села-тезки.
+            if e["type"] not in ("нп", "регіон"):
                 continue
             if (e.get("match") or e.get("value")) != row["query"]:
                 continue
@@ -697,10 +704,20 @@ class TestWholeSubjectIsAreaNotPoint(unittest.TestCase):
         return posts[0]
 
     def test_subject_keeps_coordinates(self):
-        p = self._post("Республика Чувашия - опасность по БПЛА")
+        # Субʼєкт, якого конфіг не знає. Досі тут стояла Чувашія — з 23.09.2026
+        # вона в конфізі, і пост дістає сутність-регіон, а не НП.
+        p = self._post("Новосибирская область - опасность по БПЛА")
         sub = [e for e in p["entities"] if e["type"] == "нп" and "lat" in e]
         self.assertTrue(sub, "субʼєкт має лишитись із координатою")
         self.assertEqual(sub[0]["geo_conf"], "centroid", "це площа, не крапка")
+
+    def test_mari_el_is_not_bashkortostan(self):
+        """«Республика Марий Эл» поза конфігом падала у freeform і діставала
+        центр Башкортостану за 500 км: 45 постів за місяць (23.09.2026)."""
+        p = self._post("Республика Марий Эл / Опасность по БПЛА")
+        self.assertEqual([e["value"] for e in p["entities"] if e["type"] == "регіон"],
+                         ["Марій Ел"])
+        self.assertFalse([e for e in p["entities"] if e["type"] == "нп" and "lat" in e])
 
     def test_subject_does_not_steal_the_point(self):
         """Перелік субʼєктів: крапка лишається в названій першою області."""
@@ -864,13 +881,18 @@ class TestLaunchesTellTheTruth(unittest.TestCase):
         """«Киевская область» — Київська область, а не село Kiyevskaya за 1500 км.
 
         Те саме з субʼєктами РФ, яких нема в конфізі: «Архангельская область»
-        була селом за 1977 км.
+        була селом за 1977 км (з 23.09.2026 вона в конфізі — див. нижче).
         """
         for text, want in (("Киевская область фиксация самолётов F16", "Kyiv Oblast"),
-                           ("Урдома, Ленский район, Архангельская область - пролёт",
-                            "Arkhangelsk Oblast")):
+                           ("Новосибирская область - опасность по БПЛА",
+                            "Novosibirsk Oblast")):
             with self.subTest(text=text):
                 self.assertIn(want, self._names(text))
+
+    def test_arkhangelsk_region_finds_its_village(self):
+        """Архангельська в конфізі: село шукається в області, а не наосліп."""
+        self.assertIn("Urdoma", self._names(
+            "Урдома, Ленский район, Архангельская область - пролёт"))
 
     def test_uab_plural_is_uab(self):
         """«УАБы», «УАБов» — 226 подій лишались без типу; «Кабардино» — не КАБ."""

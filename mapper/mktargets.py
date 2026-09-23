@@ -38,16 +38,17 @@ def main(src=None, out=None):
     src = src or os.path.join(ROOT, "targets.json")
     out = out or os.path.join(HERE, "targets.js")
     box = base_box()
-    t = json.load(open(src, encoding="utf-8"))
+    with open(src, encoding="utf-8") as f:
+        t = json.load(f)
     items, colors = t["objects"], t["colors"]
     keep = [i for i in items if i["tier"] <= 2
             and box[0] <= i["lat"] <= box[1] and box[2] <= i["lon"] <= box[3]]
     keep.sort(key=lambda i: -i.get("hits", 0))
     slim = [{"n": i["name"], "la": round(i["lat"], 3), "lo": round(i["lon"], 3),
              "c": i["cat"], "t": i["tier"], "h": i.get("hits", 0)} for i in keep]
-    open(out, "w", encoding="utf-8").write(
-        "window.TARGETS=" + json.dumps({"colors": colors, "items": slim},
-                                       ensure_ascii=False, separators=(",", ":")) + ";\n")
+    with open(out, "w", encoding="utf-8") as f:
+        f.write("window.TARGETS=" + json.dumps({"colors": colors, "items": slim},
+                                               ensure_ascii=False, separators=(",", ":")) + ";\n")
     print(f"цілей у рамці підкладки {box}: {len(slim)}  "
           f"{collections.Counter(i['c'] for i in slim).most_common(5)}")
     print("->", out)

@@ -11,6 +11,7 @@
 Виходить basemap.json (вектор) і relief.png (рельєф, обрізаний по рамці).
 
 Запуск:  python3 mkbase.py [lat0 lat1 lon0 lon1]
+         python3 mkbase.py --regions   (лише області конфіга в basemap.js)
 """
 import json
 import sys
@@ -132,17 +133,8 @@ def settlements(box, min_pop=12_000):
 EPS = 0.004
 
 
-def main(*box):
-    box = tuple(float(x) for x in box) if box else (42.0, 62.0, 20.0, 66.0)
-    need_gazetteer()
-    ensure_ne()
-    out = {"box": list(box)}
-
-    # 1. межі областей І області конфіга — ОДИН прохід, ОДНЕ спрощення.
-    # Було два джерела: підкладка різалась тут, а regions.json — окремо
-    # своїм спрощенням. Та сама межа виходила двома різними контурами, і на
-    # карті вони не збігались: Крим ставав клякcою поперек берегової лінії.
-    # Тепер заливка області й межа під нею — буквально ті самі вершини.
+def admin_rings(box):
+    """Межі країн і області конфіга — з одного проходу, тими самими вершинами."""
     admin, named = {}, {}
     for sr in shapefile.Reader(ADMIN).iterShapeRecords():
         rec = sr.record.as_dict()
@@ -157,6 +149,45 @@ def main(*box):
         for key, pats in MATCH.items():
             if any(pt.lower() in nr for pt in pats):
                 named.setdefault(key, []).extend(rings)
+    return admin, named
+
+
+def regions_only():
+    """Оновити в basemap.js лише області конфіга (`--regions`).
+
+    Повна збірка тягне рельєф, воду й дороги, і basemap.js із неї робиться
+    не напряму (див. CLAUDE.md: .js і .json — різні файли). Коли в `MATCH`
+    додали субʼєкт, міняти треба один ключ: той самий прохід по тих самих
+    контурах із рамкою самого файлу. Перевірено 23.09.2026: для 48 наявних
+    областей результат побайтово той самий, що в basemap.js.
+    """
+    js = os.path.join(HERE, "basemap.js")
+    s = open(js, encoding="utf-8").read()
+    i = s.index("=") + 1
+    body = s[i:].lstrip()
+    data, end = json.JSONDecoder().raw_decode(body)
+    _, named = admin_rings(tuple(data["box"]))
+    added = sorted(set(named) - set(data.get("regions") or {}))
+    data["regions"] = named
+    with open(js, "w", encoding="utf-8") as f:
+        f.write("window.BASE=")
+        json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
+        f.write(body[end:])
+    print(f"basemap.js: областей {len(named)}, нових {added}")
+
+
+def main(*box):
+    box = tuple(float(x) for x in box) if box else (42.0, 62.0, 20.0, 66.0)
+    need_gazetteer()
+    ensure_ne()
+    out = {"box": list(box)}
+
+    # 1. межі областей І області конфіга — ОДИН прохід, ОДНЕ спрощення.
+    # Було два джерела: підкладка різалась тут, а regions.json — окремо
+    # своїм спрощенням. Та сама межа виходила двома різними контурами, і на
+    # карті вони не збігались: Крим ставав клякcою поперек берегової лінії.
+    # Тепер заливка області й межа під нею — буквально ті самі вершини.
+    admin, named = admin_rings(box)
     out["admin"] = admin
     out["regions"] = named
 
@@ -196,4 +227,7 @@ def main(*box):
 
 
 if __name__ == "__main__":
-    main(*sys.argv[1:])
+    if sys.argv[1:] == ["--regions"]:
+        regions_only()
+    else:
+        main(*sys.argv[1:])

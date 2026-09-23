@@ -72,20 +72,50 @@ class TestNamedDroneWithoutTrigger(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(ST.kind_of(text), "тривога")
 
-    def test_tactical_models_anywhere_fpv_only_near_front(self):
-        """Назви моделей — тактика скрізь; ФПВ — лише біля фронту."""
-        self.assertTrue(ST.tactical("Армянск / Опасность по БПЛА Хорнет", "Крим", 102))
-        self.assertTrue(ST.tactical("Опасность по бпла шарку", None, None))
-        self.assertTrue(ST.tactical("Горловка опасность по БПЛА и ФПВ", "ТОТ_Донецьк", 81))
-        self.assertTrue(ST.tactical("Токмак / Опасность по ФПВ", "ТОТ_Запоріжжя", 67))
-        self.assertTrue(ST.tactical("Шебекино / Активность Фпв", "Бєлгородська", 8))
-        self.assertFalse(ST.tactical("Мелитополь / Тревога по БПЛА с Фпв", "ТОТ_Запоріжжя", 83))
-        self.assertFalse(ST.tactical("Каланчак / Опасность по Фпв", "ТОТ_Херсон", 73))
-        self.assertFalse(ST.tactical("Севастополь / Тревога по БПЛА с Фпв", "Крим", 247))
-        self.assertFalse(ST.tactical("Каховка БПЛА разведчик", None, None))
-        # Шарканський район Удмуртії — не «Шарк»
-        self.assertFalse(ST.tactical("Шарканский район / Республика Удмуртия / "
-                                     "Опасность по БПЛА", "Удмуртія", 1400))
+    def test_tactical_only_near_front(self):
+        """Тактика (назви моделей, ФПВ, розвідники) — «інше» лише біля фронту."""
+        T = ST.tactical
+        # фронт: Горлівка 84 км (поріг Донеччини 90), Токмак 67 (Запоріжжя 70),
+        # Каховка 38, Шебекино 8
+        self.assertTrue(T("Горловка опасность по БПЛА и ФПВ", None, [(48.30, 38.05)]))
+        self.assertTrue(T("Токмак / Опасность по ФПВ", None, [(47.25, 35.71)]))
+        self.assertTrue(T("Каховка БПЛА разведчик", None, [(46.81, 33.49)]))
+        self.assertTrue(T("Шебекино / Активность Фпв", None, [(50.41, 36.89)]))
+        # не фронт: Мелітополь 83, Каланчак 73, Севастополь, Шахтарськ 113,
+        # Луганськ 129, Джанкой — і для назв моделей теж
+        self.assertFalse(T("Мелитополь / Тревога по БПЛА с Фпв", None, [(46.85, 35.37)]))
+        self.assertFalse(T("Каланчак / Опасность по Фпв", None, [(46.25, 33.29)]))
+        self.assertFalse(T("Севастополь / Тревога по БПЛА с Фпв", "Крим", [(44.60, 33.52)]))
+        self.assertFalse(T("Шахтерск ДНР тревога по БПЛА и ФПВ", "ТОТ_Донецьк", [(48.05, 38.49)]))
+        self.assertFalse(T("Луганск тревога по БПЛА со сбросами ФПВ", "ТОТ_Луганськ", [(48.57, 39.31)]))
+        self.assertFalse(T("АПП Джанкой / Тревога по БПЛА Хорнет", "Крим", [(45.71, 34.39)]))
+        # область — за крапкою, не за словом «ДНР» у тексті
+        self.assertTrue(T("Авдеевка и близлежащие опасность по фпв", None, [(48.14, 37.75)]))
+        # кілька місць: прифронтове хоч одне
+        self.assertTrue(T("Климово тревога по ФПВ / Брянск опасность по БПЛА", "Брянська",
+                          [(53.24, 34.36), (52.38, 31.72)]))
+        # без надійної крапки — прикордонні області й слова прикордоння
+        self.assertTrue(T("Приграничные районы Брянской области - FPV", "Брянська", sure=False))
+        self.assertFalse(T("Краснодарский край / Опасность по ФПВ", "Краснодарський", sure=False))
+        self.assertTrue(T("БПЛА-разведка над Белой Березкой", None, sure=False))
+        self.assertFalse(T("Все районы Херсонской области - носители ФПВ", "ТОТ_Херсон", sure=False))
+        # довге зведення — не пост про тактичний дрон
+        self.assertFalse(T("#Сводка на утро: в Москве сбиты БПЛА. " + "Горловка ФПВ. " * 20,
+                           "Московська", [(55.75, 37.62), (48.30, 38.05)]))
+        # слова прикордоння не діють, коли крапка надійна й далеко
+        self.assertFalse(T("#Сводка: по приграничным районам FPV; в Пензе сбит БПЛА",
+                           "Пензенська", [(53.2, 45.0)]))
+        for name in ("Чаклун", "Майя", "Мавик", "Дартс", "Баба Яга", "Хорнет", "Шарк"):
+            with self.subTest(name=name):
+                self.assertTrue(T(f"Горловка БПЛА {name}", None, [(48.30, 38.05)]))
+        # Шарканський район Удмуртії — не «Шарк»; «fpvпротивника» — ФПВ
+        self.assertFalse(ST.TACTICAL.search("Шарканский район / Республика Удмуртия"))
+        self.assertTrue(ST.TACTICAL.search("активность fpvпротивника"))
+
+    def test_plain_kind_sees_tactical_as_other(self):
+        """Шум і дзеркало: тактичні слова — «інше» (збори зі словом «ФПВ»)."""
+        self.assertEqual(ST.plain_kind("Сбит БПЛА. Помогите собрать на ФПВ"), "інше")
+        self.assertEqual(ST.plain_kind("Сбит БПЛА"), "збиття")
 
     def test_long_range_types_stay(self):
         self.assertEqual(ST.kind_of("Карачев опасность по БПЛА лютый"), "тривога")
@@ -1780,7 +1810,16 @@ class TestBarePostKindFromContext(unittest.TestCase):
         self.assertEqual(e["kind"], "фіксація")
 
     def test_fallback_does_not_rescue_promo_from_noise(self):
-        e, = self._events([("vrv_radar", 1, "Над городом 3 БПЛА.\nПоддержите канал донатом "
+        e, = self._events([("vrv_radar", 1, "Над городом Курск сейчас 3 БПЛА, будьте внимательны."
+                            "\nПоддержите канал донатом https://pay.cloudtips.ru/p/01396e10", None)])
+        self.assertTrue(e["promo_lines"] > 0)
+        self.assertGreaterEqual(len(e["text"]), 25)
+        self.assertTrue(e["noise"])
+
+    def test_tactical_promo_stays_noise(self):
+        """Збір коштів зі словом «ФПВ» — шум, хоч у ньому й «сбит»."""
+        e, = self._events([("lpr1_treugolnik", 1, "Сбит очередной БПЛА над Севастополем, "
+                            "ребятам нужны ФПВ и антидроновые ружья.\nПоддержите донатом "
                             "https://pay.cloudtips.ru/p/01396e10", None)])
         self.assertTrue(e["promo_lines"] > 0)
         self.assertTrue(e["noise"])
@@ -1812,6 +1851,25 @@ class TestBarePostKindFromContext(unittest.TestCase):
                 e, = self._events([("lpr1_treugolnik", 1, text, None)])
                 self.assertEqual(e["kind"], "інше")
 
+    def test_weak_geocode_does_not_decide_the_front(self):
+        """«Любимовка» під Севастополем -> Любимівка на Херсонщині (global, 44
+        км): найслабший геокод прифронт не визначає — ФПВ лишається."""
+        e, = self._events([("lpr1_treugolnik", 1, "Любимовка\nОпасность по ФПВ", None)])
+        self.assertEqual((e["geo_conf"], e["kind"]), ("global", "тривога"))
+
+    def test_any_front_place_of_the_post_counts(self):
+        """Крапка на Брянську (109 км), але Климово з того ж поста — кордон."""
+        e, = self._events([("lpr1_treugolnik", 1, "Климово и близлежащие тревога по ФПВ\n"
+                            "Брянск и близлежащие опасность по БПЛА действует", None)])
+        self.assertEqual(e["place"], "Bryansk")
+        self.assertEqual(e["kind"], "інше")
+
+    def test_border_area_post_without_point_is_off_the_map(self):
+        """Подія на центрі Брянської (107 км) — але пост про прикордоння."""
+        e, = self._events([("locatorru", 1, "Брянская область - опасность по ФПВ", None)])
+        self.assertIn(e["geo_conf"], ("centroid", "region-snap", None))
+        self.assertEqual(e["kind"], "інше")
+
     def test_carrier_fpv_far_from_front_stays(self):
         """ФПВ із дронів-носіїв у Криму — удар у глибину, лишається."""
         e, = self._events([("lpr1_treugolnik", 1, "Севастополь\nТревога по БПЛА с Фпв", None)])
@@ -1821,7 +1879,7 @@ class TestBarePostKindFromContext(unittest.TestCase):
 
     def test_kherson_front_by_distance(self):
         """Херсонщина: Олешки біля Дніпра — прифронт, Генічеськ — ні."""
-        e, = self._events([("lpr1_treugolnik", 1, "Олешки\nОпасность по ФПВ", None)])
+        e, = self._events([("lpr1_treugolnik", 1, "Олешки\nОпасность по ФПВ\nХерсонская область РФ", None)])
         self.assertEqual(e["kind"], "інше")
         e, = self._events([("lpr1_treugolnik", 1, "Геническ\nТревога по БПЛА с Фпв", None)])
         self.assertEqual(e["kind"], "тривога")

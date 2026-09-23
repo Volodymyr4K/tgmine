@@ -296,7 +296,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .rank
-          key: rank-v21-${{ steps.cachekey.outputs.day }}
+          key: rank-v22-${{ steps.cachekey.outputs.day }}
 
       - name: Важливість цілей
         run: |
@@ -416,7 +416,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: .rank
-          key: rank-v21-${{ steps.cachekey.outputs.day }}
+          key: rank-v22-${{ steps.cachekey.outputs.day }}
 
       # Пуш бота падав, коли поки прогін ішов, у main зʼявився чужий коміт:
       # `! [rejected] main -> main (fetch first)`. Це не рідкість — прогін

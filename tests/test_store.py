@@ -72,17 +72,20 @@ class TestNamedDroneWithoutTrigger(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(ST.kind_of(text), "тривога")
 
-    def test_tactical_drones_are_not_on_the_map(self):
-        """Рішення оператора 22.09.2026 — і з тригером теж."""
-        for text in ["Енакиево ДНР Баба Яга",
-                     "Каховка БПЛА разведчик\nХерсонская область РФ",
-                     "Трасса Р-280\nВысокая активность БПЛА Хорнет",
-                     "Боброво тревога по БПЛА Хорнет\nЛНР",
-                     "Погар Дартс подходит к Белевице! Срочно укрытия!",
-                     "Токмак\nАктивность Фпв\nЗапорожская область РФ",
-                     "Ромашовка / Валуйский район / БПЛА Шарк"]:
-            with self.subTest(text=text):
-                self.assertEqual(ST.kind_of(text), "інше")
+    def test_tactical_models_anywhere_fpv_only_near_front(self):
+        """Назви моделей — тактика скрізь; ФПВ — лише біля фронту."""
+        self.assertTrue(ST.tactical("Армянск / Опасность по БПЛА Хорнет", "Крим", 102))
+        self.assertTrue(ST.tactical("Опасность по бпла шарку", None, None))
+        self.assertTrue(ST.tactical("Горловка опасность по БПЛА и ФПВ", "ТОТ_Донецьк", 81))
+        self.assertTrue(ST.tactical("Токмак / Опасность по ФПВ", "ТОТ_Запоріжжя", 67))
+        self.assertTrue(ST.tactical("Шебекино / Активность Фпв", "Бєлгородська", 8))
+        self.assertFalse(ST.tactical("Мелитополь / Тревога по БПЛА с Фпв", "ТОТ_Запоріжжя", 83))
+        self.assertFalse(ST.tactical("Каланчак / Опасность по Фпв", "ТОТ_Херсон", 73))
+        self.assertFalse(ST.tactical("Севастополь / Тревога по БПЛА с Фпв", "Крим", 247))
+        self.assertFalse(ST.tactical("Каховка БПЛА разведчик", None, None))
+        # Шарканський район Удмуртії — не «Шарк»
+        self.assertFalse(ST.tactical("Шарканский район / Республика Удмуртия / "
+                                     "Опасность по БПЛА", "Удмуртія", 1400))
 
     def test_long_range_types_stay(self):
         self.assertEqual(ST.kind_of("Карачев опасность по БПЛА лютый"), "тривога")
@@ -1798,6 +1801,30 @@ class TestBarePostKindFromContext(unittest.TestCase):
                    for l in f.read_text(encoding="utf-8").splitlines()]
         self.assertEqual([e["dup_of"] for e in evs if e["channel"] == "kupolrussia"],
                          ["lpr1_treugolnik/1"])
+
+    def test_tactical_near_front_is_off_the_map(self):
+        """Рішення оператора: тактичні дрони біля фронту — не на карту."""
+        for text in ["Енакиево ДНР Баба Яга",
+                     "Горловка ДНР опасность по БПЛА и ФПВ",
+                     "Токмак\nОпасность по БПЛА и ФПВ\nЗапорожская область РФ",
+                     "Погар Дартс подходит к Белевице! Срочно укрытия!\nБрянская область"]:
+            with self.subTest(text=text):
+                e, = self._events([("lpr1_treugolnik", 1, text, None)])
+                self.assertEqual(e["kind"], "інше")
+
+    def test_carrier_fpv_far_from_front_stays(self):
+        """ФПВ із дронів-носіїв у Криму — удар у глибину, лишається."""
+        e, = self._events([("lpr1_treugolnik", 1, "Севастополь\nТревога по БПЛА с Фпв", None)])
+        self.assertEqual((e["kind"], e["region"]), ("тривога", "Крим"))
+        e, = self._events([("vrv_radar", 1, "Новороссийск\nКраснодарский край\nФиксация FPV", None)])
+        self.assertEqual(e["kind"], "фіксація")
+
+    def test_kherson_front_by_distance(self):
+        """Херсонщина: Олешки біля Дніпра — прифронт, Генічеськ — ні."""
+        e, = self._events([("lpr1_treugolnik", 1, "Олешки\nОпасность по ФПВ", None)])
+        self.assertEqual(e["kind"], "інше")
+        e, = self._events([("lpr1_treugolnik", 1, "Геническ\nТревога по БПЛА с Фпв", None)])
+        self.assertEqual(e["kind"], "тривога")
 
     def test_worded_post_is_left_alone(self):
         e, = self._events([("lpr1_treugolnik", 1,

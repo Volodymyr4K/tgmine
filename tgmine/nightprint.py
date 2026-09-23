@@ -125,6 +125,10 @@ def night_print(root: Path, day: str, code: str) -> str:
     for k in WINDOW:
         d = (d0 + timedelta(days=k)).isoformat()
         h.update(f"{d}\0{_file_hash(root / 'store' / 'events' / f'{d}.jsonl')}\n".encode())
+    # Наслідки (`tgmine/aftermath.py`) лежать уже по ночах, а не по днях:
+    # файл ночі — рівно один. Пояснення заднім числом («учора», «в ніч на
+    # N») міняє файл давньої ночі — і саме тоді її треба перебудувати.
+    h.update(f"aftermath\0{_file_hash(root / 'store' / 'aftermath' / f'{day}.jsonl')}\n".encode())
     h.update(f"prior\0{prior_print(root, day)}\n".encode())
     return h.hexdigest()
 

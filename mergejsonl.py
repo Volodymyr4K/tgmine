@@ -34,6 +34,10 @@ from pathlib import Path
 LAYOUTS = {
     "data": ("id", "id"),
     "events": ("id", "t"),
+    # інциденти наслідків (`tgmine/aftermath.py`): похідні, щогодинний
+    # прогін перебудовує їх цілком із сирого, тож злиття лише не має кидати
+    # конфлікт — розбіжність зникне наступним прогоном
+    "aftermath": ("id", "id"),
 }
 
 
@@ -43,6 +47,8 @@ def layout_for(path: str):
         return LAYOUTS["data"]
     if "store/events/" in p and p.endswith(".jsonl"):
         return LAYOUTS["events"]
+    if "store/aftermath/" in p and p.endswith(".jsonl"):
+        return LAYOUTS["aftermath"]
     return None
 
 

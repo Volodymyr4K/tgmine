@@ -119,6 +119,18 @@ class TestSensitivity(unittest.TestCase):
             (self.root / "store" / "events" / f"{d}.jsonl").write_text("changed")
         self.assertEqual(self.fp(), base)
 
+    def test_aftermath_of_this_night_changes_the_print(self):
+        """Наслідки лежать по ночах (`store/aftermath/<ніч>.jsonl`): пояснення
+        заднім числом міняє файл давньої ночі — і саме її треба перебудувати,
+        а сусідню ні."""
+        af = self.root / "store" / "aftermath"
+        af.mkdir(parents=True)
+        base = self.fp()
+        (af / "2026-09-11.jsonl").write_text('{"id": "x"}\n')
+        self.assertEqual(self.fp(), base)
+        (af / "2026-09-10.jsonl").write_text('{"id": "x"}\n')
+        self.assertNotEqual(self.fp(), base)
+
     def test_corridor_memory_before_the_night_changes_the_print(self):
         """Містки ночі спираються на ВСЮ історію до неї (`linker.Prior`):
         нова ланка в давнішому дні мусить перебудувати ніч, а зміна того

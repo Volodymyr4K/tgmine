@@ -9,6 +9,7 @@
 # не буде в жодному разі.
 data/*.jsonl          merge=tgmine-jsonl
 store/events/*.jsonl  merge=tgmine-jsonl
+store/aftermath/*.jsonl  merge=tgmine-jsonl
 store/state.json      merge=tgmine-state
 
 # Сирі пости й події — рядкові JSON. Не даємо Git вважати їх текстом, який

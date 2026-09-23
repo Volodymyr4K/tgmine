@@ -284,6 +284,7 @@ button.primary{background:rgba(255,62,165,.16);border-color:rgba(255,62,165,.45)
                  style="width:66px" title="Наскільки близько мають бути кінці двох маршрутів, щоб вважати їх одним коридором. 120 км узято з даних: ближче лежать приблизно 5% пар, далі розподіл стрибає">
         </div>
         <button id="strikes" style="margin-top:6px" title="Позначки тієї ночі; повторний клік замінює попередній шар">Покласти збиття / ППО</button>
+        <button id="aftermath" style="margin-top:6px" title="Наслідки ударів тієї ночі з каналу exilenova_plus: пожежі й влучання на НПЗ, складах, аеродромах. Кладуться самі, коли відкривається ніч; видалене лишається видаленим. Кнопка повертає всі, яких на карті нема">Покласти наслідки</button>
         <button id="cones" style="margin-top:6px" title="Напрямок на цілу область («далее на Тамбовскую область») — конусом від місця спостереження в бік області. Окремий шар: без натиску конусів на карті нема. Підказка, не обʼєкт: клік по конусу бере його в роботу. Повторний натиск ховає шар">Показати конуси на область</button>
         <button id="bearings" style="margin-top:6px" title="Жирні стрілки напрямку з тексту: курси словами («пролёт на восток», «с юго-запада») і рух на цілу область («далее на Тамбовскую область» — стрілка в бік області з підписом). Відомий лише напрямок, не шлях. Звичайні стрілки: можна правити й стирати; повторний клік замінює попередній шар">Покласти напрямки з тексту</button>
         <button id="sights" style="margin-top:6px" title="Кожне місце, де тієї ночі щось бачили: крапка тим більша, чим більше повідомлень; порожнє кільце — центр району, не село. Підказка, не обʼєкт: в експорт не йде, клік робить із неї позначку. Повторний клік ховає шар">Показати фіксації ночі</button>
@@ -4874,6 +4875,7 @@ function restore(){
       S.corridors=Object.assign({on:false,km:120},d.corridors||{});
       S.tfilter=Object.assign({on:false,from:'20:00',to:'06:00'},d.tfilter||{});
       S.hideCity=Array.isArray(d.hideCity)?d.hideCity.slice():[];
+      S.aftSeen=Array.isArray(d.aftSeen)?d.aftSeen.slice():[];
       S.lang=d.lang==='en'?'en':'uk';   // карти без цього поля — українські
       // Прибраний шар має лишатись прибраним і після перезавантаження:
       // інакше «прибрав назви областей» тримається лише до наступного
@@ -6050,6 +6052,9 @@ function mapPayload(){
           // а не налаштування вікна редактора. Відкрив збережене — бачиш те
           // саме, що лишив, а не всю ніч раптом цілком.
           tfilter:S.tfilter,
+          // які наслідки вже клались на цю карту: видалене оператором не
+          // має повертатись при наступному відкритті
+          aftSeen:S.aftSeen||[],
           layers:S.layers,
           style:S.style,legend:S.legend,brand:S.brand,
           footer:S.footer,watermark:S.watermark};
@@ -6267,6 +6272,7 @@ function applyMap(d){
   S.corridors=Object.assign({on:false,km:120},d.corridors||{});
   S.tfilter=Object.assign({on:false,from:'20:00',to:'06:00'},d.tfilter||{});
   S.hideCity=Array.isArray(d.hideCity)?d.hideCity.slice():[];
+  S.aftSeen=Array.isArray(d.aftSeen)?d.aftSeen.slice():[];
   S.lang=d.lang==='en'?'en':'uk';
   if(d.layers) S.layers=Object.assign({},LAYERS_DEFAULT||S.layers,d.layers);
   S.selCity=null; endPass();
@@ -7117,6 +7123,9 @@ function putStrikes(){
   // мовчки втрачав двадцять сім щойно взятих стрілок.
   S.objs=S.objs.filter(o=>{
     if(o.kind!=='impact') return true;
+    // Наслідки (`aft`) — окремий шар із власного джерела, не збиття: кнопка
+    // збиття їх не зносить і не замінює.
+    if(o.aft) return true;
     // Позначки, зроблені з фіксацій ночі (`sight`), — не збиття, і кнопка
     // збиття їх не зносить: інакше оператор бере десять фіксацій у роботу,
     // кладе збиття — і фіксації зникають мовчки.
@@ -7181,6 +7190,51 @@ function putStrikes(){
                      :`покладено ${list.length} позначок`
               +(dup?` (пропущено ${dup}: там уже взяті фіксації)`:''));
 }
+// Наслідки ударів — інциденти з каналу exilenova_plus (`tgmine/aftermath.py`,
+// `mknight.aftermath`). На відміну від підказок це ОБʼЄКТИ і кладуться самі,
+// коли відкривається ніч (рішення власника 23.09.2026): звичайні позначки
+// «влучання» з джерелами, які оператор посуне, перейменує чи видалить.
+// Покладене раз не повертається саме: видалене лишається видаленим
+// (`S.aftSeen` — ідентифікатори, уже покладені на цю карту). Новий інцидент
+// тієї ж ночі (щогодинний прогін додав) докладається при наступному
+// відкритті. Кнопка кладе всі, яких на карті нема, зокрема видалені.
+function putAftermath(auto){
+  const N=window.NIGHT||{}, list=N.aftermath||[];
+  if(!Array.isArray(S.aftSeen)) S.aftSeen=[];
+  if(!list.length){ if(!auto) toast('у цій ночі наслідків нема'); return 0; }
+  const seen=new Set(S.aftSeen);
+  const have=new Set(S.objs.filter(o=>o.aft).map(o=>o.aft));
+  const add=list.filter(x=>!have.has(x.id)&&!(auto&&seen.has(x.id)));
+  if(!add.length){ if(!auto) toast('наслідки ночі вже на карті'); return 0; }
+  snapshot();
+  const tag='night:'+(N.date||'');
+  for(const x of add){
+    const obj=(x.objs&&x.objs[0])||'';
+    S.objs.push({kind:'impact',cat:'impact',type:typeForU(null).id,u:null,
+      origin:tag,aft:x.id,la:x.la,lo:x.lo,
+      // скільки постів про цей інцидент — як `n` у збиття: важить для
+      // відбору підписів, а не для розміру знака
+      n:Math.max(1,x.n||1),
+      // час першого поста; інцидент, відомий лише з пояснення заднім
+      // числом, часу не має й видимий за будь-якого фільтра годин
+      t:x.t||'',
+      size:9,
+      src:uniqSrc((x.src||[]).map(q=>({u:q.u,t:(q.d?q.d+' ':'')+(q.t||''),k:q.k||''}))),
+      label:(x.place||CAT_NAME.impact)+(obj?' · '+obj:'')});
+    if(!seen.has(x.id)){ seen.add(x.id); S.aftSeen.push(x.id); }
+  }
+  refresh();
+  toast(`наслідків ночі на карті: ${add.length}`);
+  jlog('aftermath',{date:N.date,add:add.length,auto:!!auto});
+  return add.length;
+}
+// Карта належить цій ночі: на ній нема обʼєктів з інших ночей. Лише тоді
+// наслідки кладуться самі при старті — інакше вчорашня готова карта
+// отримала б позначки сьогоднішньої ночі.
+function mapOfNight(date){
+  const tag='night:'+(date||'');
+  return !S.objs.some(o=>fromNight(o)&&o.origin!==tag);
+}
 // Ночей у сховищі більше сотні, а редактор бачив рівно одну — ту, що лежала
 // в night.js. Тепер збірка сайту кладе кожну ніч окремим файлом у nights/,
 // а тут лишається випадайка. Локально (без nights/index.json) усе працює
@@ -7211,10 +7265,14 @@ function loadNight(cb){
     const list=await r.json();
     if(!list.length) throw 0;
     sel.innerHTML=list.map(n=>
-      `<option value="${n.date}">${n.date} — підказок ${n.routes}, позначок ${n.strikes}${n.bearings?`, напрямків ${n.bearings}`:''}${n.sightings?`, фіксацій ${n.sightings}`:''}${n.alerts?`, тривог ${n.alerts}`:''}</option>`
+      `<option value="${n.date}">${n.date} — підказок ${n.routes}, позначок ${n.strikes}${n.aftermath?`, наслідків ${n.aftermath}`:''}${n.bearings?`, напрямків ${n.bearings}`:''}${n.sightings?`, фіксацій ${n.sightings}`:''}${n.alerts?`, тривог ${n.alerts}`:''}</option>`
     ).join('');
     // Перша ніч списку — підказки одразу, якщо на екрані ще нема своїх.
-    if(!S.ghosts.length) loadNight(ok=>{ if(ok) document.getElementById('ghost').click(); });
+    if(!S.ghosts.length) loadNight(ok=>{
+      if(!ok) return;
+      document.getElementById('ghost').click();
+      if(mapOfNight(window.NIGHT.date)) putAftermath(true);
+    });
     sel.onchange=()=>{
       // ІНША ДОБА — ЧИСТИЙ АРКУШ. Лишається рівно підкладка: Україна й ТОТ.
       // Вони не належать жодній ночі, їх обводять один раз і використовують
@@ -7233,6 +7291,7 @@ function loadNight(cb){
       jlog('night',{date:sel.value,drop,keep:keep.length});
       if(drop||S.ghosts.length) snapshot();
       S.objs=keep; S.ghosts=[]; S.sight=[]; S.sightHover=null; S.alerts=null; S.alertsOn=false; S.sel=null; S.selMore=[]; endPass();
+      S.aftSeen=[];             // чистий аркуш — і наслідки нової ночі з нуля
       loadNight(ok=>{
         if(!ok){toast('ніч не завантажилась');refresh();return;}
         toast('ніч '+sel.value+(drop?` · прибрано з попередньої: ${drop}`:'')
@@ -7241,11 +7300,16 @@ function loadNight(cb){
         // містками й стрілки напрямку. Це не обʼєкти: в експорт не йдуть,
         // клік бере в роботу.
         document.getElementById('ghost').click();
+        putAftermath(true);
         refresh();
       });
     };
   }catch(e){ /* локальна тека без nights/ — лишається night.js */ }
 })();
+document.getElementById('aftermath').onclick=()=>{
+  if(!window.NIGHT){loadNight(ok=>ok?putAftermath(false):toast('ніч не завантажилась'));return;}
+  putAftermath(false);
+};
 document.getElementById('strikes').onclick=()=>{
   if(!window.NIGHT){loadNight(ok=>ok?putStrikes():alert(
     'Підказок нема. Зроби їх так:\npython3 raid.py <дата>\n'+

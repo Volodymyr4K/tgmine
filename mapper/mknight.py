@@ -20,8 +20,11 @@ from datetime import datetime
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 sys.path.insert(0, HERE)
+from tgmine import aftermath as AF
 from tgmine import routes as RT
 import uknames as UN                    # українські назви місць (див. там)
+
+ROOT = os.path.dirname(HERE)
 
 
 def _namer(raid):
@@ -37,7 +40,8 @@ def _namer(raid):
              if e.get("place") and e.get("lat")}
             | {(a[0], a[1], a[2]) for e in raid["events"] for a in (e.get("also") or []) if a[0]}
             | {(g[0], g[1], g[2]) for e in raid["events"] for g in (e.get("legs") or []) if g[0]}
-            | {(g[4], g[5], g[6]) for e in raid["events"] for g in (e.get("legs") or []) if g[4]})
+            | {(g[4], g[5], g[6]) for e in raid["events"] for g in (e.get("legs") or []) if g[4]}
+            | {(x["place"], x["plat"], x["plon"]) for x in raid.get("_aft") or []})
     return nm
 
 
@@ -87,6 +91,26 @@ def strikes(raid):
                     "kind": kind, "types": dict(b["types"]),
                     "t": b["t"], "src": b["src"][:8]})
     out.sort(key=lambda s: -s["n"])
+    return out
+
+
+def aftermath(raid):
+    """Наслідки ночі — інциденти з каналу exilenova_plus (`tgmine/aftermath.py`).
+
+    На відміну від решти шарів це не підказка, а обʼєкт: рішення власника
+    23.09.2026 — ставити на карту одразу. Редактор кладе їх позначками
+    «влучання» при відкритті ночі; оператор може посунути, перейменувати чи
+    видалити, як будь-яку позначку. Точка — координати з тексту, курований
+    НПЗ чи аеродром біля міста, інакше місто. Джерела — усі пости інциденту.
+    """
+    out, nm = [], _namer(raid)
+    for x in raid.get("_aft") or []:
+        out.append({"id": x["id"], "la": x["lat"], "lo": x["lon"],
+                    "place": nm.place(x["place"], x["plat"], x["plon"]),
+                    "t": x["t"], "objs": x["objs"], "names": x["names"],
+                    "conf": x["conf"], "n": x["n"],
+                    "src": [{"u": q["u"], "t": q["t"], "k": q["k"], "d": q["d"]}
+                            for q in x["src"][:12]]})
     return out
 
 
@@ -656,23 +680,27 @@ def with_bridges(raid, rs):
 def main(src, out=None):
     out = out or os.path.join(os.path.dirname(os.path.abspath(__file__)), "night.js")
     raid = json.load(open(src, encoding="utf-8"))
+    raid["_aft"] = AF.read(ROOT, raid.get("date") or "")
     rs, meta = RT.build(raid)
     rs = with_bridges(raid, rs)
     st = strikes(raid)
     br = bearings(raid)
     sg = sightings(raid)
     al = alerts(raid)
+    af = aftermath(raid)
     dec = sum(l == "declared" for r in rs for l in r["legs"])
     open(out, "w", encoding="utf-8").write(
         "window.NIGHT=" + json.dumps({"date": raid.get("date"), "routes": rs,
                                       "strikes": st, "bearings": br,
-                                      "sightings": sg, "alerts": al},
+                                      "sightings": sg, "alerts": al,
+                                      "aftermath": af},
                                      ensure_ascii=False, separators=(",", ":")) + ";\n")
     rear = [o for o in al["onsets"] if o["reg"] not in al["muted"]]
     print(f"{raid.get('date')}: маршрутів {len(rs)}, ланок {meta['in_routes']}, "
           f"з них заявлено текстом {dec}, збиття/ППО у точці {len(st)}, "
           f"курсів словами {len(br)}, місць із фіксаціями {len(sg)}, "
-          f"стартів тривоги в тилу {len(rear)} (німих {sum(o['silent'] for o in rear)})")
+          f"стартів тривоги в тилу {len(rear)} (німих {sum(o['silent'] for o in rear)}), "
+          f"наслідків {len(af)}")
     print("->", out)
 
 

@@ -18,7 +18,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from tgmine import extract as E, geocode as GC, scrape as S, store as ST
+from tgmine import aftermath as AF, extract as E, geocode as GC, scrape as S, store as ST
 
 #: locatorru доданий 2026-07-24. НЕ дзеркало: висока схожість із рештою лише
 #: 17.8% проти 73% у пари kupolrussia↔lpr1, унікальних 43%. Дає те, чого в
@@ -36,6 +36,11 @@ from tgmine import extract as E, geocode as GC, scrape as S, store as ST
 #: зроблено, тому до 2026-06-24 його даних нема. Поки цього не виправлено,
 #: будь-яке порівняння «місяць до місяця» через цю межу дасть стрибок покриття.
 CHANNELS = ["lpr1_treugolnik", "kupolrussia", "vrv_radar", "locatorru"]
+#: Канал НАСЛІДКІВ (з 23.09.2026, рішення власника): звітує про влучання й
+#: пожежі, а не про підліт, тому в сховище подій не йде — з нього будується
+#: окремий шар `store/aftermath/` (`tgmine/aftermath.py`). supernova_plus
+#: перевіряли й не взяли.
+AFTERMATH = ["exilenova_plus"]
 CONFIG = "configs/ru-monitor.yaml"
 GAZ = ("gazetteer/RU.txt", "gazetteer/UA.txt")
 
@@ -117,18 +122,41 @@ def main():
                 f"(відкинуто {n0 - len(posts)}; --all-dates, щоб узяти всі)")
         n = st.build(posts, cfg, gaz, log=log, targets=targets)
         log(f"\nрозібрано подій: {n}")
+        aftermath(st, gaz, targets, log)
         return 0
 
     since = parse_since(a.since)
     log(f"збір із {since:%Y-%m-%d %H:%M} UTC")
     posts = S.scrape_many(a.channels, since, None, "data", log=log)
     log(f"постів у вікні: {len(posts)}")
-    if not posts:
-        log("нема чого оновлювати")
-        return 0
-    n = st.build(posts, cfg, gaz, log=log, targets=targets)
-    log(f"\nоновлено подій: {n}")
+    # Канал наслідків — окремо: у сховище подій він не йде. Збій його збору
+    # не має зупиняти основний конвеєр.
+    try:
+        S.scrape_many(AFTERMATH, since, None, "data", log=log)
+    except Exception as e:                      # noqa: BLE001
+        log(f"  ! канал наслідків не зібрано: {e}")
+    if posts:
+        n = st.build(posts, cfg, gaz, log=log, targets=targets)
+        log(f"\nоновлено подій: {n}")
+    else:
+        log("нових постів підльоту нема")
+    aftermath(st, gaz, targets, log)
     return 0
+
+
+def aftermath(st, gaz, targets, log):
+    """Шар наслідків — щоразу цілком із сирого каналу (кілька секунд): так
+    щогодинний прогін і `--rebuild` дають те саме побайтово. Лише ночі
+    вікна сховища, як і події."""
+    raw = AF.load_raw(Path("."))
+    if not raw:
+        return
+    first = st.dates()
+    since = first[0] if first else None
+    incs = AF.build(raw, gaz, targets)
+    ch = AF.write(incs, Path("."), since=since)
+    shown = sum(1 for x in incs if x["hit"] and (not since or x["night"] >= since))
+    log(f"наслідки: інцидентів {len(incs)}, на карту {shown}, змінено файлів ночей {ch}")
 
 
 if __name__ == "__main__":

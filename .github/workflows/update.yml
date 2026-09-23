@@ -206,11 +206,15 @@ jobs:
       # sync.py, raid.py на кожну ніч (158 разів за повну перебудову), тести.
       # Ключ — код розбору й довідник Wikidata; сам файл у назві несе ще й
       # хеш вмісту газетира (`geocode._gaz_key`), тож чужий не підхопиться.
+      #
+      # Поруч лежить покажчик каналу наслідків (`aftermath.Places.load`,
+      # ~28 МБ, будується ~5 с): його ключ — ще й `tgmine/aftermath.py`,
+      # інакше після правки модуля він будувався б щогодини наново.
       - name: Кеш індексу газетира
         uses: actions/cache@v4
         with:
           path: gazetteer/.cache
-          key: gazpkl-v1-${{ hashFiles('tgmine/geocode.py', 'refdata/wikidata_ru.tsv') }}
+          key: gazpkl-v2-${{ hashFiles('tgmine/geocode.py', 'refdata/wikidata_ru.tsv', 'tgmine/aftermath.py') }}
 
       - name: Межі областей
         run: test -f regions.json || python mkregions.py

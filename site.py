@@ -684,6 +684,7 @@ def night_index(nights: Path):
                     "strikes": len(d.get("strikes") or []),
                     "bearings": len(d.get("bearings") or []),
                     "sightings": len(d.get("sightings") or []),
+                    "aftermath": len(d.get("aftermath") or []),
                     "alerts": sum(1 for o in (d.get("alerts") or {}).get("onsets", [])
                                   if o.get("reg") not in ((d.get("alerts") or {}).get("muted") or []))})
     out.sort(key=lambda r: r["date"], reverse=True)

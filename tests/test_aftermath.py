@@ -283,6 +283,14 @@ class TestIncidents(unittest.TestCase):
         out = self.build([post(1, "2026-08-22 05:19", "Чапаєвськ, після атаки горить НПЗ.")])
         self.assertEqual([x["refinery"] for x in out], [None])
 
+    def test_named_plant_far_from_its_city(self):
+        # Астраханський ГПЗ — у Аксарайському, за 53 км від Астрахані;
+        # «газопереробний завод» — той самий обʼєкт, що й «ГПЗ»
+        out = self.build([post(1, "2026-08-24 18:03", "Збройні Сили України успішно уразили "
+                               "Астраханський газопереробний завод (АГПЗ).")])
+        self.assertEqual([x["refinery"] for x in out], ["Астраханський ГПЗ"])
+        self.assertGreater(out[0]["lat"], 46.7)
+
     def test_deterministic_and_order_independent(self):
         ps = [post(1, "2026-09-22 04:41", "Еще кадры с Самары, где был атакован НПЗ."),
               post(2, "2026-09-22 04:44", "Еще Самара.", reply=1),

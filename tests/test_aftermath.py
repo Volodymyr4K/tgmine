@@ -35,6 +35,22 @@ class TestText(unittest.TestCase):
         # для літер
         self.assertIn("11", A.skel("11 вересня"))
 
+    def test_patterns_are_in_skeleton_form(self):
+        # Шаблони шукають у кістяку (`skel`): «ь» там нема, «і» — «и», подвоєні
+        # — одна. «сьогодни рик», «этой ночью», «попадания не было», «сообщ»
+        # не спрацьовували ніколи (знайдено 23.09.2026).
+        import re
+        for name in ("HIT", "NOT_HIT", "NEG", "NEG_STRONG", "OFFICIAL", "OIL", "ANCHOR",
+                     "LAST_NIGHT", "ATTACKW", "TACTICAL_RX", "RETRO", "ANNIV", "_YESTERDAY",
+                     "REPORTED", "NEXT_NOUN", "REGION_WORD", "ADJ_NAME", "TITLE", "ROUTE",
+                     "FIRST_NAME", "_ADJ_LIST", "_OBJ_ANY"):
+            src = getattr(A, name).pattern
+            words = re.findall(r"[а-яёїієґэъ]+(?!\?)", src)
+            self.assertEqual([w for w in words if A.skel(w) != w], [], name)
+        self.assertTrue(A.LAST_NIGHT.search(A.skel("Цієї ночі уразили НПЗ")))
+        self.assertTrue(A.LAST_NIGHT.search(A.skel("Этой ночью атаковали")))
+        self.assertTrue(A.ANNIV.search(A.skel("Сьогодні рік, як «Павутина»")))
+
     def test_coordinates(self):
         self.assertEqual(A.coords_in("точка (55.644523,37.805698)"), [(55.64452, 37.8057)])
         self.assertEqual(A.coords_in("Координати: 50.094131° 43.237939°"), [(50.09413, 43.23794)])
@@ -61,6 +77,15 @@ class TestText(unittest.TestCase):
         self.assertEqual(self._when("Руїни складів після удару 16.08", "2026-08-19 17:29"),
                          ("day", date(2026, 8, 16)))
 
+    def test_numeric_night_of(self):
+        # замір 23.09: «у ніч на 24.07.2026» йшло на ніч поста (24.07)
+        self.assertEqual(self._when("У ніч на 24.07.2026 підтверджено ураження", "2026-07-24 19:56"),
+                         ("night", date(2026, 7, 23)))
+        self.assertEqual(self._when("У ніч з 18 на 19 квітня уразили кораблі", "2026-04-20 08:46"),
+                         ("night", date(2026, 4, 18)))
+        self.assertEqual(self._when("в ночь на 16.08 атакован", "2026-08-20 10:00"),
+                         ("night", date(2026, 8, 15)))
+
     def test_last_night_in_the_afternoon(self):
         # «сьогодні вночі», написане о 13:35, — про ніч, що скінчилась
         self.assertEqual(self._when("Сьогодні вночі уразили аеродром", "2026-08-28 13:35"),
@@ -77,6 +102,8 @@ class TestText(unittest.TestCase):
         self.assertFalse(hit("стає дедалі складнішою та дорожчою для ураження"))
         self.assertFalse(hit("Тюмень, НПЗ, вибухи в промзоні."))
         self.assertFalse(hit("У Ростові лунають вибухи."))
+        # майбутнє — побажання, не звіт
+        self.assertFalse(hit("ще більше гаражів у Донецьку буде уражено Орєшніком"))
 
     def test_denials(self):
         for t in ("зафіксованих об'єктивним контролем влучань не було",
@@ -84,7 +111,8 @@ class TestText(unittest.TestCase):
                   "Одна з ракет не дійшла до цілі",
                   "упало 2 беспилотника, но без возгорания",
                   "Аварія на установці піролізу",
-                  "о прилетах ничего не известно"):
+                  "о прилетах ничего не известно",
+                  "Челябінськ, пожежа не пов’язана з БПЛА"):
             self.assertTrue(A.NEG.search(A.skel(t)), t)
 
     def test_night_window(self):
@@ -128,6 +156,19 @@ class TestPlaces(unittest.TestCase):
         self.assertEqual(self.names("Сили Оборони уразили хімзавод у Березниках."), ["Berezniki"])
         self.assertEqual(self.names("Добрий ранок, читачі."), [])
         self.assertEqual(self.names("Республіка Татарстан, вибухи."), [])
+
+    def test_oblast_adjectives_are_not_towns(self):
+        # «у Донецькій, Луганській областях» — не селище Донецький,
+        # «у Ярославському регіоні» — не Ярославський під Москвою
+        self.assertEqual(self.names("уразили логістику у Донецькій, Луганській областях та на території рф"), [])
+        self.assertEqual(self.names("Також ми досягли НПЗ у Ярославському регіоні."), [])
+        # але місто в місцевому, за ним область у родовому — місто
+        self.assertEqual(self.names("уразили «Комбинат Каменский» у Каменськ-Шахтинському Ростовської області"),
+                         ["Kamensk-Shakhtinsky"])
+        self.assertIn("Stanytsya-Luhanska",
+                      self.names("Станица Луганская, Луганская область. Была атакована инфраструктура."))
+        # «Берегова інфраструктура» — не Берегове
+        self.assertEqual(self.names("Берегова інфраструктура: зафіксовано декілька уражень."), [])
 
     def test_quotes_are_names_not_places(self):
         # «Ангара» — ракета (альт-назва Перевального в Криму)
@@ -277,6 +318,15 @@ class TestIncidents(unittest.TestCase):
     def test_malformed_coordinates_do_not_crash(self):
         self.assertEqual(A.coords_in("44°56’36..5”N 34°13’12”E"), [])
         self.build([post(1, "2026-09-10 02:00", "Уражено склад 44°56’36..5”N 34°13’12”E після атаки")])
+
+    def test_ruins_are_details_of_the_known_strike(self):
+        # «Все що залишилося від хабу» наступного ранку — той самий удар, а не
+        # новий інцидент на ніч поста (замір 23.09, Сімферополь)
+        ps = [post(1, "2026-07-24 19:56", "У ніч на 24.07.2026 підтверджено ураження розподільчого "
+                                          "центру Wildberries у м. Сімферополь, виникла масштабна пожежа."),
+              post(2, "2026-07-25 10:19", "Все що залишилося від логістичного хабу Wildberries після "
+                                          "атаки БПЛА в окупованому Сімферополі.", reply=1)]
+        self.assertEqual([(x["night"], x["n"]) for x in self.build(ps)], [("2026-07-23", 2)])
 
     def test_refinery_of_another_town_is_not_taken(self):
         # Чапаєвськ — не НПЗ Новокуйбишевська за 30 км

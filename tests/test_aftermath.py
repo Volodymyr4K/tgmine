@@ -41,14 +41,14 @@ class TestText(unittest.TestCase):
         # не спрацьовували ніколи (знайдено 23.09.2026).
         import re
         for name in ("HIT", "NOT_HIT", "NEG", "NEG_STRONG", "OFFICIAL", "OIL", "ANCHOR",
-                     "LAST_NIGHT", "ATTACKW", "TACTICAL_RX", "RETRO", "ANNIV", "_YESTERDAY",
+                     "LAST_NIGHT", "ATTACKW", "TACTICAL_RX", "RETRO", "ANNIV", "THIS_NIGHT", "RUINS", "_YESTERDAY",
                      "REPORTED", "NEXT_NOUN", "REGION_WORD", "ADJ_NAME", "TITLE", "ROUTE",
                      "FIRST_NAME", "_ADJ_LIST", "_OBJ_ANY"):
             src = getattr(A, name).pattern
             words = re.findall(r"[а-яёїієґэъ]+(?!\?)", src)
             self.assertEqual([w for w in words if A.skel(w) != w], [], name)
-        self.assertTrue(A.LAST_NIGHT.search(A.skel("Цієї ночі уразили НПЗ")))
-        self.assertTrue(A.LAST_NIGHT.search(A.skel("Этой ночью атаковали")))
+        self.assertTrue(A.THIS_NIGHT.search(A.skel("Цієї ночі уразили НПЗ")))
+        self.assertTrue(A.THIS_NIGHT.search(A.skel("Этой ночью атаковали")))
         self.assertTrue(A.ANNIV.search(A.skel("Сьогодні рік, як «Павутина»")))
 
     def test_coordinates(self):
@@ -85,6 +85,24 @@ class TestText(unittest.TestCase):
                          ("night", date(2026, 4, 18)))
         self.assertEqual(self._when("в ночь на 16.08 атакован", "2026-08-20 10:00"),
                          ("night", date(2026, 8, 15)))
+        # крапка в кінці речення — не частина дати (пости 19850, 18886)
+        self.assertEqual(self._when("Туапсе в ніч на 01.05.2026.", "2026-05-03 10:00"),
+                         ("night", date(2026, 4, 30)))
+        self.assertEqual(self._when("Супутниковий знімок 16.09.26.", "2026-09-20 10:00"),
+                         ("day", date(2026, 9, 16)))
+        # рік названо — давня історія, а не цей рік (Оленівка, пост 27343)
+        self.assertEqual(self._when("У ніч з 28 на 29 липня 2022 року в Оленівці", "2026-07-28 07:06"),
+                         ("old", None))
+        self.assertEqual(self._when("У ніч на 24.07.2025 уражено", "2026-07-30 10:00"), ("old", None))
+
+    def test_this_night_in_the_evening_is_ahead(self):
+        # «цієї ночі» вдень — минула ніч, увечері — ніч, що попереду
+        self.assertEqual(self._when("Цієї ночі уразили НПЗ у Тюмені", "2026-07-25 13:04"),
+                         ("night", date(2026, 7, 24)))
+        self.assertIsNone(self._when("Не нехтуйте тривогами цієї ночі.", "2026-07-29 20:40"))
+        # «вночі» ввечері — так і лишається минулою ніччю
+        self.assertEqual(self._when("Але вночі під час вибухів на складі була пожежа.", "2026-07-18 20:19"),
+                         ("night", date(2026, 7, 17)))
 
     def test_last_night_in_the_afternoon(self):
         # «сьогодні вночі», написане о 13:35, — про ніч, що скінчилась
@@ -167,8 +185,13 @@ class TestPlaces(unittest.TestCase):
                          ["Kamensk-Shakhtinsky"])
         self.assertIn("Stanytsya-Luhanska",
                       self.names("Станица Луганская, Луганская область. Была атакована инфраструктура."))
-        # «Берегова інфраструктура» — не Берегове
+        # «Берегова інфраструктура» — не Берегове, але саме село — так
         self.assertEqual(self.names("Берегова інфраструктура: зафіксовано декілька уражень."), [])
+        self.assertTrue(self.names("Береговое, Крым - прилет, горит."))
+        # однина після прикметника — місто і його область
+        self.assertEqual(self.names("Атакована нефтебаза в станице Тацинской Ростовской области, пожар."),
+                         ["Tatsinskaya"])
+        self.assertEqual(self.names("Уражено НПЗ у Ярославському, Московському, Тверському та Курському регіонах."), [])
 
     def test_quotes_are_names_not_places(self):
         # «Ангара» — ракета (альт-назва Перевального в Криму)
@@ -327,6 +350,54 @@ class TestIncidents(unittest.TestCase):
               post(2, "2026-07-25 10:19", "Все що залишилося від логістичного хабу Wildberries після "
                                           "атаки БПЛА в окупованому Сімферополі.", reply=1)]
         self.assertEqual([(x["night"], x["n"]) for x in self.build(ps)], [("2026-07-23", 2)])
+
+    def test_anniversary_word_does_not_hide_a_fresh_strike(self):
+        out = self.build([post(1, "2026-08-24 03:00", "У річницю Незалежності дрони уразили НПЗ у Саратові. Горять резервуари.")])
+        self.assertEqual([x["place"] for x in out], ["Saratov"])
+        out = self.build([post(1, "2026-06-01 09:14", "Сьогодні рік, як «Павутина». Аеродром Бєлая у вогні і диму.")])
+        self.assertEqual(out, [])
+
+    def test_old_dates_are_history(self):
+        # давній пост — нічого; довідка з давньою датою не ховає свіжого удару
+        self.assertEqual(self.build([post(1, "2026-07-21 10:00", "9 травня 2014 року. / Маріуполь. / "
+                                               "БМП-2 проривається крізь барикади, горить.")]), [])
+        out = self.build([post(2, "2026-07-14 14:22", "ВМС ЗС України знищили прикордонний корабель «Ізумруд» "
+                                                  "неподалік Новоросійська. Саме «Ізумруд» 25 листопада 2018 "
+                                                  "року брав участь у нападі в Керченській протоці.")])
+        self.assertEqual([(x["place"], x["night"]) for x in out], [("Novorossiysk", "2026-07-14")])
+
+    def test_old_sentence_and_old_reply(self):
+        # давнє речення не дає свого міста, хоч решта поста — свіжий удар
+        # (і не чіпляється поясненням до свіжого інциденту того міста)
+        out = self.build([post(3, "2026-07-12 03:00", "Керч, після атаки горить нафтобаза."),
+                          post(1, "2026-07-14 14:22", "ВМС знищили корабель «Ізумруд» неподалік Новоросійська. "
+                                                  "Саме він 25 листопада 2018 року горів у Керчі після зіткнення.")])
+        self.assertEqual(sorted((x["place"], x["n"]) for x in out), [("Kerch", 1), ("Novorossiysk", 1)])
+        # давній пост-відповідь не йде в інцидент батька
+        ps = [post(1, "2026-07-21 03:00", "Маріуполь, після атаки горить склад."),
+              post(2, "2026-07-21 08:00", "9 травня 2014 року. БМП-2 проривається крізь барикади, вибухи.", reply=1)]
+        self.assertEqual([x["n"] for x in self.build(ps)], [1])
+
+    def test_coastal_in_small_places(self):
+        out = self.build([post(1, "2026-08-12 18:21", "Новоросійськ 12.08. Уражено фрегати на базі ВМФ. "
+                                                  "Берегова інфраструктура: зафіксовано декілька уражень.")])
+        self.assertEqual([x["place"] for x in out], ["Novorossiysk"])
+
+    def test_refinery_name_matches_the_city(self):
+        self.assertTrue(A._names_city("Астраханський ГПЗ", ["астрахан"]))
+        self.assertTrue(A._names_city("Куйбишевський НПЗ (Самара)", ["самара"]))
+        self.assertFalse(A._names_city("Краснодарський НПЗ", ["красногвардеиское"]))
+        self.assertFalse(A._names_city('Нефтеперерабатывающий завод "Роснефть"', ["нефтегорск"]))
+
+    def test_refinery_stem_is_a_whole_name(self):
+        # «нефте» з «Нефтеперерабатывающий» — не Нефтегорськ (57 км до Туапсе)
+        out = self.build([post(1, "2026-08-22 05:19", "Нефтегорск, Краснодарский край: атака на НПЗ, пожар.")])
+        self.assertEqual([x["refinery"] for x in out], [None])
+
+    def test_ruins_without_a_known_strike_open_one(self):
+        # руїни — перше повідомлення про удар: інцидент є, як і до правила
+        out = self.build([post(1, "2026-08-04 10:00", "Все что осталось от склада ВБ в Алексине после атаки.")])
+        self.assertEqual([(x["place"], x["night"]) for x in out], [("Aleksin", "2026-08-03")])
 
     def test_refinery_of_another_town_is_not_taken(self):
         # Чапаєвськ — не НПЗ Новокуйбишевська за 30 км

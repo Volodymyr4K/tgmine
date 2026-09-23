@@ -72,6 +72,9 @@ SPAN_H = 30
 #: Пояснення без дати («супутниковий знімок», «другу добу горить») шукає
 #: інцидент того ж міста не далі за стільки діб назад.
 RETRO_DAYS = 7
+#: Дата, давніша за стільки діб від поста, — історія, а не наш удар:
+#: «у ніч з 28 на 29 липня 2022 року» (Оленівка).
+OLD_DAYS = 180
 #: Дрібне місце — не далі за стільки від контексту (міста батька, області).
 SMALL_KM = 100.0
 #: Точні координати в тексті належать місту поста, якщо ближчі за це.
@@ -158,8 +161,6 @@ NOT_PLACES = {skel(w) for w in (
     "советский", "радянський", "октябрьский", "первомайский", "заречный",
     "мирный", "мирний", "светлый", "лесной", "солнечный", "степной",
     "садовый", "ударный", "ударний", "ударні",
-    # «Берегова інфраструктура», «береговий ракетний комплекс» — не Берегове
-    "береговий", "берегова", "береговой", "береговая",
     # люди, яких канал згадує найчастіше
     "артем", "артём", "медведев", "медведєв", "путин", "путін", "шойгу",
     "герасимов", "белоусов", "кадыров", "кадиров",
@@ -412,11 +413,12 @@ MONTHS = {skel(m): i for i, ms in enumerate((
 _MON = "|".join(sorted(MONTHS, key=len, reverse=True))
 #: «в ніч на 15-те вересня», «у ніч проти 20 вересня», «в ночь на 12 сентября»
 _NIGHT_ON = r"\b(?:в|у)\s+(?:нич|ноч)\w*\s+(?:на|проти|[сз]\s+\d{1,2}(?:\.\d{2})?\s+на)\s+"
-NIGHT_OF = re.compile(rf"{_NIGHT_ON}(\d{{1,2}})(?:-?\w{{1,3}})?\s+({_MON})\b")
+NIGHT_OF = re.compile(rf"{_NIGHT_ON}(\d{{1,2}})(?:-?\w{{1,3}})?\s+({_MON})\b(?:\s+(20\d{{2}}))?")
 #: «у ніч на 24.07.2026», «в ночь на 16.08»
-NIGHT_OF_NUM = re.compile(rf"{_NIGHT_ON}(\d{{1,2}})\.(\d{{2}})(?:\.(?:20)?\d{{2}})?(?![\d.])")
+#: Крапка після дати — кінець речення («…в ніч на 01.05.2026.»), а не частина числа.
+NIGHT_OF_NUM = re.compile(rf"{_NIGHT_ON}(\d{{1,2}})\.(\d{{2}})(?:\.((?:20)?\d{{2}}))?(?!\d|\.\d)")
 #: «11 вересня», «12-го вересня», «21 вересня 2026 року»
-DAY_OF = re.compile(rf"\b(\d{{1,2}})(?:-?(?:того|ого|го|те|е|ое))?\s+({_MON})\b")
+DAY_OF = re.compile(rf"\b(\d{{1,2}})(?:-?(?:того|ого|го|те|е|ое))?\s+({_MON})\b(?:\s+((?:19|20)\d{{2}}))?")
 #: Слова події: атака, вибухи, ППО, кадри, місцеві пишуть — речення з
 #: місцем і такими словами — репортаж.
 ANCHOR = re.compile(
@@ -424,12 +426,12 @@ ANCHOR = re.compile(
     r"рейд|обстанов|кадр|момент|движух|движ|мисцев|местн|собща|повидомл|пишут|кажут|"
     r"говорят|лунают|збит|сбит|сбив|збив|шахед|геран|под ударом|пид ударом|тривог|"
     r"тревог|сирен|хлопк|звук|зараз|сейчас|щойно|прямо|наслидк|последств")
-NUM_DATE = re.compile(r"(?<![\d.])(\d{1,2})\.(\d{2})\.(?:20)?(\d{2})(?![\d.])")
+NUM_DATE = re.compile(r"(?<![\d.])(\d{1,2})\.(\d{2})\.(?:20)?(\d{2})(?!\d|\.\d)")
 #: «після удару 16.08» — день і місяць без року, лише після слова події
-NUM_DM = re.compile(r"(?:удар|атак|нич|ноч|писл|после|вид|от)\w*\s+(\d{1,2})\.(\d{2})(?![\d.])")
+NUM_DM = re.compile(r"(?:удар|атак|нич|ноч|писл|после|вид|от)\w*\s+(\d{1,2})\.(\d{2})(?!\d|\.\d)")
 #: Минула ніч словами: «сьогодні вночі», «цієї ночі», «после ночной атаки»,
 #: «ранкової роботи», «этим утром».
-LAST_NIGHT = re.compile(r"вночи|уночи|циеи ночи|етой ночю|сегодня ночю|ночн\w* (?:атак|удар|рейд|прил)|"
+LAST_NIGHT = re.compile(r"вночи|уночи|ночн\w* (?:атак|удар|рейд|прил)|"
                         r"ничн\w* (?:атак|удар|рейд|прил|робот)|вранци|зранку|ранков|утром|утрен|"
                         r"согодни ранком")
 #: Удар названо: атака, дрон, ракета, приліт, ударники, Сили оборони. Сама
@@ -462,11 +464,20 @@ RETRO = re.compile(
     r"продовжу\w* гор|продолжа\w* гор|догора|доси гор|"
     # нове про старе: «сьогодні з'ясувалося», «стало відомо»
     r"зясувал|вияснил|стало видомо|стало известно|розбира\w* завал|разбор\w* завал|"
-    # руїни вже відомого удару: «Все що залишилося від хабу Wildberries»
-    r"що залишилос|що лишилос|что осталос|"
     # річниці: «сьогодні рік, як… Павутина»
-    r"рик тому|согодни рик|рик як|год назад|годовщин|ричниц|роковин")
-ANNIV = re.compile(r"согодни рик|сегодня год|годовщин|ричниц|роковин")
+    # «У річницю Незалежності уразили НПЗ» — свіжий удар, тож саме слово
+    # «річниця» — не ознака; «сьогодні рік / річниця» — `ANNIV`
+    r"рик тому|рик як|год назад")
+#: «Цієї ночі», «этой ночью» — минула ніч лише вдень: після 20:00 це ніч,
+#: що попереду («Не нехтуйте тривогами цієї ночі», «Будьте у безпечному місці
+#: цієї ночі»; усі три такі пости корпусу — наперед).
+THIS_NIGHT = re.compile(r"циеи ночи|етой ночю|сегодня ночю")
+#: Руїни: «Все що залишилося від хабу Wildberries» — здебільшого подробиці
+#: відомого удару (тоді до нього, а не новий інцидент на ніч поста); коли
+#: відомого нема — пост відкриває удар, як і раніше.
+RUINS = re.compile(r"що залишилос|що лишилос|что осталос")
+ANNIV = re.compile(r"согодни рик\b|сегодня год\b|согодни (?:\w+ )?(?:ричниц|роковин)|"
+                   r"сегодня (?:\w+ )?годовщин")
 _YESTERDAY = re.compile(r"\bвчора|\bучора|\bвчера|вчорашн|учорашн|вчерашн")
 REPORTED = re.compile(r"(?:вчора|учора|вчера)\w*\s+(?:\w+\s+){0,2}(?:повидом|собщ|заяв|писал|писали|показ)")
 
@@ -554,29 +565,60 @@ _NOT_STEMS = None
 
 #: Прикметник у переліку областей: «у Донецькій, Луганській областях»,
 #: «Донецької та Луганської областей».
+_REGION_PLURAL = re.compile(r"^(?:областях|областей|областям|областями|регионах|регионов|"
+                            r"регионам|краях|краев|краив|республиках|республик)$")
 _ADJ_LIST = re.compile(r"\w+к(ий|ой|ои|ая|ую|ом|ого|ому|им|их)$")
 
 
+#: «Берегова інфраструктура», «береговий ракетний комплекс», «берегової
+#: охорони» — прикметник «прибережний», а не село Берегове в Криму.
+_COASTAL_NEXT = re.compile(r"^(?:инфраструктур|оборон|охорон|охран|лини|ракетн|батаре|комплекс|"
+                           r"артилер|позиц|обект|смуг|полос|укрипл|укрепл|зон|баз)")
+
+
+def _coastal(sks, i):
+    return (sks[i].startswith("берегов") and i + 1 < len(sks)
+            and bool(_COASTAL_NEXT.match(sks[i + 1])))
+
+
+def _names_city(obj_name, city_words):
+    """Назва обʼєкта містить назву міста: «Астраханський ГПЗ» — Астрахань.
+    Спільний початок — майже на все слово міста, а не пʼять літер:
+    «Красногвардейское» не «Краснодарський НПЗ», «Нефтегорск» не
+    «Нефтеперерабатывающий завод "Роснефть"»."""
+    own = re.findall(r"\w+", skel(obj_name))
+    for cw in city_words:
+        need = max(5, len(cw) - 3)
+        for w in own:
+            k = 0
+            while k < min(len(w), len(cw)) and w[k] == cw[k]:
+                k += 1
+            if k >= need:
+                return True
+    return False
+
+
 def _before_region(sks, i):
-    """Слово стоїть перед «область/край/регіон», можливо через перелік
-    прикметників: тоді це назва області, а не однойменне селище
-    («Донецькій» — не Донецький, «Ярославському регіоні» — не Ярославський)."""
+    """Слово стоїть перед «область/край/регіон»: тоді це назва області, а не
+    однойменне селище («Ярославському регіоні» — не Ярославський). Перелік
+    прикметників («у Донецькій, Луганській областях», «Донецької та
+    Луганської областей») — лише коли він закінчується МНОЖИНОЮ: однина
+    після прикметника — місто і його область («в станице Тацинской
+    Ростовской области», «у Каменськ-Шахтинському Ростовської області»)."""
     if i + 1 < len(sks) and REGION_WORD.match(sks[i + 1]):
         return True
-    # перелік — лише від прикметника («В Курске и области» — місто Курськ) і
-    # лише в тому самому відмінку: «у Каменськ-Шахтинському Ростовської
-    # області» — місто, а за ним область у родовому
+    # перелік — лише від прикметника: «В Курске и области» — місто Курськ
     m = _ADJ_LIST.match(sks[i])
     if not m:
         return False
     j = i + 1
-    while j < len(sks) and j <= i + 4:
+    while j < len(sks) and j <= i + 16:
         if REGION_WORD.match(sks[j]):
-            return True
+            return bool(_REGION_PLURAL.match(sks[j]))
         n = _ADJ_LIST.match(sks[j])
         # перелік не повторює того самого слова: «Станица Луганская, Луганская
         # область» — станиця й область
-        if sks[j] in ("та", "и", "і", "й", "або", "или") or (
+        if sks[j] in ("та", "и", "й", "або", "или") or (
                 n and n.group(1) == m.group(1) and sks[j] != sks[i]):
             j += 1
             continue
@@ -788,7 +830,7 @@ class Places:
             if not cand and not (len(sk) >= 3 and tok[:1].isupper() and i > 0):
                 continue
             cap = tok[:1].isupper()
-            nxt_region = _before_region(sks, i)
+            nxt_region = _before_region(sks, i) or _coastal(sks, i)
             hits = [] if nxt_region else self._noun_hits(sk, i, sks)
             # другу частину складеної назви («Усть-Луга», «Ростов-на-Дону»)
             # окремим містом не беремо — лише всю назву
@@ -851,7 +893,7 @@ class Places:
             sk = sks[i]
             if not tok[:1].isupper() or len(sk) < 5 or not _candidate(tok, sk, text, at, toks, sks, i):
                 continue
-            if i + 1 < len(sks) and REGION_WORD.match(sks[i + 1]):
+            if _before_region(sks, i) or _coastal(sks, i):
                 continue
             e = at + len(tok)
             if (at > 1 and text[at - 1] == "-" and text[at - 2].isalpha()) or \
@@ -976,10 +1018,10 @@ class Places:
             # НПЗ цього міста: у назві місто («Куйбишевський НПЗ (Самара)»)
             # або він поруч — не найближчий у 40 км (Чапаєвськ ставав на НПЗ
             # Новокуйбишевська)
-            stems = {w[:5] for w in self.cyr.get((city["name"], city["lat"], city["lon"]), ())}
+            words = self.cyr.get((city["name"], city["lat"], city["lon"]), ())
             near = [(hav(c, (o["lat"], o["lon"])), o) for o in self.refineries]
             near = [x for x in near if x[0] <= 12 or (
-                x[0] <= OBJ_NAMED_KM and any(st in skel(x[1]["name"]) for st in stems))]
+                x[0] <= OBJ_NAMED_KM and _names_city(x[1]["name"], words))]
             if near:
                 o = min(near, key=lambda x: (x[0], x[1]["name"]))[1]
                 return (o["lat"], o["lon"]), o["name"]
@@ -1012,20 +1054,26 @@ def _date_of(sent_sk: str, posted: datetime):
     день) для «N вересня» / «учора». None — дати нема."""
     t = posted.astimezone(MSK)
     m = NIGHT_OF.search(sent_sk)
-    if m:
-        d = _mkdate(int(m.group(1)), MONTHS[m.group(2)], t)
-        return ("night", d - timedelta(days=1)) if d else None
-    m = NIGHT_OF_NUM.search(sent_sk)
-    if m and 1 <= int(m.group(2)) <= 12:
-        d = _mkdate(int(m.group(1)), int(m.group(2)), t)
-        return ("night", d - timedelta(days=1)) if d else None
-    days = {_mkdate(int(a), MONTHS[b], t) for a, b in DAY_OF.findall(sent_sk)}
+    n = NIGHT_OF_NUM.search(sent_sk)
+    for mm, month in ((m, m and MONTHS[m.group(2)]), (n, n and int(n.group(2)))):
+        if not mm or not 1 <= month <= 12:
+            continue
+        d = _mkdate(int(mm.group(1)), month, t, mm.group(3))
+        if d is None:
+            continue
+        # «у ніч з 28 на 29 липня 2022 року» — Оленівка, не цей рік
+        if (t.date() - d).days > OLD_DAYS:
+            return ("old", None)
+        return ("night", d - timedelta(days=1))
+    days = {_mkdate(int(a), MONTHS[b], t, y or None) for a, b, y in DAY_OF.findall(sent_sk)}
     # «09.09.2026», «16.09.26»
     for a, b, y in NUM_DATE.findall(sent_sk):
         try:
             days.add(date(2000 + int(y) % 100, int(b), int(a)))
         except ValueError:
             pass
+    if days and all((t.date() - d).days > OLD_DAYS for d in days if d):
+        return ("old", None)
     for a, b in NUM_DM.findall(sent_sk):
         if 1 <= int(b) <= 12:
             days.add(_mkdate(int(a), int(b), t))
@@ -1046,11 +1094,18 @@ def _date_of(sent_sk: str, posted: datetime):
     # про ніч, що вже скінчилась: оперативна ніч D-1, а не поточна D.
     if t.hour >= 12 and LAST_NIGHT.search(sent_sk):
         return ("night", t.date() - timedelta(days=1))
+    if 12 <= t.hour < 20 and THIS_NIGHT.search(sent_sk):
+        return ("night", t.date() - timedelta(days=1))
     return None
 
 
-def _mkdate(d, m, t):
+def _mkdate(d, m, t, year=None):
     """Дата без року: рік поста, а якщо так виходить майбутнє — минулий."""
+    if year:
+        try:
+            return date(2000 + int(year) % 100, m, d)
+        except ValueError:
+            return None
     try:
         x = date(t.year, m, d)
     except ValueError:
@@ -1112,7 +1167,14 @@ def analyse(p: dict, places: Places, point_region, context=(), depth_km=None) ->
     # Дата, названа в пості один раз, стосується всього поста: «2-го вересня
     # ми повідомляли про пожежу … під Пермі … у Лядах».
     post_when = _date_of(sk, t)
+    # єдина дата поста — давня («9 травня 2014 року», «до 24.02.2022»): увесь
+    # пост історія, місць без своєї дати він не дає
     if post_when and post_when[0] == "many":
+        post_when = None
+    # …але не тоді, коли речення без дати звітує про свіжий наслідок: «ВМС
+    # потопили «Ізумруд»… / Саме «Ізумруд» 25 листопада 2018 року…»
+    if post_when and post_when[0] == "old" and any(
+            HIT.search(NOT_HIT.sub(" ", skel(x))) and _date_of(skel(x), t) is None for x in sents):
         post_when = None
     short = len(text) <= 100
     post_event = bool(ANCHOR.search(sk) or HIT.search(sk) or RAW_ANCHOR.search(text))
@@ -1148,9 +1210,10 @@ def analyse(p: dict, places: Places, point_region, context=(), depth_km=None) ->
                 dateline = len(_TOK.findall(s)) <= 3
                 anchored = short or bool(ANCHOR.search(ss) or HIT.search(ss) or RAW_ANCHOR.search(s)
                                          or _OBJ_ANY.search(ss)) or (dateline and post_event)
-                memo[a] = (bool(RETRO.search(ss)), _date_of(ss, t) or post_when, anchored)
+                memo[a] = (bool(RETRO.search(ss)), _date_of(ss, t) or post_when, anchored,
+                           bool(RUINS.search(ss)))
                 return memo[a]
-        return whole_retro, post_when, short
+        return whole_retro, post_when, short, False
 
     coords = coords_in(text)
     ms = places.mentions(text)
@@ -1188,10 +1251,15 @@ def analyse(p: dict, places: Places, point_region, context=(), depth_km=None) ->
             near = places.near_same(m["tok"], context)
             if near is not None:
                 r = near
-        retro, when, anchored = sent_info(m["pos"])
+        retro, when, anchored, ruins = sent_info(m["pos"])
+        # давня дата — історія: ні нового удару, ні пояснення до свіжого
+        if when and when[0] == "old":
+            continue
         if when and when[0] == "many":
             when = None
-        out.append({"rec": r, "how": m["how"], "retro": retro or bool(when) or anniversary,
+        soft = ruins and not (retro or when or anniversary)
+        out.append({"rec": r, "how": m["how"], "retro": retro or bool(when) or anniversary or soft,
+                    "soft": soft,
                     "when": when, "tok": m["tok"], "anchored": anchored,
                     "hit_here": sent_hit(m["pos"])})
     # Два місця одного поста ближче за 20 км — одне місце, і конкретніше
@@ -1207,6 +1275,7 @@ def analyse(p: dict, places: Places, point_region, context=(), depth_km=None) ->
             twin["anchored"] = twin["anchored"] or x["anchored"]
             twin["hit_here"] = twin["hit_here"] or x["hit_here"]
             twin["retro"] = twin["retro"] and x["retro"]
+            twin["soft"] = twin["soft"] and x["soft"]
     order = {id(x): i for i, x in enumerate(out)}
     out = sorted(keep, key=lambda x: order[id(x)])
     # Єдине місце поста — місце всієї події поста: «Туапсе станом на ранок.
@@ -1243,7 +1312,9 @@ def analyse(p: dict, places: Places, point_region, context=(), depth_km=None) ->
             "places": out, "regions": regs, "objs": objs, "names": names[:2],
             "hit": bool(HIT.search(NOT_HIT.sub(" ", sk))) and not neg, "neg": neg,
             "official": bool(OFFICIAL.search(sk) or RAW_OFFICIAL.search(text)), "coords": coords,
-            "retro": whole_retro or bool(post_when), "when": post_when, "sk": sk,
+            "retro": whole_retro or bool(post_when),
+            "when": None if post_when and post_when[0] == "old" else post_when, "sk": sk,
+            "old": bool(post_when and post_when[0] == "old"),
             "event": post_event, "attack": bool(ATTACKW.search(sk) or RAW_ANCHOR.search(text))}
 
 
@@ -1385,7 +1456,7 @@ def build(posts: list[dict], gaz, targets=None, *, point_region=None,
                 best = j
         return best
 
-    def place(a, r, retro, when, anchored, via, tok=""):
+    def place(a, r, retro, when, anchored, via, tok="", soft=False):
         """Пост із місцем -> інцидент. Повертає, чи пост кудись пішов."""
         # (наступність серії — лише для слів, яких газетир не знає: розвʼязане
         # місце не замінюємо — «Великий Новгород» після «Нижнього Новгорода»
@@ -1434,10 +1505,12 @@ def build(posts: list[dict], gaz, targets=None, *, point_region=None,
                     night = d1 if d1.isoformat() in act else (
                         when[1] if when[1].isoformat() in act else d1)
                 j = new(a, r, night.isoformat(), timed=False)
-            if j is None:
+            if j is not None:
+                attach(j, a, "retro", r, tok)
+                return True
+            # руїни без відомого удару — перше повідомлення про нього
+            if not soft:
                 return False
-            attach(j, a, "retro", r, tok)
-            return True
         # Місце без події в реченні не йде нікуди: «Ми встоїмо / Москва
         # ляже» під звітом СБС про кораблі чіплялось до живої московської
         # серії тієї ночі.
@@ -1458,6 +1531,10 @@ def build(posts: list[dict], gaz, targets=None, *, point_region=None,
             ctx = [incs[j]["pt"] for j in of_post[par]]
         a = analyse(p, places, point_region, ctx, depth_km)
         parents[p["id"]] = par
+        # давній пост («9 травня 2014 року. Маріуполь») — ні в інцидент батька,
+        # ні за координатами, ні в гілку
+        if a["old"]:
+            continue
         placed = False
         cities = []
         # Перелік міст через країну («кораблі в Новоросійську, С-400 під
@@ -1469,6 +1546,7 @@ def build(posts: list[dict], gaz, targets=None, *, point_region=None,
                 for x in distinct.values() for y in distinct.values()) > 150:
             for pl in a["places"]:
                 pl["retro"] = True
+                pl["soft"] = False
                 pl["anchored"] = False          # огляд нових ударів не відкриває
         for pl in a["places"]:
             r = pl["rec"]
@@ -1476,7 +1554,7 @@ def build(posts: list[dict], gaz, targets=None, *, point_region=None,
             if any(key_of(c) == k for c in cities):
                 continue
             cities.append(r)
-            if place(a, r, pl["retro"], pl["when"], pl["anchored"], "live", pl["tok"]):
+            if place(a, r, pl["retro"], pl["when"], pl["anchored"], "live", pl["tok"], pl.get("soft")):
                 placed = True
         # точні координати без міста в тексті: «Себряковцемент … у
         # Волгоградській області … 50.094131° 43.237939°». Спершу — інцидент

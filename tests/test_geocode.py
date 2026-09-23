@@ -616,6 +616,31 @@ class TestCityNamedLikeItsOblast(unittest.TestCase):
         self.assertAt("Луганск\nЕдиничные фиксации\nЛНР", (48.57, 39.31))
         self.assertAt("Донецк, Макеевка ДНР и близлежащие\nединичные фиксации", (48.02, 37.80))
 
+    def donetsk_conf(self, text):
+        posts = E.enrich([{"channel": "t", "id": 1, "text": text,
+                           "date": "2026-07-01T10:00:00+00:00"}], self.cfg)
+        GC.geocode_posts(posts, self.gaz, self.cfg.geo,
+                         aliases=self.cfg.geo_aliases, region_a1=self.a1)
+        return next(x["geo_conf"] for x in posts[0]["entities"] if x.get("match") == "Донецк")
+
+    def test_each_namesake_guard(self):
+        # кожен запобіжник — пост, де спрацьовує лише він
+        for text, want in [
+                ("Донецк\nфиксации БПЛА", "centroid"),                            # без другого маркера
+                ("Донецк - тревога по БПЛА со стороны ДНР", "centroid"),           # маркер — джерело
+                ("Донецк ДНР, Ростовская область - опасность по БПЛА", "centroid"),  # область тезки
+                ("Донецк ДНР, Гуково - опасность по БПЛА", "centroid"),            # НП коло тезки
+                ("Донецк ДНР, Криничне - опасность по БПЛА", "city-marker"),       # місто коло обох
+                # хутори-тезки коло тезки — не доказ (А/Б: 22 події за 289 км)
+                ("Донецк, пос.Октябрьский и близлежащие / Опасность по БПЛА / ДНР", "city-marker")]:
+            with self.subTest(text=text):
+                self.assertEqual(self.donetsk_conf(text), want)
+
+    def test_luhansk_is_not_the_namesakes_oblast(self):
+        # центр ЛНР — Луганськ, за 53 км від Донецька Ростовського; область
+        # тезки — за адмінкодом, а не за відстанню
+        self.assertAt("Донецк ДНР, Луганск ЛНР - фиксации БПЛА", (48.02, 37.80))
+
     def test_federal_city_label_does_not_take_the_point(self):
         # «Москва» тут — підпис регіону vrv, крапка — Троїцьк
         b = self.best("АО Троицк\nМосква\nСбитие БПЛА")
@@ -626,7 +651,9 @@ class TestCityNamedLikeItsOblast(unittest.TestCase):
         for text in ("Донецк, Каменск-Шахтинский, Гуково\nфиксации БПЛА",
                      "Гуково\nДонецк Ростовской\nНовошахтинск\nРостовская область\nТревога по БПЛА",
                      # «ЛДНР» — теж маркер ДНР, але область тезки названо
-                     "Донецк, Гуково, Ростовская область - тревога по БПЛА от ЛДНР"):
+                     "Донецк, Гуково, Ростовская область - тревога по БПЛА от ЛДНР",
+                     # «со стороны ДНР» — джерело; Гуково — коло тезки
+                     "Донецк, Гуково, Новошахтинск - опасность БПЛА со стороны ДНР"):
             with self.subTest(text=text.split("\n")[0]):
                 b = self.best(text)
                 self.assertTrue(b is None or GC.haversine((b["lat"], b["lon"]), (48.02, 37.80)) > 50)

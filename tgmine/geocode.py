@@ -1104,15 +1104,20 @@ def _consensus(queries: list[str], gaz: "Gazetteer", radius: float = CONSENSUS_K
 
 
 _AREA_WORD = re.compile(r"област|край|республик|oblast|kray|respublik")
+#: «от ДНР», «со стороны ЛДНР» — джерело, а не місце поста
+_FROM_BEFORE = re.compile(r"(?:\bот|\bиз|стороны|сторони|\bвід|\bз)\s*$", re.I)
 
 
-def _namesake_elsewhere(gaz, e, seat, p, region_geo) -> bool:
-    """Чи НЕ брати адмінцентр замість області. Місто-маркер має тезку деінде («Донецк» — ще й місто в
-    Ростовській: «Донецк, Каменск-Шахтинский, Гуково») — адмінцентр береться,
-    лише коли пост ще раз називає ту саму область іншим словом («Донецк,
-    Макеевка ДНР») і не називає область, де лежить тезка."""
-    # лише пряма назва міста: «от Брянска», «Смоленска область» — родовий
-    # відмінок і область, а не місто (замір А/Б 23.09: 190 км на джерело)
+def _namesake_elsewhere(gaz, e, seat, p, region_a1) -> bool:
+    """Чи НЕ брати адмінцентр замість області.
+
+    Лише пряма назва міста: «от Брянска», «Смоленска область» — родовий
+    відмінок і область, а не місто (замір А/Б 23.09: 190 км на джерело).
+    Місто-маркер із тезкою деінде («Донецк» — ще й місто в Ростовській:
+    «Донецк, Каменск-Шахтинский, Гуково») — адмінцентр, лише коли пост ще
+    раз називає ту саму область іншим словом і не як джерело («Донецк,
+    Макеевка ДНР», а не «со стороны ДНР»), не називає області тезки і не
+    називає міста коло тезки (Гуково, Кам'янськ-Шахтинський)."""
     if not any(r is seat or (r["lat"], r["lon"], r["name"]) == (seat["lat"], seat["lon"], seat["name"])
                for r in gaz.by_name.get(norm(e["match"]), ())):
         return True
@@ -1121,13 +1126,34 @@ def _namesake_elsewhere(gaz, e, seat, p, region_geo) -> bool:
               and haversine((c["lat"], c["lon"]), (seat["lat"], seat["lon"])) > 50]
     if not others:
         return False
-    regs = [x for x in p.get("entities", []) if x["type"] == "регіон"]
-    same = any(x["value"] == e["value"] and x.get("pos") != e.get("pos") for x in regs)
-    near_other = any(
-        x["value"] != e["value"] and x["value"] in region_geo
-        and min(haversine(region_geo[x["value"]], (c["lat"], c["lon"])) for c in others) < 150
-        for x in regs)
-    return not same or near_other
+    text = p.get("text") or ""
+    ents = p.get("entities", [])
+    regs = [x for x in ents if x["type"] == "регіон"]
+    same = any(x["value"] == e["value"] and x.get("pos") != e.get("pos")
+               and not (x.get("pos") is not None
+                        and _FROM_BEFORE.search(text[max(0, x["pos"] - 20):x["pos"]]))
+               for x in regs)
+    if not same:
+        return True
+    # область тезки — за адмінкодом газетира, а не за відстанню до центру
+    # області: центр ЛНР — сам Луганськ, за 53 км від Донецька Ростовського
+    other_codes = {(c.get("cc"), c.get("a1")) for c in others}
+    if any(x["value"] != e["value"] and other_codes & set((region_a1 or {}).get(x["value"], ()))
+           for x in regs):
+        return True
+    # НП поста, що є лише коло тезки й не коло адмінцентру
+    for x in ents:
+        if x["type"] == "регіон" or not x.get("match") or x is e:
+            continue
+        near = [c for c in gaz.candidates(str(x["match"]), None) if c["fclass"] == "P"]
+        # лише місто, а не хутір: «поселок Октябрьский» (район Донецька) має
+        # безлюдних тезок коло Донецька Ростовського — не доказ
+        by_other = any(c["pop"] >= 1000 and haversine((c["lat"], c["lon"]), (o["lat"], o["lon"])) <= 50
+                       for c in near for o in others)
+        by_seat = any(haversine((c["lat"], c["lon"]), (seat["lat"], seat["lon"])) <= 50 for c in near)
+        if by_other and not by_seat:
+            return True
+    return False
 
 
 def geocode_posts(posts: list[dict], gaz: Gazetteer, region_geo: dict,
@@ -1235,7 +1261,7 @@ def geocode_posts(posts: list[dict], gaz: Gazetteer, region_geo: dict,
                 if hit and hit.get("fcode") in ("ADM1", "ADM1H") and gaz.is_area_adm1(hit):
                     seat = gaz.lookup(e["match"], base, max_km, prefer_seat=True)
                     if seat and seat["fclass"] == "P" and not _namesake_elsewhere(
-                            gaz, e, seat, p, region_geo):
+                            gaz, e, seat, p, region_a1):
                         hit = seat
                 # Місто-маркер — лише пряма назва. Родовий фолбек тут ставив би
                 # ціль: «в направлении Москвы» (маркер Московської) ставало

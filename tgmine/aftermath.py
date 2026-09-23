@@ -474,11 +474,14 @@ def coords_in(text: str) -> list[tuple[float, float]]:
         if _POV.search(text[max(0, m.start() - 8):m.start()]):
             continue
         g = m.groups()
-        if len(g) == 2:
-            la, lo = float(g[0]), float(g[1])
-        else:
-            la = int(g[0]) + int(g[1]) / 60 + float(g[2]) / 3600
-            lo = int(g[3]) + int(g[4]) / 60 + float(g[5]) / 3600
+        try:
+            if len(g) == 2:
+                la, lo = float(g[0]), float(g[1])
+            else:
+                la = int(g[0]) + int(g[1]) / 60 + float(g[2]) / 3600
+                lo = int(g[3]) + int(g[4]) / 60 + float(g[5]) / 3600
+        except ValueError:
+            continue                          # «36..5”» — описка, не координата
         if 41 <= la <= 72 and 19 <= lo <= 180:
             out.append((round(la, 5), round(lo, 5)))
     return out
@@ -611,6 +614,9 @@ class Places:
         # покажчику, хоч би й було менше за BIG_POP: Усть-Луга, Приморськ.
         self.oil = [o for o in (targets or {}).get("objects", [])
                     if o.get("cat") in ("refinery", "fuel_depot") and not o.get("osm")]
+        # кириличні назви великих міст (кістяк першого слова) — впізнати «свій»
+        # НПЗ за назвою (`object_point`); окремо, щоб не чіпати записи газетира
+        self.cyr: dict[tuple, set] = collections.defaultdict(set)
         oil_cells = {(round(o["lat"] + dy / 10, 1), round(o["lon"] + dx / 10, 1))
                      for o in self.oil for dy in (-1, 0, 1) for dx in (-2, -1, 0, 1, 2)}
         seen = set()
@@ -643,6 +649,7 @@ class Places:
                 for st in _noun_stems(words[-1]):
                     if big:
                         self.noun[st].append((tuple(words), r))
+                        self.cyr[(r["name"], r["lat"], r["lon"])].add(words[0])
                     elif len(words) == 1 and len(st) >= 4:
                         # дрібні — лише однослівні: `small_mentions` інших не
                         # бере, а покажчик і так найбільша частина кешу
@@ -922,8 +929,13 @@ class Places:
         аеродром. None — лишається місто."""
         c = (city["lat"], city["lon"])
         if re.search(OBJECTS[0][1], text_sk):
+            # НПЗ цього міста: у назві місто («Куйбишевський НПЗ (Самара)»)
+            # або він поруч — не найближчий у 40 км (Чапаєвськ ставав на НПЗ
+            # Новокуйбишевська)
+            stems = {w[:5] for w in self.cyr.get((city["name"], city["lat"], city["lon"]), ())}
             near = [(hav(c, (o["lat"], o["lon"])), o) for o in self.refineries]
-            near = [x for x in near if x[0] <= OBJ_CITY_KM]
+            near = [x for x in near if x[0] <= 12 or (
+                x[0] <= OBJ_CITY_KM and any(st in skel(x[1]["name"]) for st in stems))]
             if near:
                 o = min(near, key=lambda x: (x[0], x[1]["name"]))[1]
                 return (o["lat"], o["lon"]), o["name"]
@@ -971,6 +983,9 @@ def _date_of(sent_sk: str, posted: datetime):
             days.add(_mkdate(int(a), int(b), t))
     days.discard(None)
     days.discard(None)
+    # сьогоднішня дата — не заднє число: «Ураження … 06.07.2026» о 14:00
+    # 06.07 — це репортаж, ніч за часом поста
+    days.discard(t.date())
     if len(days) == 1:
         return ("day", days.pop())
     if len(days) > 1:
@@ -1267,6 +1282,11 @@ def build(posts: list[dict], gaz, targets=None, *, point_region=None,
             # червня, Перм 28 і 29 квітня)
             if span_h is not None and (t - inc["first"]).total_seconds() / 3600 > span_h:
                 continue
+            # живий пост не йде в інцидент, відкритий поясненням на давню
+            # ніч («11 вересня… Губаха», а за дві години — новий удар по
+            # Губасі): такий інцидент приймає лише пости своєї ночі
+            if span_h is not None and inc["t0"] is None and inc["night"] != night_of(t):
+                continue
             if best is None or inc["last"] > incs[best]["last"]:
                 best = j
         return best
@@ -1316,10 +1336,9 @@ def build(posts: list[dict], gaz, targets=None, *, point_region=None,
 
     def place(a, r, retro, when, anchored, via, tok=""):
         """Пост із місцем -> інцидент. Повертає, чи пост кудись пішов."""
-        if not retro and tok:
-            j = series(tok, a["t"])
-            if j is not None and hav(incs[j]["pt"], (r["lat"], r["lon"])) > 5:
-                r = incs[j]["rec"]
+        # (наступність серії — лише для слів, яких газетир не знає: розвʼязане
+        # місце не замінюємо — «Великий Новгород» після «Нижнього Новгорода»
+        # мав одну основу останнього слова й зникав)
         k, pt = key_of(r), (r["lat"], r["lon"])
         if retro:
             nights = None
@@ -1510,15 +1529,17 @@ def build(posts: list[dict], gaz, targets=None, *, point_region=None,
         a_["merged"] = True
     # Одне місце за ніч — одна позначка: дві серії про Туапсе тієї ж ночі
     # (живий репортаж і денне «пекло триває») — один інцидент.
-    seen_k = {}
+    # (і так само два інциденти тієї ночі ближче за 5 км — Губаха з назви й
+    # цех Метафраксу з координат за пів кілометра)
+    by_night = collections.defaultdict(list)
     for inc in incs:
         if inc["merged"]:
             continue
-        kk = (inc["night"], inc["key"])
-        if kk not in seen_k:
-            seen_k[kk] = inc
+        base = next((b for b in by_night[inc["night"]]
+                     if b["key"] == inc["key"] or hav(b["pt"], inc["pt"]) <= 5), None)
+        if base is None:
+            by_night[inc["night"]].append(inc)
             continue
-        base = seen_k[kk]
         ids = {x["id"] for x in base["posts"]}
         base["posts"] += [x for x in inc["posts"] if x["id"] not in ids]
         if inc["t0"] and (base["t0"] is None or inc["t0"] < base["t0"]):
@@ -1628,7 +1649,10 @@ def _finish(inc, places, point_region, depth_km, front_km):
             else "visible" if hit else "attack")
     t0 = inc["t0"]
     return {
-        "id": f"{CHANNEL}/{posts[0]['id']}",
+        # перший пост + місто: один пост про два міста відкриває два
+        # інциденти («Сіріус … Сочі»), і id мусить їх розрізняти — ним
+        # редактор памʼятає покладене, а драйвер злиття зводить рядки
+        "id": f"{CHANNEL}/{posts[0]['id']}/{r['name']}",
         "night": inc["night"],
         "t": t0.astimezone(MSK).strftime("%H:%M") if t0 else "",
         "lat": round(la, 5), "lon": round(lo, 5),

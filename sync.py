@@ -153,8 +153,17 @@ def aftermath(st, gaz, targets, log):
         return
     first = st.dates()
     since = first[0] if first else None
-    incs = AF.build(raw, gaz, targets)
-    ch = AF.write(incs, Path("."), since=since)
+    # Шар будується щоразу з усього сирого, тож пост, на якому розбір
+    # падає, валив би КОЖЕН прогін, доки не випаде з вікна збору, — без
+    # сайту й коміту даних. Падіння тут лишає вчорашній шар і кричить у лог.
+    try:
+        incs = AF.build(raw, gaz, targets)
+        ch = AF.write(incs, Path("."), since=since)
+    except Exception as e:                       # noqa: BLE001
+        import traceback
+        traceback.print_exc()
+        print(f"::warning::шар наслідків не перебудовано: {e!r}")
+        return
     shown = sum(1 for x in incs if x["hit"] and (not since or x["night"] >= since))
     log(f"наслідки: інцидентів {len(incs)}, на карту {shown}, змінено файлів ночей {ch}")
 

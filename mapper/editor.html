@@ -4820,7 +4820,8 @@ function imgToData(img){
 // губилось у шумі; з кнопкою «узяти всі» один випадковий клік зносив би
 // всю ніч.
 function snapState(){
-  return JSON.stringify({objs:S.objs, ghosts:S.ghosts, sight:S.sight, hideCity:S.hideCity});
+  return JSON.stringify({objs:S.objs, ghosts:S.ghosts, sight:S.sight, hideCity:S.hideCity,
+                         aftSeen:S.aftSeen||[]});
 }
 function applyState(j){
   const d=JSON.parse(j);
@@ -4830,6 +4831,8 @@ function applyState(j){
   // Прибраний підпис міста теж крок історії: інакше Delete по назві був
   // незворотним, а виглядав як звичайне видалення.
   if(d.hideCity) S.hideCity=d.hideCity.slice();
+  // покладені наслідки — теж стан кроку: undo зміни ночі повертає й їх
+  if(Array.isArray(d.aftSeen)) S.aftSeen=d.aftSeen.slice();
   S.selCity=null;
 }
 function snapshot(){
@@ -4861,6 +4864,8 @@ function autosave(){
 function restore(){
   try{
     const d=JSON.parse(localStorage.getItem('tgmine-map')||'null');
+    // видалені наслідки памʼятаються й тоді, коли на карті нічого не лишилось
+    if(d&&Array.isArray(d.aftSeen)) S.aftSeen=d.aftSeen.slice();
     if(d&&d.objs&&d.objs.length){
       migrateMarks(d.objs);
       const dd=dedupeMarks(d.objs);
@@ -7321,6 +7326,11 @@ function loadNight(cb){
 })();
 document.getElementById('aftermath').onclick=()=>{
   if(!window.NIGHT){loadNight(ok=>ok?putAftermath(false):toast('ніч не завантажилась'));return;}
+  // на карту іншої ночі — ні: після перезавантаження випадайка стоїть на
+  // найсвіжішій ночі, а відкрита карта може бути вчорашньою
+  if(!mapOfNight(window.NIGHT.date)){
+    toast('на карті обʼєкти іншої ночі — спершу вибери цю ніч у списку');return;
+  }
   putAftermath(false);
 };
 document.getElementById('strikes').onclick=()=>{

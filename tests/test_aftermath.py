@@ -253,6 +253,36 @@ class TestIncidents(unittest.TestCase):
     def test_ukraine_controlled_territory_is_dropped(self):
         self.assertEqual(self.build([post(1, "2026-09-09 13:00", "У Києві після атаки горить склад.")]), [])
 
+    def test_two_places_of_one_post_have_distinct_ids(self):
+        out = self.build([post(1, "2026-09-07 07:33", "Сіріус і Сочі: після атаки горять нафтобази.")])
+        ids = [x["id"] for x in out]
+        self.assertEqual(len(ids), len(set(ids)))
+
+    def test_retro_incident_does_not_swallow_a_new_strike(self):
+        # рецензія 23.09: пояснення «11 вересня» відкриває ніч 10.09 без
+        # часу, і живий удар за дві години мусить піти на свою ніч
+        ps = [post(1, "2026-09-15 07:09", "11 вересня десяток БПЛА прилетіло по заводу у Губасі. Уражено установки."),
+              post(2, "2026-09-15 09:30", "Губаха зараз під атакою, горить завод.")]
+        self.assertEqual(sorted(x["night"] for x in self.build(ps)), ["2026-09-10", "2026-09-14"])
+
+    def test_todays_date_is_not_retro(self):
+        out = self.build([post(1, "2026-07-06 14:02", "Ураження Омського НПЗ 06.07.2026, горить установка.")])
+        self.assertEqual([(x["night"], x["t"]) for x in out], [("2026-07-06", "14:02")])
+
+    def test_series_does_not_replace_a_resolved_city(self):
+        ps = [post(1, "2026-09-10 02:00", "Нижній Новгород, після атаки горить НПЗ."),
+              post(2, "2026-09-10 04:00", "Великий Новгород, пожежа після атаки дронів.")]
+        self.assertEqual(sorted(x["place"] for x in self.build(ps)), ["Nizhniy Novgorod", "Velikiy Novgorod"])
+
+    def test_malformed_coordinates_do_not_crash(self):
+        self.assertEqual(A.coords_in("44°56’36..5”N 34°13’12”E"), [])
+        self.build([post(1, "2026-09-10 02:00", "Уражено склад 44°56’36..5”N 34°13’12”E після атаки")])
+
+    def test_refinery_of_another_town_is_not_taken(self):
+        # Чапаєвськ — не НПЗ Новокуйбишевська за 30 км
+        out = self.build([post(1, "2026-08-22 05:19", "Чапаєвськ, після атаки горить НПЗ.")])
+        self.assertEqual([x["refinery"] for x in out], [None])
+
     def test_deterministic_and_order_independent(self):
         ps = [post(1, "2026-09-22 04:41", "Еще кадры с Самары, где был атакован НПЗ."),
               post(2, "2026-09-22 04:44", "Еще Самара.", reply=1),

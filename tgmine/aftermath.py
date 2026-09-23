@@ -385,7 +385,11 @@ HIT = re.compile(
 #: «засобами ураження», «завдають вогневого ураження» (це атака).
 #: Майбутнє — теж не наслідок: «ще більше гаражів у Донецьку буде уражено».
 NOT_HIT = re.compile(r"(?:для|засоб\w*|вогнев\w*|огнев\w*)\s+(?:\w+\s+)?(?:ураженн?я|поражени)\w*|"
-                     r"\bбуд(?:е|ут|ет)\s+(?:\w+\s+)?(?:ураж|пораж|знищ|уничтож|зруйн|разруш|гор)\w*")
+                     r"\bбуд(?:е|ут|ет)\s+(?:\w+\s+)?(?:ураж|пораж|знищ|уничтож|зруйн|разруш|гор)\w*|"
+                     # побажання: «Русня має горіти», «Рф должна гореть», «коли
+                     # почнуть горіти ваші «Пятьорочкі»»
+                     r"\b(?:мае|мав би|мала б|мало б|повин\w*|долж\w*|почнут\w*|начнут\w*|"
+                     r"нехай|хай|пуст\w*)\s+(?:\w+\s+)?гор\w*")
 #: Заперечення наслідку: «влучань не було», «недоліт», «фейк».
 NEG = re.compile(
     r"влучан\w* не було|не було\w* влучан|попадан\w* не било|недолит|недолет|"
@@ -399,8 +403,10 @@ NEG = re.compile(
     r"авари|не повяз\w* з (?:атак|бпла|дрон|удар)|не связан\w* с (?:атак|бпла|дрон|удар)|ничего не известно|ничого не видомо|"
     r"без пожар|без пожеж|без возгоран|без загоран|пока цел|поки цил|не влучив|не влучил|"
     r"не попал|не попав|не загорив|не загорел|не загорила|"
-    # губернатор: «Никаких серьезных „прилетов“ нет»
-    r"никаких (?:\w+ )?\W?прилет\w*\W* нет|прилет\w*\W* не било")
+    # губернатор: «Никаких серьезных „прилетов“ нет», «Разрушеній нєт»
+    r"никаких (?:\w+ )?\W?прилет\w*\W* нет|прилет\w*\W* не било|"
+    r"разрушени\w* нет|повреждени\w* нет|руйнуван\w* нема|пошкоджен\w* нема|"
+    r"прилот\w* не било|жодних \W?прилот")
 #: Спростування всього інциденту, а не часткового промаху.
 NEG_STRONG = re.compile(r"не повяз\w* з (?:атак|бпла|дрон|удар)|не связан\w* с (?:атак|бпла|дрон|удар)|\bфейк|влучан\w* не було|"
                         r"попадан\w* не било|без пожар|без пожеж|без возгоран|ничего не известно|"
@@ -434,7 +440,9 @@ ANCHOR = re.compile(
     r"атак|удар|вибух|взрив|прил|пролет|пролит|\bпво|\bреб\b|\bрлс|бпла|дрон|ракет|"
     r"рейд|обстанов|кадр|момент|движух|движ|мисцев|местн|собща|повидомл|пишут|кажут|"
     r"говорят|лунают|збит|сбит|сбив|збив|шахед|геран|под ударом|пид ударом|тривог|"
-    r"тревог|сирен|хлопк|звук|зараз|сейчас|щойно|прямо|наслидк|последств")
+    r"тревог|сирен|хлопк|звук|зараз|сейчас|щойно|прямо|наслидк|последств|"
+    # «СОУ знову щось підірвали в Каспійську»
+    r"пидирв|подорв|пидрив|подрив")
 NUM_DATE = re.compile(r"(?<![\d.])(\d{1,2})\.(\d{2})\.(?:20)?(\d{2})(?!\d|\.\d)")
 #: «після удару 16.08» — день і місяць без року, лише після слова події
 NUM_DM = re.compile(r"(?:удар|атак|нич|ноч|писл|после|вид|от)\w*\s+(\d{1,2})\.(\d{2})(?!\d|\.\d)")
@@ -471,6 +479,8 @@ RETRO = re.compile(
     r"все еще гор|досих пир|досих пор|писля минулого|после прошл|субот\w* атак|"
     # нове про старе: «сьогодні з'ясувалося», «стало відомо»
     r"зясувал|вияснил|стало видомо|стало известно|розбира\w* завал|разбор\w* завал|"
+    # пожежа триває, а не новий удар: «продовжує горіти», «догорає»
+    r"продовжу\w* гор|продолжа\w* гор|догора|доси гор|"
     # річниці: «сьогодні рік, як… Павутина»
     # «У річницю Незалежності уразили НПЗ» — свіжий удар, тож саме слово
     # «річниця» — не ознака; «сьогодні рік / річниця» — `ANNIV`
@@ -482,11 +492,7 @@ THIS_NIGHT = re.compile(r"циеи ночи|етой ночю|сегодня н�
 #: Руїни: «Все що залишилося від хабу Wildberries» — здебільшого подробиці
 #: відомого удару (тоді до нього, а не новий інцидент на ніч поста); коли
 #: відомого нема — пост відкриває удар, як і раніше.
-#: Так само пожежа, що триває: «продовжує горіти», «догорає» — до відомого
-#: удару, а коли його нема (серія про Нижньокамськ уся з «продолжает гореть»)
-#: — удар таки був.
-RUINS = re.compile(r"що залишилос|що лишилос|что осталос|"
-                   r"продовжу\w* гор|продолжа\w* гор|догора|доси гор")
+RUINS = re.compile(r"що залишилос|що лишилос|что осталос")
 ANNIV = re.compile(r"согодни рик\b|сегодня год\b|согодни (?:\w+ )?(?:ричниц|роковин)|"
                    r"сегодня (?:\w+ )?годовщин")
 _YESTERDAY = re.compile(r"\bвчора|\bучора|\bвчера|вчорашн|учорашн|вчерашн")
@@ -535,7 +541,8 @@ def hav(a, b) -> float:
 CYR = re.compile(r"[а-яё]", re.I)
 #: Слово після назви, що робить її прикметником області чи району:
 #: «Брянська область», «Пермського краю», «Ростовский район».
-REGION_WORD = re.compile(r"(?:обл|кра[июейя]|кра$|респ|район|р-н|округ|ао$|автоном|реги?он)")
+#: «обл» — ціле слово чи «област…»: «Коломна, обломки» — не область.
+REGION_WORD = re.compile(r"(?:обл$|област|кра[июейя]|кра$|респ|район|р-н|округ|ао$|автоном|реги?он)")
 #: Назва-прикметник: «Московский», «Ударный», «Саратовская», «Центральний».
 ADJ_NAME = re.compile(r"(?:ий|ой|ая|ое|ие|ни|ня|ске|ска|цке|цка|зке|зка)$")
 #: Слово перед назвою, після якого це не місце: корабель, людина, палац.
@@ -580,7 +587,18 @@ _NOT_STEMS = None
 #: Прикметник від назви місця в будь-якому відмінку: «Самарская», «Ростовська»
 #: (кістяк «ростовска»), «Херсонською», «Ярославському», «Краснодарского».
 #: Іменник у місцевому («у Нижньокамську», «в Курске») — не прикметник.
-_REGION_ADJ = re.compile(r"(?:ск|цк|зк)(?:а|ая|ой|ою|ому|ого|ий|ии|ие|ое|ую|их|им|ои|ей|ом)$")
+_REGION_ADJ = re.compile(r"(?:ск|цк|зк)(?:а|и|ая|ой|ою|ому|ого|ий|ии|ие|ое|ую|их|им|ои|ей)$")
+#: Перед «район/округ» — будь-який прикметник: «Железнодорожном районе»,
+#: «Промышленном районе Самары» (не лише -ськ).
+_DISTRICT_ADJ = re.compile(r"(?:ий|ой|ая|ое|ие|ого|ому|ом|ую|их|им|ими|ою|ои|ей)$")
+_DISTRICT_WORD = re.compile(r"^(?:район|р-н|округ|мо$)")
+#: Знахідний «на Ростовську область» — лише перед «область»: «у Нижньокамську
+#: (Республіка Татарстан)» — місто в місцевому.
+_REGION_ADJ_ACC = re.compile(r"(?:ск|цк|зк)у$")
+#: «в Краснодарском крае» — місцевий прикметника з місцевим регіону; «под
+#: Нижнекамском, Республика Татарстан» — орудний міста.
+_REGION_ADJ_LOC = re.compile(r"(?:ск|цк|зк)ом$")
+_REGION_LOC = {"крае", "области", "обл", "регионе", "республике", "округе", "районе"}
 _REGION_PLURAL = re.compile(r"^(?:областях|областей|областям|областями|регионах|регионов|"
                             r"регионам|краях|краев|краив|республиках|республик)$")
 _ADJ_LIST = re.compile(r"\w+к(ий|ой|ои|ая|ую|ом|ого|ому|им|их)$")
@@ -597,14 +615,24 @@ def _coastal(sks, i):
             and bool(_COASTAL_NEXT.match(sks[i + 1])))
 
 
+_ABBR_DOT = {"респ", "обл", "г", "м", "ст", "пос", "с", "смт", "пгт", "д", "р", "н", "п", "т", "о", "вул", "ул"}
+
+
 def _names_something(text):
     """Пост називає щось своє — слово з великої не на початку й не абревіатура:
     «Окупований Сокологірськ, Луганської обл.», «танкер біля Керченського
     порту». Тоді він не продовження чужої серії, навіть якщо назва не
     розвʼязалась."""
     def starts_sentence(at):
-        before = text[:at].rstrip()
-        return not before or before[-1] in ".!?…/\n"
+        before = text[:at].rstrip(" \t\u00a0")
+        if not before or before[-1] == "\n":
+            return True
+        before = before.rstrip()
+        if before[-1] == ".":
+            # «у респ. Башкортостан», «Курська обл. Суджа» — скорочення, не кінець речення
+            w = re.findall(r"\w+", before[-8:])
+            return not (w and w[-1].lower() in _ABBR_DOT)
+        return before[-1] in "!?…/"
     return any(len(tok) >= 4 and tok[:1].isupper() and not tok.isupper() and not starts_sentence(at)
                for tok, at in _tokens(text))
 
@@ -635,7 +663,11 @@ def _before_region(sks, i):
     Ростовской области», «у Каменськ-Шахтинському Ростовської області»)."""
     # лише прикметник: «Самарская область», але «Уфа, Респ. Башкортостан» і
     # «Нурлино Респ. Башкортостан» — місто й регіон
-    if i + 1 < len(sks) and REGION_WORD.match(sks[i + 1]) and _REGION_ADJ.search(sks[i]):
+    if i + 1 < len(sks) and REGION_WORD.match(sks[i + 1]) and (
+            _REGION_ADJ.search(sks[i])
+            or (_REGION_ADJ_ACC.search(sks[i]) and sks[i + 1] in ("област", "обл"))
+            or (_REGION_ADJ_LOC.search(sks[i]) and sks[i + 1] in _REGION_LOC)
+            or (_DISTRICT_WORD.match(sks[i + 1]) and _DISTRICT_ADJ.search(sks[i]))):
         return True
     # перелік — лише від прикметника: «В Курске и области» — місто Курськ
     m = _ADJ_LIST.match(sks[i])
@@ -1207,7 +1239,7 @@ def analyse(p: dict, places: Places, point_region, context=(), depth_km=None) ->
             HIT.search(NOT_HIT.sub(" ", skel(x))) and _date_of(skel(x), t) is None for x in sents):
         post_when = None
     short = len(text) <= 100
-    post_event = bool(ANCHOR.search(sk) or HIT.search(sk) or RAW_ANCHOR.search(text))
+    post_event = bool(ANCHOR.search(sk) or HIT.search(NOT_HIT.sub(" ", sk)) or RAW_ANCHOR.search(text))
 
     memo = {}
 
@@ -1238,7 +1270,7 @@ def analyse(p: dict, places: Places, point_region, context=(), depth_km=None) ->
                 # Рядок-підпис («… на території Камського заводу масел.
                 # Пермь.») — місце всього поста: подію бере з поста.
                 dateline = len(_TOK.findall(s)) <= 3
-                anchored = short or bool(ANCHOR.search(ss) or HIT.search(ss) or RAW_ANCHOR.search(s)
+                anchored = short or bool(ANCHOR.search(ss) or HIT.search(NOT_HIT.sub(" ", ss)) or RAW_ANCHOR.search(s)
                                          or _OBJ_ANY.search(ss)) or (dateline and post_event)
                 memo[a] = (bool(RETRO.search(ss)), _date_of(ss, t) or post_when, anchored,
                            bool(RUINS.search(ss)))
@@ -1343,7 +1375,7 @@ def analyse(p: dict, places: Places, point_region, context=(), depth_km=None) ->
             "hit": bool(HIT.search(NOT_HIT.sub(" ", sk))) and not neg, "neg": neg,
             "official": bool(OFFICIAL.search(sk) or RAW_OFFICIAL.search(text)), "coords": coords,
             "retro": whole_retro or bool(post_when),
-            "when": None if post_when and post_when[0] == "old" else post_when, "sk": sk,
+            "when": None if post_when and post_when[0] == "old" else post_when, "sk": sk, "regs": regs,
             "old": bool(post_when and post_when[0] == "old"),
             "event": post_event, "attack": bool(ATTACKW.search(sk) or RAW_ANCHOR.search(text))}
 
@@ -1451,7 +1483,7 @@ def build(posts: list[dict], gaz, targets=None, *, point_region=None,
         cells[cell((r["lat"], r["lon"]))].append(len(incs) - 1)
         return len(incs) - 1
 
-    def attach(j, a, via, r=None, tok=""):
+    def attach(j, a, via, r=None, tok="", keep_last=False):
         inc = incs[j]
         if tok:
             st = _tok_stem(tok)
@@ -1467,7 +1499,8 @@ def build(posts: list[dict], gaz, targets=None, *, point_region=None,
         if a["id"] in {x["id"] for x in inc["posts"]}:
             return
         inc["posts"].append({**a, "via": via})
-        inc["last"] = max(inc["last"], a["t"])
+        if not keep_last:
+            inc["last"] = max(inc["last"], a["t"])
         of_post.setdefault(a["id"], []).append(j)
 
     def series(tok, t):
@@ -1538,8 +1571,9 @@ def build(posts: list[dict], gaz, targets=None, *, point_region=None,
             if j is not None:
                 attach(j, a, "retro", r, tok)
                 return True
-            # руїни без відомого удару — перше повідомлення про нього
-            if not soft:
+            # руїни без відомого удару — перше повідомлення про нього, але лише
+            # зранку: пополудні ніч поста вже наступна, і удар був не в неї
+            if not soft or a["t"].astimezone(MSK).hour >= 12:
                 return False
         # Місце без події в реченні не йде нікуди: «Ми встоїмо / Москва
         # ляже» під звітом СБС про кораблі чіплялось до живої московської
@@ -1554,6 +1588,7 @@ def build(posts: list[dict], gaz, targets=None, *, point_region=None,
 
     parents, loose = {}, []
     recent = []                                    # (id, час) постів у порядку
+    series_ids = set()                             # пости, приєднані як продовження серії
     for p in posts:
         # контекст дрібного місця — місто інциденту батька
         par = _reply_parent(p)
@@ -1650,18 +1685,25 @@ def build(posts: list[dict], gaz, targets=None, *, point_region=None,
         # Відповідь сюди не йде — у неї своя гілка (нижче, `loose`). Дві серії
         # впереміш (Самара й Кстово однієї ночі) — не серія: усі пости з
         # інцидентами за SERIES_MIN мають вести в один.
+        # Самі продовження серію не подовжують: зважають лише справжні пости,
+        # і `last` інциденту вони не рухають — інакше ланцюжок «Горит.» кожні
+        # 40 хв тягнувся через межу ночі й ковтав наступний удар.
+        text = p.get("text") or ""
         if (not placed and not cities and not a["coords"] and a["hit"] and not a["neg"]
-                and par is None and len(p.get("text") or "") <= SERIES_LEN
-                and not _names_something(p.get("text") or "")):
+                and par is None and len(text) <= SERIES_LEN and not _names_something(text)):
             seen = set()
             for qid, qt in reversed(recent):
                 if (a["t"] - qt).total_seconds() / 60 > SERIES_MIN:
                     break
-                seen.update(of_post.get(qid, ()))
-            # лише в інцидент, що вже має наслідок: інакше «ППО під Валдаєм» чи
-            # «черги в Москві» ставали ударом
-            if len(seen) == 1 and any(x["hit"] for x in incs[next(iter(seen))]["posts"]):
-                attach(next(iter(seen)), a, "series")
+                seen.update(j for j in of_post.get(qid, ()) if qid not in series_ids)
+            j = next(iter(seen)) if len(seen) == 1 else None
+            # лише в інцидент, що вже має наслідок (інакше «ППО під Валдаєм» чи
+            # «черги в Москві» ставали ударом), і не в чужу область: «А в
+            # башкирии тоже горит» — не Воронеж
+            if j is not None and any(x["hit"] for x in incs[j]["posts"]) and (
+                    not a["regs"] or point_region(*incs[j]["pt"]) in a["regs"]):
+                attach(j, a, "series", keep_last=True)
+                series_ids.add(p["id"])
                 placed = True
         recent.append((p["id"], a["t"]))
         if not placed and par is not None:

@@ -1708,11 +1708,24 @@ def read(root: Path, night: str) -> list[dict]:
     return [json.loads(l) for l in f.read_text(encoding="utf-8").splitlines() if l.strip()]
 
 
-def load_raw(root: Path) -> list[dict]:
+#: Скільки діб до вікна сховища ще читати: відповіді на старі пости й
+#: пояснення заднім числом. Далі — ні: скрапер щогодини дотягує сторінку
+#: давньої історії кожного каналу (~500 постів на добу вглиб), і без межі
+#: збірка шару повзла б угору разом із сирим.
+RAW_MARGIN_DAYS = 30
+
+
+def load_raw(root: Path, since: str | None = None) -> list[dict]:
+    """Сирі пости каналу; з `since` (перша доба сховища) — лише від
+    since − RAW_MARGIN_DAYS."""
     f = Path(root) / "data" / f"{CHANNEL}.jsonl"
     if not f.exists():
         return []
-    return [json.loads(l) for l in f.read_text(encoding="utf-8").splitlines() if l.strip()]
+    rows = [json.loads(l) for l in f.read_text(encoding="utf-8").splitlines() if l.strip()]
+    if since:
+        lo = (date.fromisoformat(since) - timedelta(days=RAW_MARGIN_DAYS)).isoformat()
+        rows = [p for p in rows if (p.get("date") or "")[:10] >= lo]
+    return rows
 
 
 def main(argv=None):
@@ -1732,14 +1745,14 @@ def main(argv=None):
         targets = json.loads((root / "targets.json").read_text(encoding="utf-8"))
     except FileNotFoundError:
         targets = None
-    incs = build(load_raw(root), gaz, targets)
+    days = sorted(p.stem for p in (root / "store" / "events").glob("*.jsonl"))
+    incs = build(load_raw(root, days[0] if days else None), gaz, targets)
     if a.list is not None:
         for x in incs:
             if x["hit"] and x["night"] >= a.list:
                 print(f"{x['night']} {x['t'] or '--:--'} {x['place']:<22} {x['conf']:<8} "
                       f"{', '.join(x['objs']):<30} n={x['n']:<3} {x['id']}")
         return 0
-    days = sorted(p.stem for p in (root / "store" / "events").glob("*.jsonl"))
     since = days[0] if days else ""
     ch = write(incs, root, since=since or None)
     print(f"наслідки: інцидентів {len(incs)}, на карту "

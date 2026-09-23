@@ -736,6 +736,12 @@ def copy_mapper():
         if f.exists():
             shutil.copyfile(f, dst / name)
             n += 1
+    # Цілі пошуку — з того targets.json, що в цій збірці, а не закомічений
+    # знімок: mapper/targets.js руками перебудовували двічі (31.08 і 09.09), і
+    # між тим пошук жив зі старими координатами й жаром, поки CI оновлював
+    # сам targets.json щогодини.
+    if Path("targets.json").exists():
+        _script(src / "mktargets.py").main("targets.json", str(dst / "targets.js"))
     stamp_assets(dst)
     # HTML не кешується взагалі, решта — назавжди: адреса скриптів уже несе
     # хеш вмісту, тож змінений файл приходить під новою адресою, а незмінений

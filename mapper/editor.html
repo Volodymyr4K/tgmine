@@ -1506,6 +1506,24 @@ function preTile(im,filter){
   PRE.map.delete(im);PRE.map.set(im,{f:filter,src:im.src,cv:cv2});
   return cv2;
 }
+// Тайл через фільтр НА МАЛЕНЬКОМУ полотні, без кешу — для експорту.
+// Chrome 153 з відеокартою (M1 Pro, заміряно 23.09.2026) губить
+// непрозорість, коли фільтр полотна стоїть на drawImage у великому полотні:
+// шаблон «Telegram-пост 4:5» (полотно 4096×5120) виходив ПОВНІСТЮ прозорим
+// файлом на 110 КБ, рамка вікна 4944×4000 — прозорою на 93%. Без фільтра
+// те саме полотно ціле, без GPU теж. Тому на велике полотно кладеться вже
+// пофарбований тайл, і фільтра на ньому нема взагалі. Одне робоче полотно
+// на все: експорт — разова дія, копії тримати нема чого (сотні тайлів на
+// подвійній деталізації — це сотні МБ).
+let SCR=null;
+function scrTile(im,filter){
+  if(!SCR||(SCR.getContext('2d').isContextLost&&SCR.getContext('2d').isContextLost()))
+    SCR=document.createElement('canvas');
+  SCR.width=im.naturalWidth;SCR.height=im.naturalHeight;   // заодно й очищує
+  const g=SCR.getContext('2d');
+  g.filter=filter;g.drawImage(im,0,0);
+  return SCR;
+}
 // Після кадру: лишаються копії, які цей кадр малював, і ще стільки ж —
 // попередній рівень тайлів, щоб колесо туди-сюди через межу рівня не
 // фарбувало все наново на кожному кроці. Викидання лише тут, а не посеред
@@ -1516,7 +1534,12 @@ function trimPre(){
   while(PRE.map.size>max) PRE.map.delete(PRE.map.keys().next().value);
 }
 function drawTiles(c,kind,alpha,filter,comp,bias){
+  // Три шляхи фільтра. Екран у звичайній деталізації — кеш пофарбованих
+  // тайлів (preTile). Експорт і екран під час експорту — тайл фарбується
+  // окремо на малому полотні (scrTile). Фільтр прямо на цільовому полотні
+  // лишився тільки як перемикач для замірів (PRE.on=false).
   const pre=!!filter&&PRE.on&&c===ctx&&!bias;
+  const scrF=!!filter&&PRE.on&&!pre;
   // Без цього браузер масштабує тайли найдешевшим фільтром — на експорті
   // це видно як мило. На екрані — 'medium': 'high' у Chrome з відеокартою
   // коштує ~100 мс на кадр, щойно фільтра на drawImage нема (з фільтром ця
@@ -1534,7 +1557,7 @@ function drawTiles(c,kind,alpha,filter,comp,bias){
   if(pre) PRE.need+=(x1-x0+1)*(y1-y0+1);
   c.save();
   if(pre) c.imageSmoothingQuality='medium';
-  if(filter&&!pre) c.filter=filter;
+  if(filter&&!pre&&!scrF) c.filter=filter;
   if(comp) c.globalCompositeOperation=comp;
   c.globalAlpha=alpha;
   for(let x=x0;x<=x1;x++) for(let y=y0;y<=y1;y++){
@@ -1542,7 +1565,8 @@ function drawTiles(c,kind,alpha,filter,comp,bias){
     if(!im.complete||!im.naturalWidth) continue;
     const p=scr(x*sc,y*sc), q=scr((x+1)*sc,(y+1)*sc);
     // +1 px перекриття: інакше між тайлами видно щілини на дробовому масштабі
-    c.drawImage(pre?preTile(im,filter):im,p[0],p[1],q[0]-p[0]+1,q[1]-p[1]+1);
+    c.drawImage(pre?preTile(im,filter):scrF?scrTile(im,filter):im,
+                p[0],p[1],q[0]-p[0]+1,q[1]-p[1]+1);
   }
   c.restore();
 }
@@ -1646,6 +1670,37 @@ addEventListener('visibilitychange',()=>{ if(!document.hidden) resize(); });
 // й шрифт сам, а масштаб — лише resize(). Перевірено 23.09.2026 через CDP
 // Browser.crashGpuProcess. Готові копії тайлів теж могли спорожніти.
 cv.addEventListener('contextrestored',()=>{ PRE.map.clear(); resize(); });
+// Лічильник збоїв: експорт звіряє його до і після, бо збій посеред
+// малювання тихо дає прозоре полотно (див. exportCheck).
+let GPU_LOST=0;
+cv.addEventListener('contextlost',()=>{ GPU_LOST++; });
+// Щільність екрана змінюється не лише при завантаженні: вікно перетягнули
+// на інший монітор (звичайний <-> Retina) або змінили масштаб сторінки.
+// Подія resize при цьому не приходить, а полотно лишалось під стару
+// щільність: на Retina розмите (різкість -30%, заміряно 23.09.2026), на
+// звичайному — вчетверо більше пікселів, ніж треба. Браузер повідомляє про
+// це лише через matchMedia(resolution), і запит одноразовий — після зміни
+// ставимо новий під нову щільність. Подія ця ненадійна: у Chrome (емуляція
+// через CDP, 23.09.2026) `.matches` оновлювався, а change приходив через
+// раз. Тому ще й перевірка раз на секунду — одне порівняння чисел.
+function syncDpr(){
+  const d=Math.min(2,devicePixelRatio||1);
+  if(d===DPR) return;
+  DPR=d; resize();
+}
+function watchDpr(){
+  try{
+    const mq=matchMedia(`(resolution: ${devicePixelRatio||1}dppx)`);
+    const h=()=>{
+      if(mq.removeEventListener) mq.removeEventListener('change',h); else mq.removeListener(h);
+      syncDpr();
+      watchDpr();
+    };
+    if(mq.addEventListener) mq.addEventListener('change',h); else mq.addListener(h);
+  }catch(e){}
+}
+watchDpr();
+setInterval(syncDpr,1000);
 
 // ==========================================================================
 // МАЛЮВАННЯ
@@ -6235,6 +6290,33 @@ document.getElementById('load').onclick=()=>{
 };
 // Експорт малює ТЕ САМЕ, але у власне полотно з подвоєною щільністю:
 // плакат має бути придатним до друку, а не скріншотом вікна.
+// Перевірка ГОТОВОГО файла, а не полотна: полотно може зламатись і між
+// перевіркою та кодуванням. Справжній експорт завжди повністю непрозорий —
+// перше, що малюється, це суцільне тло на всю рамку. Прозорість означає
+// зрив: збій відеокарти посеред експорту (завантажувався чорний файл, 1
+// колір) або вада GPU-малювання (шаблон «Telegram-пост» виходив прозорим
+// на Chrome 153). Файл декодується в мініатюру 64×64 — це дешево.
+// 'ok' — усе непрозоре; 'empty' — усе прозоре; 'holes' — прозорі ділянки.
+// Не вдалось декодувати — 'ok': не можемо перевірити, то й не блокуємо.
+async function exportCheck(src){
+  const url=(src instanceof Blob)?URL.createObjectURL(src):src;
+  try{
+    const im=new Image(); im.src=url; await im.decode();
+    const t=document.createElement('canvas'); t.width=t.height=64;
+    const g=t.getContext('2d'); g.drawImage(im,0,0,64,64);
+    const d=g.getImageData(0,0,64,64).data;
+    let clear=0, holes=0;
+    for(let i=3;i<d.length;i+=4){ if(d[i]===0) clear++; if(d[i]<250) holes++; }
+    return clear===d.length/4?'empty':holes?'holes':'ok';
+  }catch(e){ return 'ok'; }
+  finally{ if(src instanceof Blob) URL.revokeObjectURL(url); }
+}
+const EXPORT_TRIES=3;
+function expLock(on){
+  for(const id of ['export','exportSvg']){
+    const b=document.getElementById(id); if(b) b.disabled=on;
+  }
+}
 document.getElementById('export').onclick=async ()=>{
   // Експорт віддає рамку, а не вікно: плакат не має залежати від того,
   // на якому екрані оператор працював.
@@ -6246,6 +6328,10 @@ document.getElementById('export').onclick=async ()=>{
   // зовні це виглядало як «експорт не працює».
   if(!(f.w>0)||!(f.h>0)){toast('кадр порожній — вписати кадр і повторити');return;}
   btn.textContent='готую тайли…';
+  // Поки йде експорт (з повторами це секунди), друге натискання запускало
+  // другий експорт, і його finally скидав S.bias посеред першого.
+  expLock(true);
+  const view0=Object.assign({},S.view);
   try{
   // Щільність — із шаблону: скільки разів рамку треба збільшити, щоб вийшов
   // файл заданого розміру. Без шаблону лишається ×2, як було.
@@ -6289,6 +6375,14 @@ document.getElementById('export').onclick=async ()=>{
   //
   // Правило: міняєш це — перевір заміром НА СПРАВЖНІЙ КАРТІ, і не одним
   // експортом, а кількома підряд.
+  let blob=null, verdict='ok', lostLast=false;
+  for(let attempt=1;attempt<=EXPORT_TRIES;attempt++){
+  if(attempt>1){
+    // за паузу карту могли зсунути — повторна спроба малює те саме, що перша
+    Object.assign(S.view,view0);
+    await tilesReady(S.bias);
+  }
+  const lost0=GPU_LOST;
   const SS=ssFor(outW,outH);
   const c2=document.createElement('canvas');
   c2.width=Math.round(outW*SS); c2.height=Math.round(outH*SS);
@@ -6318,17 +6412,11 @@ document.getElementById('export').onclick=async ()=>{
   g.restore();
   RSCALE=1;
   const out=(SS===1)?c2:downHalving(c2,outW,outH);
-  // Мовчазний зрив краще спіймати тут, ніж у каналі: карта з підкладкою й
-  // підписами не буває одноколірною.
-  if(S.objs.length&&looksBlank(out)){
-    toast('експорт вийшов порожнім — перезавантаж сторінку й повтори');
-    return;
-  }
   // Файл віддається як blob, а не data:URL. Причина не в красі: картинка
   // 1800×1200 у base64 — це рядок на 5 МБ, і не кожен браузер погоджується
   // такий «файл» завантажити (Safari просто відкриває його вкладкою). Blob
   // качається скрізь однаково, і памʼять звільняється одразу після кліку.
-  const blob=await new Promise((res,rej)=>{
+  blob=await new Promise((res,rej)=>{
     try{ out.toBlob(b=>b?res(b):rej(new Error('порожній файл')),'image/png'); }
     catch(e){ rej(e); }
   }).catch(e=>{
@@ -6340,11 +6428,40 @@ document.getElementById('export').onclick=async ()=>{
     throw e;
   });
   if(!blob) return;
+  verdict=await exportCheck(blob);
+  // Мовчазний зрив краще спіймати тут, ніж у каналі: карта з підкладкою й
+  // підписами не буває одноколірною. Раніше ця перевірка закінчувала
+  // експорт одразу; тепер це ще одна причина повторити — і вона діє й після
+  // збою відеокарти, коли файл непрозорий, але неправильний.
+  if(verdict==='ok'&&S.objs.length&&looksBlank(out)) verdict='empty';
+  lostLast=GPU_LOST!==lost0;
+  // Великі полотна звільняються тут і зараз, а не колись збирачем сміття:
+  // інакше наступна спроба виділяє ще стільки ж поверх — саме така тиснява
+  // давала порожні експорти (див. SS_AREA_MAX).
+  c2.width=c2.height=0; if(out!==c2) out.width=out.height=0;
+  if(verdict==='ok'&&!lostLast) break;
+  const why=lostLast?'збій відеокарти':verdict==='empty'?'порожній файл':'прозорі ділянки';
+  jlog('export-retry',{fmt:'png',attempt,why});
+  if(attempt<EXPORT_TRIES){
+    btn.textContent='повторюю…';
+    await new Promise(r=>setTimeout(r,1500));   // дати відеокарті піднятись
+  }
+  }
+  // Три спроби поспіль зірвались. Порожній файл не віддаємо зовсім —
+  // гірше за нього лише те, що оператор дізнається про нього в каналі.
+  if(verdict==='empty'){
+    toast('експорт зірвався тричі (порожній файл) — не збережено; перезавантаж сторінку й повтори');
+    return;
+  }
   const url=URL.createObjectURL(blob);
   const a=document.createElement('a');
   a.href=url;a.download=(S.tpl?S.tpl.id:'map')+'.png';a.click();
   setTimeout(()=>URL.revokeObjectURL(url),10000);
-  toast(`PNG готовий: ${outW}×${outH}, ${Math.round(blob.size/1024)} КБ`);
+  toast(verdict!=='ok'
+    ?'PNG збережено, але в ньому прозорі ділянки — відкрий і перевір перед публікацією'
+    :lostLast
+    ?'PNG збережено, але під час експорту збоїла відеокарта — відкрий і перевір перед публікацією'
+    :`PNG готовий: ${outW}×${outH}, ${Math.round(blob.size/1024)} КБ`);
   // Експорт — момент, коли карта готова. Її джерело має бути на сервері одразу,
   // не через дебаунс: саме цю карту потім шукатимуть за рендером.
   if(typeof srvPush==='function') srvPush(false);
@@ -6352,7 +6469,7 @@ document.getElementById('export').onclick=async ()=>{
     console.error('експорт PNG:',e);jlog('export-fail',{fmt:'png',msg:String(e)});
     toast('експорт не вдався: '+((e&&e.message)||e));
   }finally{
-    S.bias=0;btn.textContent=was;RSCALE=1;draw();
+    S.bias=0;btn.textContent=was;RSCALE=1;expLock(false);draw();
   }
 };
 // Експорт у SVG. Той самий код малювання, інший приймач команд: лінії,
@@ -6368,14 +6485,21 @@ document.getElementById('exportSvg').onclick=async ()=>{
   // блокові const із середини try там не видно взагалі.
   let svgSat=S.layers.sat, svgNight=S.layers.night;
   btn.textContent='готую тайли…';
+  expLock(true);
+  const view0=Object.assign({},S.view);
   try{
   S.bias=Math.max(0,Math.min(3,Math.round(Math.log2(dens))));
   await tilesReady(S.bias);
   btn.textContent='малюю…';
 
   // 1. растрова підкладка окремо, у власне полотно
-  let baseImg=null;
-  if(S.layers.sat||S.layers.night){
+  let baseImg=null, baseWarn='';
+  // Підкладка — таке саме растрове полотно, як PNG, і ламається так само
+  // (збій відеокарти посеред малювання). Тому та сама перевірка готової
+  // картинки й до трьох спроб; порожню підкладку у файл не кладемо.
+  for(let attempt=1;attempt<=EXPORT_TRIES&&(S.layers.sat||S.layers.night);attempt++){
+    if(attempt>1){ Object.assign(S.view,view0); await tilesReady(S.bias); }
+    const lost0=GPU_LOST;
     // із запасом і зменшенням, як у PNG: інакше підкладка у SVG виходила
     // помітно зубчастішою за ту саму підкладку в PNG. Множник цілий із тієї
     // самої причини, що й у PNG (див. замір біля SS): на 1.5 виграш був
@@ -6405,6 +6529,22 @@ document.getElementById('exportSvg').onclick=async ()=>{
             'Запусти ./run.sh і відкрий http://localhost:8765/editor.html');
       return;
     }
+    const verdict=await exportCheck(baseImg);
+    rc.width=rc.height=0; if(rc2!==rc) rc2.width=rc2.height=0;
+    if(verdict==='ok'&&GPU_LOST===lost0) break;
+    jlog('export-retry',{fmt:'svg',attempt,
+      why:GPU_LOST!==lost0?'збій відеокарти':verdict==='empty'?'порожня підкладка':'прозорі ділянки'});
+    if(attempt===EXPORT_TRIES){
+      if(verdict==='empty'){
+        toast('експорт SVG зірвався тричі (порожня підкладка) — не збережено; перезавантаж сторінку й повтори');
+        return;
+      }
+      // скажемо в підсумку, інакше попередження перекриє «готовий»
+      baseWarn=verdict==='ok'?'під час експорту збоїла відеокарта':'у підкладці прозорі ділянки';
+      break;
+    }
+    btn.textContent='повторюю…';
+    await new Promise(r=>setTimeout(r,1500));
   }
 
   // 2. вектор: те саме малювання, але приймач — SVG
@@ -6450,7 +6590,9 @@ document.getElementById('exportSvg').onclick=async ()=>{
   const a=document.createElement('a');
   a.href=URL.createObjectURL(blob);
   a.download=(S.tpl?S.tpl.id:'map')+'.svg';a.click();
-  toast(`SVG готовий: ${out.w}×${out.h}, ${Math.round(svg.length/1024)} КБ`);
+  toast(baseWarn
+    ?`SVG збережено, але ${baseWarn} — відкрий і перевір перед публікацією`
+    :`SVG готовий: ${out.w}×${out.h}, ${Math.round(svg.length/1024)} КБ`);
   }catch(e){
     console.error('експорт SVG:',e);jlog('export-fail',{fmt:'svg',msg:String(e)});
     toast('експорт не вдався: '+((e&&e.message)||e));
@@ -6458,7 +6600,7 @@ document.getElementById('exportSvg').onclick=async ()=>{
     // Стан малювання спільний із екраном: якщо вийти з експорту через
     // помилку й не повернути його, карта далі малюється чужими шарами.
     S.layers.sat=svgSat; S.layers.night=svgNight;
-    S.bias=0;RSCALE=1;NOBG=false;btn.textContent=was;draw();
+    S.bias=0;RSCALE=1;NOBG=false;btn.textContent=was;expLock(false);draw();
   }
 };
 

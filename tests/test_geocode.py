@@ -585,6 +585,63 @@ class TestRegionNameIsNotACityMarker(unittest.TestCase):
 
 
 @needs_gazetteer
+class TestCityNamedLikeItsOblast(unittest.TestCase):
+    """«Донецк», «Луганск» — ще й альт-назви Донецької/Луганської ADM1.
+
+    За населенням виграє область (4 млн проти 0.9 млн), маркер ставав
+    центроїдом, і пост «Луганск / Единичные фиксации» крапки не мав зовсім,
+    а «Донецк, Макеевка ДНР» лишав лише Макіївку (23.09.2026).
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.cfg = E.Config.load(CFG)
+        cls.gaz = GC.Gazetteer.load(GAZ / "RU.txt", GAZ / "UA.txt")
+        cls.a1 = cls.gaz.region_codes(cls.cfg.entities["регіон"], cls.cfg.geo)
+
+    def best(self, text):
+        posts = E.enrich([{"channel": "t", "id": 1, "text": text,
+                           "date": "2026-07-01T10:00:00+00:00"}], self.cfg)
+        GC.geocode_posts(posts, self.gaz, self.cfg.geo,
+                         aliases=self.cfg.geo_aliases, region_a1=self.a1)
+        return ST.point_entity(posts[0])
+
+    def assertAt(self, text, want, tol=15):
+        b = self.best(text)
+        self.assertIsNotNone(b, "крапки нема")
+        self.assertNotEqual(b.get("geo_conf"), "centroid")
+        self.assertLess(GC.haversine((b["lat"], b["lon"]), want), tol, b.get("geo_name"))
+
+    def test_city_not_its_oblast(self):
+        self.assertAt("Луганск\nЕдиничные фиксации\nЛНР", (48.57, 39.31))
+        self.assertAt("Донецк, Макеевка ДНР и близлежащие\nединичные фиксации", (48.02, 37.80))
+
+    def test_federal_city_label_does_not_take_the_point(self):
+        # «Москва» тут — підпис регіону vrv, крапка — Троїцьк
+        b = self.best("АО Троицк\nМосква\nСбитие БПЛА")
+        self.assertEqual(b.get("match"), "Троицк")
+
+    def test_namesake_in_another_oblast_stays_ambiguous(self):
+        # Донецьк Ростовської: без «ДНР» український Донецьк не береться
+        for text in ("Донецк, Каменск-Шахтинский, Гуково\nфиксации БПЛА",
+                     "Гуково\nДонецк Ростовской\nНовошахтинск\nРостовская область\nТревога по БПЛА",
+                     # «ЛДНР» — теж маркер ДНР, але область тезки названо
+                     "Донецк, Гуково, Ростовская область - тревога по БПЛА от ЛДНР"):
+            with self.subTest(text=text.split("\n")[0]):
+                b = self.best(text)
+                self.assertTrue(b is None or GC.haversine((b["lat"], b["lon"]), (48.02, 37.80)) > 50)
+
+    def test_genitive_and_region_word_are_not_the_city(self):
+        # «от Брянска» — джерело, «Брянска область» — область (А/Б: 190 км)
+        for text in ("Калужская область - опасность по БПЛА от Брянска.",
+                     "Между Севск и Суземка, Брянска область - продолжаются пролёты БПЛА"):
+            with self.subTest(text=text):
+                b = self.best(text)
+                self.assertTrue(b is None or b.get("geo_conf") != "city-marker"
+                                or GC.haversine((b["lat"], b["lon"]), (53.25, 34.37)) > 20)
+
+
+@needs_gazetteer
 class TestWholeSubjectIsAreaNotPoint(unittest.TestCase):
     """Цілий субʼєкт має координату, але крапкою події не є.
 

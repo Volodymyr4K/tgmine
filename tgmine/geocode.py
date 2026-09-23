@@ -438,6 +438,15 @@ class Gazetteer:
         out.discard(None)
         return out
 
+    def is_area_adm1(self, rec: dict) -> bool:
+        """ADM1 — область, а не місто-субʼєкт. «Москва», «Санкт-Петербург» —
+        теж ADM1, але це саме місто; у vrv «АО Троицк / Москва» така назва —
+        підпис, і місто-маркер Москви перебивав би Троїцьк. Ознака — альт-
+        назва з родовим словом («Донецкая область», «Республика Крым»)."""
+        return any(_AREA_WORD.search(alt.lower()) for a in self.adm1
+                   if (a["cc"], a["a1"]) == (rec.get("cc"), rec.get("a1"))
+                   for alt in a["alts"])
+
     def names_the_region(self, query: str, codes) -> bool:
         """Збіг — це назва самої області, а не міста в ній.
 
@@ -1094,6 +1103,33 @@ def _consensus(queries: list[str], gaz: "Gazetteer", radius: float = CONSENSUS_K
     return best[3] if best else None
 
 
+_AREA_WORD = re.compile(r"област|край|республик|oblast|kray|respublik")
+
+
+def _namesake_elsewhere(gaz, e, seat, p, region_geo) -> bool:
+    """Чи НЕ брати адмінцентр замість області. Місто-маркер має тезку деінде («Донецк» — ще й місто в
+    Ростовській: «Донецк, Каменск-Шахтинский, Гуково») — адмінцентр береться,
+    лише коли пост ще раз називає ту саму область іншим словом («Донецк,
+    Макеевка ДНР») і не називає область, де лежить тезка."""
+    # лише пряма назва міста: «от Брянска», «Смоленска область» — родовий
+    # відмінок і область, а не місто (замір А/Б 23.09: 190 км на джерело)
+    if not any(r is seat or (r["lat"], r["lon"], r["name"]) == (seat["lat"], seat["lon"], seat["name"])
+               for r in gaz.by_name.get(norm(e["match"]), ())):
+        return True
+    others = [c for c in gaz.candidates(e["match"], None)
+              if c["fclass"] == "P" and c["pop"] >= 1000
+              and haversine((c["lat"], c["lon"]), (seat["lat"], seat["lon"])) > 50]
+    if not others:
+        return False
+    regs = [x for x in p.get("entities", []) if x["type"] == "регіон"]
+    same = any(x["value"] == e["value"] and x.get("pos") != e.get("pos") for x in regs)
+    near_other = any(
+        x["value"] != e["value"] and x["value"] in region_geo
+        and min(haversine(region_geo[x["value"]], (c["lat"], c["lon"])) for c in others) < 150
+        for x in regs)
+    return not same or near_other
+
+
 def geocode_posts(posts: list[dict], gaz: Gazetteer, region_geo: dict,
                   entity_type: str = "нп", max_km: float = 400.0,
                   refine_regions: bool = True, aliases: dict | None = None,
@@ -1189,8 +1225,18 @@ def geocode_posts(posts: list[dict], gaz: Gazetteer, region_geo: dict,
                 district = e.get("pos") is not None and any(
                     x["type"] == entity_type and x.get("pos") == e["pos"]
                     for x in p.get("entities", []))
+                # Іменник-місто, що в газетирі ще й альт-назва області
+                # («Донецк», «Луганск» у Донецької/Луганської ADM1): за
+                # населенням виграє область, і місто ставало центром області
+                # (невидимою площею) — «Донецк, Макеевка ДНР» лишав лише
+                # Макіївку. Та сама заміна на адмінцентр, що й для топонімів.
                 hit = (None if district or gaz.names_the_region(e["match"], codes)
                        else gaz.lookup(e["match"], base, max_km))
+                if hit and hit.get("fcode") in ("ADM1", "ADM1H") and gaz.is_area_adm1(hit):
+                    seat = gaz.lookup(e["match"], base, max_km, prefer_seat=True)
+                    if seat and seat["fclass"] == "P" and not _namesake_elsewhere(
+                            gaz, e, seat, p, region_geo):
+                        hit = seat
                 # Місто-маркер — лише пряма назва. Родовий фолбек тут ставив би
                 # ціль: «в направлении Москвы» (маркер Московської) ставало
                 # крапкою в Москві, хоч до фолбека подія була площею області.

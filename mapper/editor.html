@@ -7199,6 +7199,8 @@ function putStrikes(){
 // тієї ж ночі (щогодинний прогін додав) докладається при наступному
 // відкритті. Кнопка кладе всі, яких на карті нема, зокрема видалені.
 function putAftermath(auto){
+  // запобіжник: до `restore()` нічого не кладемо й не автозберігаємо
+  if(!S.ready) return 0;
   const N=window.NIGHT||{}, list=N.aftermath||[];
   if(!Array.isArray(S.aftSeen)) S.aftSeen=[];
   if(!list.length){ if(!auto) toast('у цій ночі наслідків нема'); return 0; }
@@ -7227,6 +7229,17 @@ function putAftermath(auto){
   toast(`наслідків ночі на карті: ${add.length}`);
   jlog('aftermath',{date:N.date,add:add.length,auto:!!auto});
   return add.length;
+}
+// Наслідки при СТАРТІ — лише після `start()`: список ночей і сама ніч
+// вантажаться паралельно з ним, і якщо ніч приходила раніше, `putAftermath`
+// робив snapshot -> autosave ДО `restore()` — автозбереження переписувалось
+// картою з самих наслідків, і робота оператора зникала (відтворено з
+// повільним tiles/index.json, 23.09.2026). Тепер чекаємо `S.ready` і лише
+// тоді вирішуємо, чи це карта цієї ночі — уже по відновлених обʼєктах.
+function autoAftermath(date){
+  if(!S.ready){ setTimeout(()=>autoAftermath(date),200); return; }
+  if(!window.NIGHT||window.NIGHT.date!==date) return;   // ніч уже змінили
+  if(mapOfNight(date)) putAftermath(true);
 }
 // Карта належить цій ночі: на ній нема обʼєктів з інших ночей. Лише тоді
 // наслідки кладуться самі при старті — інакше вчорашня готова карта
@@ -7271,7 +7284,7 @@ function loadNight(cb){
     if(!S.ghosts.length) loadNight(ok=>{
       if(!ok) return;
       document.getElementById('ghost').click();
-      if(mapOfNight(window.NIGHT.date)) putAftermath(true);
+      autoAftermath(window.NIGHT.date);
     });
     sel.onchange=()=>{
       // ІНША ДОБА — ЧИСТИЙ АРКУШ. Лишається рівно підкладка: Україна й ТОТ.

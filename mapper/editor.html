@@ -104,6 +104,13 @@ button.primary{background:rgba(255,62,165,.16);border-color:rgba(255,62,165,.45)
 .hudb{width:auto;background:transparent;border:1px solid transparent;border-radius:6px;
   padding:2px 7px;font-size:12px;color:var(--ink);line-height:1.1}
 .hudb:hover{background:#16202c;border-color:var(--line)}
+/* Стан джерел (health.json): канал замовк або стоїть збір. Червоне, бо це
+   про повноту самої ночі, а не підказка до дії. */
+#health{margin-top:8px;padding:8px 10px;border:1px solid rgba(255,90,90,.55);
+  background:rgba(255,60,60,.10);border-radius:8px;font-size:11.5px;
+  line-height:1.45;color:#ffd6d6}
+#health div+div{margin-top:6px}
+#healthChip{color:#ff8a8a;border-color:rgba(255,90,90,.5)}
 /* Довідка: усе, що інакше треба вгадувати. Відкривається «?» і кнопкою. */
 #help{position:absolute;inset:0;z-index:120;display:none;
   background:rgba(3,6,10,.72);backdrop-filter:blur(2px)}
@@ -220,6 +227,7 @@ button.primary{background:rgba(255,62,165,.16);border-color:rgba(255,62,165,.45)
       <span class="sep"></span><span id="cursor">—</span>
       <span class="sep"></span><span id="saved" title="Робота зберігається в цьому браузері">—</span>
       <button class="hudb" id="cleanBtn" title="Тільки карта, без панелей (\\)">⛶</button>
+      <button class="hudb" id="healthChip" style="display:none">⚠ джерела</button>
       <button class="hudb" id="helpBtn" title="Клавіші та підказки (?)">?</button>
       <button class="hudb" id="bugBtn" title="Щось пішло не так — зібрати звіт із журналом (Ctrl+Shift+L)">🐞</button>
     </div>
@@ -269,6 +277,7 @@ button.primary{background:rgba(255,62,165,.16);border-color:rgba(255,62,165,.45)
       <div class="body">
         <label>Ніч</label>
         <select id="nightSel"><option value="">(єдина ніч із night.js)</option></select>
+        <div id="health" style="display:none"></div>
         <button id="ghost" style="margin-top:6px" title="Шар-привид зі зшитих шляхів; клік по шляху робить із нього маршрут">Показати маршрути ночі</button>
         <label style="margin-top:6px">Які підказки показувати</label>
         <select id="ghostMin">
@@ -7324,6 +7333,65 @@ function loadNight(cb){
     };
   }catch(e){ /* локальна тека без nights/ — лишається night.js */ }
 })();
+// Стан джерел. `health.json` щогодини кладе site.py (health.py): канал
+// замовк, поки інші пишуть, або стоїть сам збір. Тоді тил на карті порожній
+// не тому, що ніч тиха, — а оператор інакше вирішить саме так (аудит
+// 24.09.2026: vrv_radar дає 86–93% крапок глибокого тилу). Показується
+// мовчання, що триває зараз, і мовчання всередині вибраної ночі (доба
+// 12:00 -> 12:00 МСК). Локально, без health.json, блок просто не зʼявляється.
+const HEALTH={data:null,key:''};
+function mskTime(iso){
+  const d=new Date(Date.parse(iso)+3*3600e3), p=n=>String(n).padStart(2,'0');
+  return p(d.getUTCDate())+'.'+p(d.getUTCMonth()+1)+' '+p(d.getUTCHours())+':'+p(d.getUTCMinutes());
+}
+function healthNotes(){
+  const h=HEALTH.data; if(!h) return [];
+  const out=[], built=Date.parse(h.built);
+  const age=(Date.now()-built)/3600e3;
+  if(age>3) out.push(`Дані не оновлювались ${Math.round(age)} год (остання збірка ${mskTime(h.built)} МСК) — конвеєр стоїть, свіжих постів на карті нема.`);
+  const d=(window.NIGHT&&window.NIGHT.date)||document.getElementById('nightSel').value;
+  const w0=/^\d{4}-\d\d-\d\d$/.test(d||'')?Date.parse(d+'T09:00:00Z'):null;
+  for(const g of h.gaps||[]){
+    const a=Date.parse(g.from), b=g.to?Date.parse(g.to):built, live=!g.to;
+    if(!live&&!(w0!=null&&a<w0+864e5&&b>w0)) continue;
+    const span=`${mskTime(g.from)} – ${live?'досі':mskTime(g.to)} МСК, ${g.h} год`;
+    if(g.ch==='*'){
+      out.push(live?`Збір стоїть: жоден канал не приніс поста з ${mskTime(g.from)} МСК (${g.h} год).`
+                   :`Цієї ночі збір стояв (${span}) — на карті ніч неповна.`);
+      continue;
+    }
+    const c=((h.channels||{})[g.ch]||{}).covers||'';
+    out.push(`@${g.ch} ${live?'мовчить':'мовчав'} (${span}), а інші канали за цей час написали ${g.others} постів.`
+             +(c?` Він дає ${c} — там карта може бути неповною.`:''));
+  }
+  return out;
+}
+function renderHealth(){
+  const notes=healthNotes(), key=notes.join('\n');
+  if(key===HEALTH.key) return;
+  HEALTH.key=key;
+  const box=document.getElementById('health'), chip=document.getElementById('healthChip');
+  box.style.display=chip.style.display=notes.length?'':'none';
+  box.innerHTML=notes.map(t=>'<div>⚠ '+esc(t)+'</div>').join('');
+  chip.title=notes.join('\n');
+  if(notes.length) jlog('health',{notes:notes.length});
+}
+function loadHealth(){
+  fetch('health.json',{cache:'no-store'}).then(r=>r.ok?r.json():null)
+    .then(h=>{ if(h&&h.built){ HEALTH.data=h; HEALTH.key=null; renderHealth(); } })
+    .catch(()=>{});
+}
+// Значок у HUD видно й зі схованою панеллю; клік відкриває сам блок.
+document.getElementById('healthChip').onclick=()=>{
+  const app=document.getElementById('app');
+  if(app.classList.contains('hidepanel')) document.getElementById('panelToggle').click();
+  const sec=document.querySelector('#side .sec[data-sec="night"]');
+  if(sec&&!sec.classList.contains('open')) sec.querySelector('h2').click();
+  document.getElementById('health').scrollIntoView({block:'nearest'});
+};
+loadHealth();
+setInterval(loadHealth,10*60e3);   // збірка щогодини — частіше нема сенсу
+setInterval(renderHealth,2000);    // зміна ночі й вік збірки — без хуків у loadNight
 document.getElementById('aftermath').onclick=()=>{
   if(!window.NIGHT){loadNight(ok=>ok?putAftermath(false):toast('ніч не завантажилась'));return;}
   // на карту іншої ночі — ні: після перезавантаження випадайка стоїть на

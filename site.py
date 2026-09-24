@@ -805,6 +805,11 @@ def main():
             shutil.copyfile(name, OUT / name)
 
     copy_mapper()
+    # Чи не замовк канал, поки інші пишуть (див. health.py). Поза відбитком
+    # ночей навмисно: стан залежить від «зараз», а не від сховища.
+    if (OUT / "mapper").is_dir():
+        import health
+        health.write(Path("data"), OUT / "mapper" / "health.json")
 
     # Числа для прози — раз на збірку, з поточного сховища, не з памʼяті.
     #

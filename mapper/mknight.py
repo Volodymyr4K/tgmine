@@ -479,6 +479,9 @@ ALERT_MUTED_HOURS = 12.0
 ALERT_GAP_HOURS = 3.0
 #: Тривога без відбою вважається чинною стільки хвилин — для покриття.
 ALERT_HOLD_MIN = 90
+#: Місце тривоги додає свою область до названих у тексті, лише коли лежить не
+#: далі за стільки від центру названої: сусідня область, а не вгаданий тезка.
+ALERT_PLACE_KM = 150.0
 #: Нагадування про чинну тривогу — не старт.
 ALERT_REMINDER = re.compile(r"напоминаем|сохраняется|продолжается|действует|"
                             r"остаётся|остается|повторно", re.I)
@@ -521,7 +524,7 @@ def alerts(raid):
         h = int(hhmm[:2])
         return (h + 24 if h < 12 else h, hhmm)
 
-    from tgmine import store as ST
+    from tgmine import store as ST, geocode as GC
     from tgmine.labels import REGION_LABEL
     # Ніч (raid.py) несе області назвами для читача («Донеччина (ТОТ)»), а
     # тут ключі — конфігу: без зворотного словника фіксації ТОТ і Іванівської
@@ -573,29 +576,36 @@ def alerts(raid):
                 continue
             if x["value"] not in regs:
                 regs.append(x["value"])
-        # Області МІСЦЬ тривоги — за полігонами, бо текст називає область не
-        # завжди: «…Северский район, г.Краснодар / Елизаветинская, Майкоп,
-        # Республика Адыгея» світив лише Адигею, «Курортный район /
-        # Санкт-Петербург» — нічого. Місця — крапка події (надійна, не ціль
-        # руху) і `also` (там уже нема цілей і джерел).
-        pts = [(x[1], x[2]) for x in e.get("also") or []]
-        if (e.get("lat") and not e.get("aim")
-                and e.get("geo_conf") in ST.POINT_REGION_CONF):
-            pts.insert(0, (e["lat"], e["lon"]))
-        for la, lo in pts:
-            r = ST.point_region(la, lo)
-            if r and r not in regs:
-                regs.append(r)
-        # Запасне — область події (`store._event` бере її й за крапкою).
-        if not regs and e.get("region"):
-            regs = [key(e["region"])]
+        # Області МІСЦЬ тривоги — за полігонами, але лише ПОРУЧ із названою
+        # областю: «…Северский район, г.Краснодар / …Майкоп, Республика
+        # Адыгея» світив лише Адигею. `also` несе й вгадані за населенням
+        # місця («Меры безопасности» -> Mery у Підмосковʼї), тож далека
+        # область з місця — не тривога (рецензія v34: 144 такі за місяць).
+        if regs:
+            anchors = [cfg.geo[r] for r in regs if r in cfg.geo]
+            pts = [(x[1], x[2]) for x in e.get("also") or []]
+            if e.get("lat") and not e.get("aim") and e.get("geo_conf") not in (
+                    "global", "centroid", "region-snap", "source", None):
+                pts.insert(0, (e["lat"], e["lon"]))
+            for la, lo in pts:
+                if not any(GC.haversine((la, lo), a) <= ALERT_PLACE_KM for a in anchors):
+                    continue
+                r = ST.point_region(la, lo)
+                if r and r not in regs:
+                    regs.append(r)
+        else:
+            # Текст області не назвав («Курортный район / Санкт-Петербург /
+            # Тревога») — область за надійною крапкою (`store.point_region_of`).
+            r = e.get("region") or e.get("region_pt")
+            if r:
+                regs = [key(r)]
         reminder = bool(ALERT_REMINDER.search(text))
         for r in regs:
             msgs[r].append((t, e["kind"], e.get("url", ""), e.get("hhmm", ""),
                             reminder, e.get("utype")))
     fixes = collections.Counter(
-        key(e.get("region")) for e in raid["events"]
-        if e.get("scope") == "точка" and e.get("lat") and e.get("region")
+        key(e.get("region") or e.get("region_pt")) for e in raid["events"]
+        if e.get("scope") == "точка" and e.get("lat") and (e.get("region") or e.get("region_pt"))
         and e.get("geo_conf") not in ("centroid", "region-snap"))
     onsets, cover, muted, anchors = [], {}, [], {}
     hold, gap = timedelta(minutes=ALERT_HOLD_MIN), timedelta(hours=ALERT_GAP_HOURS)

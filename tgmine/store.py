@@ -95,7 +95,11 @@ MSK = timezone(timedelta(hours=3))
 #     «…, Кавказский, Тихорецкий  районы» — переліком районів; перелік
 #     районів після міста — не його підписи; повторний маркер після «от» —
 #     джерело; ширше коло для Комі й Карелії (`geo_km`).
-PIPELINE_VERSION = 34
+# 35: критична перевірка v34 — область за крапкою окремим полем `region_pt`
+#     і лише з опорою на велике місто поста (`region` знову лише текстова);
+#     перелік джерел «от X, Y» — без ланки X -> Y; та сама ланка раз;
+#     «Крымский, … районы» — не Крим; за 400 км — лише тезка в області.
+PIPELINE_VERSION = 35
 
 # Курс, названий словами. 2040 точкових подій (5.6%) кажуть «пролёт БПЛА на
 # северо-восток» або «с юго-запада фиксации», і досі ці слова викидались, а
@@ -379,8 +383,12 @@ POINT_KINDS = {"вибух", "збиття", "ППО", "фіксація", "пу
 #: всю нерозвʼязану статистику регіону.
 REGIONAL_FALLBACK = {"centroid", "region", "region-snap"}
 #: Координати, за якими подія без названої області дістає її з полігона
-#: (`point_region`): знайдені в контексті поста, а не вгадані за населенням.
-POINT_REGION_CONF = {"region", "consensus", "alias", "city-marker"}
+#: без інших умов (`point_region_of`): ручна правка й маркер області.
+POINT_REGION_CONF = {"alias", "city-marker"}
+#: Інакше крапку має підпирати велике місто з того ж поста — не далі
+#: POINT_REGION_KM і від POINT_REGION_POP жителів.
+POINT_REGION_POP = 50000
+POINT_REGION_KM = 100.0
 
 TARGET_PRIORITY = {
     "refinery": (0, 18), "defense_plant": (0, 15), "chemical": (0, 15),
@@ -779,6 +787,39 @@ def point_region(lat, lon):
     return None
 
 
+def point_region_of(p, best, lat, lon):
+    """Область події за крапкою, коли текст області не назвав.
+
+    Сама крапка (`region`/`consensus`) тут доказом НЕ є: без названої
+    області це вгадування тезки, і кримське «Красногвардейский район»
+    ставало районом Пітера, «Очаков» — селом у Марій Ел, «Дубки» —
+    Дагестаном (рецензія v34: із ~40 перевірених поза півднем майже всі
+    хибні). Доказ — велике місто з того ж поста (не район, не відмінковий
+    здогад), розвʼязане поруч: «Курортный район / Санкт-Петербург»,
+    «г.Ярославль, угроза атаки». Ручна правка й маркер області — самі собою.
+    """
+    if best is None or best.get("_aim"):
+        return None
+    if best.get("geo_conf") in POINT_REGION_CONF:
+        return point_region(lat, lon)
+    if best.get("geo_conf") not in ("region", "consensus"):
+        return None
+    text = p.get("text") or ""
+    for e in p.get("entities", []):
+        if ("lat" not in e or e.get("inherited") or e.get("geo_area") or e.get("geo_morph")
+                or e.get("geo_conf") not in ("region", "consensus", "alias", "city-marker")
+                or (e.get("geo_pop") or 0) < POINT_REGION_POP):
+            continue
+        # Частина міста (PPLX: Красногвардійський Пітера, 337 тис.) і назва
+        # з «район» після неї — не місто: це якраз тезки районів.
+        if e.get("geo_fcode") == "PPLX" or (e.get("pos") is not None and GC.DISTRICT_AFTER.match(
+                text[e["pos"] + len(str(e.get("match") or "")):])):
+            continue
+        if GC.haversine((lat, lon), (e["lat"], e["lon"])) <= POINT_REGION_KM:
+            return point_region(lat, lon) or point_region(e["lat"], e["lon"])
+    return None
+
+
 def plain_kind(text):
     """Вид лише з тексту, без фолбеку й з тактичними словами як «іншим» —
     для ознаки шуму й дедуплікації дзеркала, яким місце поста невідоме.
@@ -1108,6 +1149,12 @@ _SRC_REGION = re.compile(r"(?:\bиз|\bс)\s+$", re.I)
 #: Назва саме ОБЛАСТІ, а не міста-маркера («Крыма», «Ростовской», а не
 #: «Луганск»): лише така ціль може бути «своєю областю» без змісту.
 _REGION_NAME = re.compile(r"(?:ск|цк)(?:ой|ую|ая|ий|ого|ому|им)$|^Крым|^Республик|^ЛНР$|^ДНР$", re.I)
+#: Між пунктами ПЕРЕЛІКУ джерел — кома чи «и»; тире — шлях, а не перелік
+#: («от Энергодар - Днепрорудное - Васильевка», «от Луганск - Новоайдар»),
+#: і там ланка між ними — справжній рух. Порожнеча — теж ні: маркер
+#: «каховки» сидить усередині «Новой каховки».
+_SRC_LIST_GAP = re.compile(r"\s*(?:(?:район\w*|р-н|МО|ГО|округ\w*)\s*)?(?:,|\bи\b|\bили\b)\s*"
+                           r"(?:(?:г|с|п|пгт|д|ст)\.\s*)?", re.I)
 _VIA_BEFORE = re.compile(r"(?:\bчерез|\bв\s+обход|\bвдоль)\s+(?:г\.\s*)?$", re.I)
 
 
@@ -1185,15 +1232,27 @@ def legs_of(p, best=None):
     first_pos = ents[0]["pos"]
     aim = _aim_ids(p, [e for e in ents if e.get("geo_conf") != "centroid"], first_pos)
     role = {}
+    prev = None
     for e in ents:
         if SRC_BEFORE.search(before(e)) or _SRC_REGION.search(before(e)) and e.get("type") == "регіон":
             role[id(e)] = "from"
+        elif (prev is not None and role[id(prev)] in ("from", "from+")
+              and _SRC_LIST_GAP.fullmatch(
+                  text[prev["pos"] + len(str(prev.get("match") or "")):e["pos"]])):
+            # Перелік джерел: «от Кичменгский Городок, Великий Устюг», «от
+            # Суджанский, Глушковский район» — прийменник стоїть лише перед
+            # першим, а `_aim_ids` продовжує на решту той самий ланцюг, і
+            # другий пункт ставав ЦІЛЛЮ: ланка між двома джерелами (376
+            # подій архіву). Решта переліку — не ціль і не початок стрілки:
+            # стрілка йде, як і досі, від першого джерела.
+            role[id(e)] = "from+"
         elif _VIA_BEFORE.search(before(e)):
             role[id(e)] = "via"
         elif id(e) in aim or _moving_to(text, e["pos"]):
             role[id(e)] = "to"
         else:
             role[id(e)] = "here"
+        prev = e
     targets = [e for e in ents if role[id(e)] == "to"]
     if not targets:
         return []
@@ -1213,7 +1272,7 @@ def legs_of(p, best=None):
         origin = here[0]
     else:
         return []
-    legs, prev = [], None
+    legs, prev, seen = [], None, set()
     vias = [e for e in ents if role[id(e)] == "via" and origin["pos"] < e["pos"] < targets[0]["pos"]]
     cur = origin
     for v in vias:
@@ -1232,9 +1291,13 @@ def legs_of(p, best=None):
                                and o.get("value") == t.get("value") and o.get("pos") is not None
                                and not _moving_to(text, o["pos"])
                                for o in p.get("entities", [])))
-        if src is not t and not same_region and \
+        # Та сама ланка двічі («в направлении Балаклавы, Балаклавской ТЭС» —
+        # обидві назви в одному районі) — одна стрілка.
+        pair = (round(src["lat"], 3), round(src["lon"], 3), round(t["lat"], 3), round(t["lon"], 3))
+        if src is not t and not same_region and pair not in seen and \
                 GC.haversine((src["lat"], src["lon"]), (t["lat"], t["lon"])) > 5:
             legs.append((src, t))
+            seen.add(pair)
         prev = t
     return legs
 
@@ -1851,15 +1914,12 @@ class Store:
             # а відкочена до центру області. Раніше вона виглядала в сховищі
             # так само, як чесно знайдений НП.
             best = {"value": region, "geo_name": region, "geo_conf": "region-snap"}
-        # Область, якої текст не назвав, — за крапкою, коли крапка надійна:
-        # «Курортный район / Санкт-Петербург» (маркер Пітера свідомо лише на
-        # початку поста, інакше місто перебиває район), «Кача и близлежащие».
-        # Без неї подія не світила чип тривоги й не рахувалась фіксацією своєї
-        # області. Слабкі координати (global), джерело пуску й ціль руху —
-        # ні: там область крапки не є областю поста.
-        if region is None and lat is not None and not (best or {}).get("_aim") \
-                and (best or {}).get("geo_conf") in POINT_REGION_CONF:
-            region = point_region(lat, lon)
+        # Область, якої текст не назвав, — за крапкою (`region_pt`), лише
+        # для чипа тривоги редактора. `region` лишається ТЕКСТОВОЮ: за нею
+        # маршрути відсівають тезок (`routes._hops`), і область з крапки
+        # відкидала законні міжобласні ланки (рецензія v34).
+        region_pt = (point_region_of(p, best, lat, lon)
+                     if region is None and lat is not None else None)
         # Вид із фолбеку (DRONE_*) чи з контексту — слабке твердження, і на
         # слабкій координаті воно подією не стає: найбільший однойменний за
         # населенням («Новая волна» -> Novaya, «Благодаря вам» -> Благодарный,
@@ -1909,6 +1969,9 @@ class Store:
             "aim": bool((best or {}).get("_aim")),
             "depth": round(depth_km((lat, lon))) if lat else None,
             "region": region,
+            # Область за надійною крапкою, коли текст області не назвав
+            # (`point_region_of`); поле є завжди (test_schema_is_uniform).
+            "region_pt": region_pt,
             "drones": m,
             # курс словами, див. bearing_of; None — у тексті напрямку нема
             "bearing": bearing_of(clean),

@@ -1163,6 +1163,21 @@ def _namesake_elsewhere(gaz, e, seat, p, region_a1) -> bool:
     return False
 
 
+def _lookup_km(gaz, q, near, km, max_km, near_a1, scope=True, **kw):
+    """`lookup` у ширшому колі області (`geo_km`), але за межею max_km —
+    лише тезка в самій області. `lookup` без тезки в області бере будь-кого
+    в колі, і на 750 км «Октябрьский, Республика Коми» їхав за Урал, а
+    «Архангельск, Республика Карелия» — в Архангельськ (рецензія v34)."""
+    # `scope=False` — маркер області: його пошук областю не звужувався й
+    # не звужується, область тут лише перевіряє далекий збіг.
+    a1 = near_a1 if scope else None
+    hit = gaz.lookup(q, near, km, near_a1=a1, **kw)
+    if (hit and km > max_km and (hit.get("dist_km") or 0) > max_km
+            and (hit.get("cc"), hit.get("a1")) not in (near_a1 or ())):
+        hit = gaz.lookup(q, near, max_km, near_a1=a1, **kw)
+    return hit
+
+
 def geocode_posts(posts: list[dict], gaz: Gazetteer, region_geo: dict,
                   entity_type: str = "нп", max_km: float = 400.0,
                   refine_regions: bool = True, aliases: dict | None = None,
@@ -1268,11 +1283,13 @@ def geocode_posts(posts: list[dict], gaz: Gazetteer, region_geo: dict,
                 # (невидимою площею) — «Донецк, Макеевка ДНР» лишав лише
                 # Макіївку. Та сама заміна на адмінцентр, що й для топонімів.
                 hit = (None if district or gaz.names_the_region(e["match"], codes)
-                       else gaz.lookup(e["match"], base,
-                                       (region_km or {}).get(e["value"], max_km)))
+                       else _lookup_km(gaz, e["match"], base,
+                                       (region_km or {}).get(e["value"], max_km), max_km, codes,
+                                       scope=False))
                 if hit and hit.get("fcode") in ("ADM1", "ADM1H") and gaz.is_area_adm1(hit):
-                    seat = gaz.lookup(e["match"], base, (region_km or {}).get(e["value"], max_km),
-                                      prefer_seat=True)
+                    seat = _lookup_km(gaz, e["match"], base,
+                                      (region_km or {}).get(e["value"], max_km), max_km, codes,
+                                      scope=False, prefer_seat=True)
                     if seat and seat["fclass"] == "P" and not _namesake_elsewhere(
                             gaz, e, seat, p, region_a1):
                         hit = seat
@@ -1369,9 +1386,9 @@ def geocode_posts(posts: list[dict], gaz: Gazetteer, region_geo: dict,
                                (dc[1]["pop"] + 500) / (1 + dc[0] / 50.0))
                     hit = {**c, "dist_km": round(d), "conf": "consensus"}
                 else:
-                    hit = gaz.lookup(q, near, km, near_a1=a1, prefer_seat=True)
+                    hit = _lookup_km(gaz, q, near, km, max_km, a1, prefer_seat=True)
             else:
-                hit = gaz.lookup(q, near, km, near_a1=a1, prefer_seat=True)
+                hit = _lookup_km(gaz, q, near, km, max_km, a1, prefer_seat=True)
             # Джерело пуску: область поста — це ЦІЛЬ, а джерело за кордоном,
             # тож пошук «у своїй області» тягнув до російського села-тезки:
             # «из-под Харькова в направлении Белгородской» -> Харьковское на
@@ -1402,7 +1419,7 @@ def geocode_posts(posts: list[dict], gaz: Gazetteer, region_geo: dict,
             if a1 and e.get("pos") is not None:
                 after = p["text"][e["pos"] + len(str(e.get("match") or q)):]
                 if DISTRICT_AFTER.match(after):
-                    d = gaz.lookup(f"{q} район", near, km, near_a1=a1)
+                    d = _lookup_km(gaz, f"{q} район", near, km, max_km, a1)
                     if d and (d.get("cc"), d.get("a1")) in a1:
                         hit = d
                         stats["district"] += 1
@@ -1422,9 +1439,22 @@ def geocode_posts(posts: list[dict], gaz: Gazetteer, region_geo: dict,
                 after = p["text"][e["pos"] + len(str(e.get("match") or q)):]
                 nq = norm(q)
                 if nq and " " not in nq and _ADJ_STEM.search(nq) and DISTRICT_LIST_AFTER.match(after):
-                    d = gaz.lookup(f"{q} район", near, km, near_a1=a1)
-                    if (d and str(d.get("fcode") or "").startswith("ADM")
-                            and (not a1 or (d.get("cc"), d.get("a1")) in a1)):
+                    d = _lookup_km(gaz, f"{q} район", near, km, max_km, a1)
+                    if a1 and d and (d.get("cc"), d.get("a1")) not in a1:
+                        # Область поста — джерело: «Миллеровский, Тарасовский,
+                        # Каменский районы … от ЛНР» — район шукаємо в колі,
+                        # інакше «Каменский» ставав волгоградським селом.
+                        # Найближчий, а не за населенням: у районів GeoNames
+                        # pop=0 означає «невідомо», і воронезький Каменський
+                        # (18 тис., 238 км) бив ростовський (0, 78 км).
+                        adm = [(haversine(near, (c["lat"], c["lon"])), c)
+                               for c in gaz.candidates(f"{q} район", None)
+                               if str(c.get("fcode") or "").startswith("ADM")] if near else []
+                        adm = [dc for dc in adm if dc[0] <= max_km]
+                        d = ({**min(adm, key=lambda dc: dc[0])[1], "conf": "region",
+                              "dist_km": round(min(adm, key=lambda dc: dc[0])[0]), "morph": False}
+                             if adm else None)
+                    if d and str(d.get("fcode") or "").startswith("ADM"):
                         hit = d
                         stats["district_list"] += 1
             if e.get("pos") is not None:

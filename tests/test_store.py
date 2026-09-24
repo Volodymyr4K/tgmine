@@ -1927,21 +1927,62 @@ class TestRegionsOfPlaces(unittest.TestCase):
         regs = {x["value"] for x in self.E.entities_of(
             "Фиксации БПЛА на Крымском полуострове", self.cfg) if x["type"] == "регіон"}
         self.assertEqual(regs, {"Крим"})
+        # кубанський Крымский район і в переліку районів — не Крим
+        for text in ("Абинский, Крымский и Северский районы",
+                     "Темрюкский, Крымский, Абинский  районы"):
+            with self.subTest(text=text):
+                self.assertNotIn("Крим", {x["value"] for x in self.E.entities_of(text, self.cfg)
+                                          if x["type"] == "регіон"})
 
     def test_region_from_the_point_when_text_names_none(self):
         """«Курортный район / Санкт-Петербург», «Краснодар и близлежащие» —
-        область з полігона під надійною крапкою."""
-        for text, reg in (("Курортный район / Санкт-Петербург / Работа ПВО по БПЛА",
+        область з полігона (`region_pt`), бо крапку підпирає велике місто
+        поста. Текстова `region` лишається порожньою: за нею маршрути
+        відсівають тезок."""
+        for text, reg in (("Курортный район\nСанкт-Петербург\nРабота ПВО по БПЛА",
                            "Ленінградська"),
-                          ("Краснодар и близлежащие / Тревога по БПЛА", "Краснодарський")):
+                          ("Краснодар и близлежащие\nТревога по БПЛА", "Краснодарський"),
+                          ("Кронштадтский район\nСанкт-Петербург\nРабота ПВО по БПЛА",
+                           "Ленінградська")):
             with self.subTest(text=text[:20]):
-                self.assertEqual(self._event(text, "vrv_radar")["region"], reg)
+                e = self._event(text, "vrv_radar")
+                self.assertEqual((e["region"], e["region_pt"]), (None, reg))
+
+    def test_namesake_guess_gives_no_region(self):
+        """Без названої області крапка — вгаданий тезка: кримський
+        «Красногвардейский район» — район Пітера, «Очаков» — село в Марій Ел.
+        Такі області не дістають (рецензія v34)."""
+        for text in ("Красногвардейский район опасность по БПЛА",
+                     "Очаков фиксации БПЛА с выходом в Чёрное море",
+                     "Трасса Таврида от Дубки до Комсомольское тревога по БПЛА"):
+            with self.subTest(text=text[:20]):
+                self.assertIsNone(self._event(text)["region_pt"])
 
     def test_weak_point_gives_no_region(self):
         """Вгадане за населенням (global) область не дає."""
         e = self._event("Любимовка\nОпасность по БПЛА")
         self.assertEqual(e["geo_conf"], "global")
-        self.assertIsNone(e["region"])
+        self.assertIsNone(e["region_pt"])
+
+    def test_wide_radius_does_not_leave_the_subject(self):
+        """Коло 750 км — лише для тезок у самій області: «Октябрьский,
+        Республика Коми» не їде за Урал, «Архангельск, Республика Карелия» —
+        не Архангельськ."""
+        e = self._event("Октябрьский, Республика Коми - опасность по БПЛА", "locatorru")
+        self.assertIn(e["region"], ("Комі",))
+        if e["geo_conf"] not in ("centroid", "region-snap"):
+            self.assertEqual(ST.point_region(e["lat"], e["lon"]), "Комі")
+        e = self._event("Архангельск, Республика Карелия - опасность по БПЛА", "locatorru")
+        self.assertNotEqual(e["place"], "Arkhangel’sk")
+
+    def test_district_list_when_post_region_is_the_source(self):
+        """«… Каменский районы … от ЛНР» — область поста джерело, район
+        шукається в колі, а не в ЛНР (інакше — волгоградське село)."""
+        p = self._post("Миллеровский, Чертковский, Тарасовский, Каменский районы / "
+                       "Тревога по БПЛА от ЛНР")
+        e, = [e for e in p["entities"] if e["type"] == "нп" and e["value"] == "Каменский"]
+        self.assertTrue(e.get("geo_area"))
+        self.assertEqual(ST.point_region(e["lat"], e["lon"]), "Ростовська")
 
     def test_wide_subject_reaches_its_far_towns(self):
         """Від якоря Комі до Воркути 716 км, від Петрозаводська до Лоухів 481:
@@ -2010,3 +2051,46 @@ class TestRegionsOfPlaces(unittest.TestCase):
                         "муниципальных образований: г.Анапа, г. Новороссийск, Абинский, "
                         "Крымский, Темрюкский районы.")
         self.assertEqual(e["place"], "Anapa")
+
+    def test_source_list_gives_no_leg_between_sources(self):
+        """«от Дубна, Клин», «со стороны Цимлянск, Волгодонск» — обидва
+        джерела: ланки між ними нема (376 подій архіву мали таку). Стрілка —
+        від ПЕРШОГО джерела, як і досі («От Туапсе, Агой, Небуг в сторону
+        Сочи»)."""
+        e = self._event("Редкино, Тверь, Конаково, Тверская область - опасность по БПЛА от "
+                        "Дубна, Клин.", "locatorru")
+        self.assertEqual(e["legs"], [])
+        e = self._event("Опасность по БПЛА со стороны Цимлянск, Волгодонск в направлении "
+                        "Зимовники, Ростовская область.", "locatorru")
+        self.assertEqual([(l[0], l[4]) for l in e["legs"]], [("Tsimlyansk", "Zimovniki")])
+        e = self._event("От Туапсе, Агой, Небуг в сторону Сочи, Адлер, Краснодарский край - "
+                        "опасность по БПЛА.", "locatorru")
+        self.assertEqual({(l[0], l[4]) for l in e["legs"]}, {("Tuapse", "Sochi"), ("Tuapse", "Adler")})
+
+    def test_dash_between_sources_is_a_path(self):
+        """«от Энергодар - Днепрорудное - Васильевка» — шлях, не перелік
+        джерел: ланки лишаються."""
+        e = self._event("Запорожская область РФ, еще фиксации БпЛА от Энергодар - Днепрорудное - "
+                        "Васильевка и далее на юг")
+        self.assertIn(("Enerhodar", "Dniprorudne"), [(l[0], l[4]) for l in e["legs"]])
+
+    def test_target_point_gives_no_region(self):
+        """Крапка-ціль руху («в направлении Краснодар») — не область поста,
+        хоч місто й велике."""
+        e = self._event("Опасность по БПЛА в направлении Краснодар", "locatorru")
+        self.assertTrue(e["aim"])
+        self.assertIsNone(e["region_pt"])
+
+    def test_marker_inside_a_name_is_not_the_next_source(self):
+        """Маркер «каховки» всередині «Новой каховки» — не наступне джерело."""
+        e = self._event("От  Новой каховки в направлении Геническа фиксации БПЛА.\n"
+                        "Херсонская область РФ")
+        self.assertEqual([(l[0], l[4]) for l in e["legs"]], [("Nova Kakhovka", "Henichesk")])
+
+    def test_same_leg_once(self):
+        """Дві назви одного місця-цілі — одна ланка."""
+        e = self._event("От Камышового шоссе в направлении Балаклавы, Балаклавской ТЭС\n"
+                        "Фиксации БПЛА")
+        pairs = [(l[1], l[2], l[5], l[6]) for l in e["legs"]]
+        self.assertEqual(len(pairs), len(set(pairs)))
+        self.assertTrue(pairs)

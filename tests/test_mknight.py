@@ -419,6 +419,37 @@ class TestAlertRegionsFromPlaces(unittest.TestCase):
         regs = {o["reg"] for o in self.mk.alerts(raid)["onsets"]}
         self.assertEqual(regs, {"Адигея", "Краснодарський"})
 
+    def test_far_place_adds_nothing(self):
+        """`also` несе й вгадані за населенням місця: «Меры безопасности» ->
+        Mery у Підмосковʼї. Далеко від названої області — не тривога."""
+        raid = {"events": [{
+            "scope": "область", "kind": "тривога", "t": "2026-09-08T02:03:00+03:00",
+            "hhmm": "02:03", "url": "https://t.me/a/1", "region": "Брянська",
+            "text": "Брянская область / Белая Березка / Меры безопасности",
+            "lat": 52.47, "lon": 32.93, "geo_conf": "region", "aim": False,
+            "also": [["Mery", 55.6, 37.7, False]]}]}
+        self.assertEqual({o["reg"] for o in self.mk.alerts(raid)["onsets"]}, {"Брянська"})
+
+    def test_point_region_when_text_names_none(self):
+        """Текст області не назвав — чип за `region_pt`."""
+        raid = {"events": [{
+            "scope": "область", "kind": "тривога", "t": "2026-09-08T02:03:00+03:00",
+            "hhmm": "02:03", "url": "https://t.me/a/1", "region": None,
+            "region_pt": "Ленінградська",
+            "text": "Курортный район\nСанкт-Петербург\nТревога по БПЛА",
+            "lat": 60.2, "lon": 29.9, "geo_conf": "consensus", "aim": False, "also": []}]}
+        self.assertEqual({o["reg"] for o in self.mk.alerts(raid)["onsets"]}, {"Ленінградська"})
+
+    def test_target_point_near_named_region_adds_nothing(self):
+        """Ціль руху в сусідній області (Обоянь за 70 км від Бєлгорода) —
+        не тривога в ній."""
+        raid = {"events": [{
+            "scope": "область", "kind": "тривога", "t": "2026-09-08T02:03:00+03:00",
+            "hhmm": "02:03", "url": "https://t.me/a/1", "region": "Бєлгородська",
+            "text": "Белгородская область опасность по БПЛА в направлении Обоянь",
+            "lat": 51.21, "lon": 36.28, "geo_conf": "region", "aim": True, "also": []}]}
+        self.assertEqual({o["reg"] for o in self.mk.alerts(raid)["onsets"]}, {"Бєлгородська"})
+
     def test_target_point_adds_nothing(self):
         """Крапка-ціль руху («в направлении X») області тривозі не дає."""
         raid = {"events": [{

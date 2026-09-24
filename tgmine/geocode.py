@@ -755,6 +755,13 @@ WIDE_VOTE_MAX = 400
 # правильного запису серед кандидатів нема взагалі.
 DISTRICT_AFTER = re.compile(
     r"\s*(?:муниципальн\w*\s+)?(?:район\w*|р-?н\b|округ\w*)", re.I)
+#: «Белоглинский, Кавказский, …, Тихорецкий  районы» (зведення РСЧС): слово
+#: «районы» наприкінці переліку стосується КОЖНОГО пункту. Без цього пункти
+#: шукались як села, і «Кавказский», «Красноармейский» ставали хуторами-
+#: тезками на Ростовщині — хибними місцями кубанської тривоги.
+DISTRICT_LIST_AFTER = re.compile(
+    r"(?:\s*(?:,|\bи\b)\s*[А-ЯЁ][а-яё]+(?:-[А-ЯЁа-яё][а-яё]+)?(?:ск|цк)(?:ий|ой)\b)*"
+    r"\s*(?:муниципальн\w*\s+)?районы\b")
 
 # «Киевская область» — ЦІЛА область, а не село-тезка. Області України в конфізі
 # нема (там субʼєкти РФ і ТОТ), тож прикметник іде у freeform як НП, і точний
@@ -1159,8 +1166,11 @@ def _namesake_elsewhere(gaz, e, seat, p, region_a1) -> bool:
 def geocode_posts(posts: list[dict], gaz: Gazetteer, region_geo: dict,
                   entity_type: str = "нп", max_km: float = 400.0,
                   refine_regions: bool = True, aliases: dict | None = None,
-                  region_a1: dict | None = None) -> dict:
+                  region_a1: dict | None = None, region_km: dict | None = None) -> dict:
     """Проставляє lat/lon сутностям.
+
+    region_km: радіус пошуку від якоря області, якщо він ширший за max_km
+    (`geo_km` у конфігу) — для субʼєктів, яких одне коло 400 км не покриває.
 
     refine_regions: місто-маркер області ("Керчь" -> Крим) віддає власні
     координати замість центроїда регіону. Інакше вся Керч сидить у центрі Криму
@@ -1178,6 +1188,7 @@ def geocode_posts(posts: list[dict], gaz: Gazetteer, region_geo: dict,
             regions.insert(0, home)
         near = region_geo[regions[0]] if regions else None
         a1 = (region_a1 or {}).get(regions[0]) if regions else None
+        km = (region_km or {}).get(regions[0], max_km) if regions else max_km
         consensus = None
         if near is None:
             # Прохід 0: узгодження назв усередині поста. Йде ПЕРЕД якорем, бо
@@ -1257,9 +1268,11 @@ def geocode_posts(posts: list[dict], gaz: Gazetteer, region_geo: dict,
                 # (невидимою площею) — «Донецк, Макеевка ДНР» лишав лише
                 # Макіївку. Та сама заміна на адмінцентр, що й для топонімів.
                 hit = (None if district or gaz.names_the_region(e["match"], codes)
-                       else gaz.lookup(e["match"], base, max_km))
+                       else gaz.lookup(e["match"], base,
+                                       (region_km or {}).get(e["value"], max_km)))
                 if hit and hit.get("fcode") in ("ADM1", "ADM1H") and gaz.is_area_adm1(hit):
-                    seat = gaz.lookup(e["match"], base, max_km, prefer_seat=True)
+                    seat = gaz.lookup(e["match"], base, (region_km or {}).get(e["value"], max_km),
+                                      prefer_seat=True)
                     if seat and seat["fclass"] == "P" and not _namesake_elsewhere(
                             gaz, e, seat, p, region_a1):
                         hit = seat
@@ -1356,9 +1369,9 @@ def geocode_posts(posts: list[dict], gaz: Gazetteer, region_geo: dict,
                                (dc[1]["pop"] + 500) / (1 + dc[0] / 50.0))
                     hit = {**c, "dist_km": round(d), "conf": "consensus"}
                 else:
-                    hit = gaz.lookup(q, near, max_km, near_a1=a1, prefer_seat=True)
+                    hit = gaz.lookup(q, near, km, near_a1=a1, prefer_seat=True)
             else:
-                hit = gaz.lookup(q, near, max_km, near_a1=a1, prefer_seat=True)
+                hit = gaz.lookup(q, near, km, near_a1=a1, prefer_seat=True)
             # Джерело пуску: область поста — це ЦІЛЬ, а джерело за кордоном,
             # тож пошук «у своїй області» тягнув до російського села-тезки:
             # «из-под Харькова в направлении Белгородской» -> Харьковское на
@@ -1389,7 +1402,7 @@ def geocode_posts(posts: list[dict], gaz: Gazetteer, region_geo: dict,
             if a1 and e.get("pos") is not None:
                 after = p["text"][e["pos"] + len(str(e.get("match") or q)):]
                 if DISTRICT_AFTER.match(after):
-                    d = gaz.lookup(f"{q} район", near, max_km, near_a1=a1)
+                    d = gaz.lookup(f"{q} район", near, km, near_a1=a1)
                     if d and (d.get("cc"), d.get("a1")) in a1:
                         hit = d
                         stats["district"] += 1
@@ -1405,6 +1418,15 @@ def geocode_posts(posts: list[dict], gaz: Gazetteer, region_geo: dict,
                         # місто за населенням перебиває село, назване поруч, —
                         # «Розовка, Куйбышевский район» ставала Більмаком.
                         e["_district_word"] = True
+            if e.get("pos") is not None and not str((hit or {}).get("fcode") or "").startswith("ADM"):
+                after = p["text"][e["pos"] + len(str(e.get("match") or q)):]
+                nq = norm(q)
+                if nq and " " not in nq and _ADJ_STEM.search(nq) and DISTRICT_LIST_AFTER.match(after):
+                    d = gaz.lookup(f"{q} район", near, km, near_a1=a1)
+                    if (d and str(d.get("fcode") or "").startswith("ADM")
+                            and (not a1 or (d.get("cc"), d.get("a1")) in a1)):
+                        hit = d
+                        stats["district_list"] += 1
             if e.get("pos") is not None:
                 after = p["text"][e["pos"] + len(str(e.get("match") or q)):]
                 nq = norm(q)

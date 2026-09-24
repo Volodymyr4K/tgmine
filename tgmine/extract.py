@@ -13,7 +13,8 @@ from pathlib import Path
 
 import yaml
 
-from .geocode import DISTRICT_AFTER, GENERIC as _GENERIC_WORDS, LAUNCH_WORD
+from .geocode import (DISTRICT_AFTER, DISTRICT_LIST_AFTER, GENERIC as _GENERIC_WORDS,
+                      LAUNCH_WORD, _ADJ_STEM)
 
 
 @dataclass
@@ -32,6 +33,7 @@ class Config:
     noise: re.Pattern | None = None                          # збори, реклама, вербування
     geo: dict[str, tuple[float, float]] = field(default_factory=dict)
     geo_aliases: dict[str, tuple[float, float]] = field(default_factory=dict)
+    geo_km: dict[str, float] = field(default_factory=dict)
 
     @classmethod
     def load(cls, path: str | Path) -> "Config":
@@ -88,6 +90,7 @@ class Config:
         if raw.get("noise"):
             cfg.noise = rx(raw["noise"])
         cfg.geo = {k: tuple(v) for k, v in (raw.get("geo") or {}).items()}
+        cfg.geo_km = {k: float(v) for k, v in (raw.get("geo_km") or {}).items()}
         cfg.geo_aliases = {k.lower(): tuple(v)
                            for k, v in (raw.get("geo_aliases") or {}).items()}
         return cfg
@@ -272,9 +275,17 @@ def _freeform_scope(scope, offset, spec, etype, cfg, seen):
         # Сутність-регіон при цьому ЛИШАЄТЬСЯ. Звузити патерни в конфізі не
         # можна: у 1680 із 3582 постів область упізнана САМЕ цим прикметником,
         # і без нього вони лишились би без області взагалі.
+        #
+        # Те саме для пункту переліку «…, Калининский, Красноармейский,
+        # Северский  районы» (зведення РСЧС): маркер Кубані «Красноармейск…»
+        # інакше ставав хутором Красноармійським на Ростовщині. Лише
+        # прикметник: «г. Новороссийск, Абинский, … районы» — місто, і
+        # перелік районів після нього його районом не робить.
         taken += [m.span() for vals in cfg.entities.values()
                   for rx in vals.values() for m in rx.finditer(scope)
-                  if not DISTRICT_AFTER.match(scope[m.end():])]
+                  if not DISTRICT_AFTER.match(scope[m.end():])
+                  and not (_ADJ_STEM.search(m.group(0).lower())
+                           and DISTRICT_LIST_AFTER.match(scope[m.end():]))]
         def add(val, pos):
             low = val.lower()
             if len(val) < spec["min_len"] or low in spec["stoplist"] or low in seen:

@@ -397,3 +397,46 @@ class TestBridgedRouteFields(unittest.TestCase):
         self.assertEqual((m["conf"], m["u"], m["t1"]), ("strong", "Дартс", "00:30"))
         self.assertEqual(m["legs"], ["seen", "bridge", "seen"])
         self.assertEqual(m["bridges"], [{"at": 1, "nights": 5}])
+
+
+class TestAlertRegionsFromPlaces(unittest.TestCase):
+    """Чип тривоги світять і області МІСЦЬ поста, не лише названі області."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.mk = load_script("mapper/mknight.py")
+
+    def test_places_add_their_regions(self):
+        """«…г.Краснодар / …Майкоп, Республика Адыгея» світив лише Адигею."""
+        raid = {"events": [{
+            "scope": "область", "kind": "тривога", "t": "2026-09-08T02:03:00+03:00",
+            "hhmm": "02:03", "url": "https://t.me/locatorru/58816", "region": "Адигея",
+            "text": "Ильский, Северская, Афипский, Северский район, г.Краснодар / "
+                    "Елизаветинская, Яблоновский, Майкоп, Ханская, Республика Адыгея - "
+                    "опасность по БПЛА.",
+            "lat": 44.608, "lon": 40.102, "geo_conf": "region", "aim": False,
+            "also": [["Il’skiy", 44.842, 38.567, False], ["Krasnodar", 45.045, 38.982, False]]}]}
+        regs = {o["reg"] for o in self.mk.alerts(raid)["onsets"]}
+        self.assertEqual(regs, {"Адигея", "Краснодарський"})
+
+    def test_target_point_adds_nothing(self):
+        """Крапка-ціль руху («в направлении X») області тривозі не дає."""
+        raid = {"events": [{
+            "scope": "область", "kind": "тривога", "t": "2026-09-08T02:03:00+03:00",
+            "hhmm": "02:03", "url": "https://t.me/a/1", "region": None,
+            "text": "Опасность по БПЛА в направлении Краснодар",
+            "lat": 45.045, "lon": 38.982, "geo_conf": "region", "aim": True, "also": []}]}
+        self.assertEqual(self.mk.alerts(raid)["onsets"], [])
+
+    def test_reader_labels_count_fixes_of_their_region(self):
+        """Ніч несе області назвами для читача («Донеччина (ТОТ)»): фіксація
+        там має знімати з чипа позначку «німа»."""
+        raid = {"events": [
+            {"scope": "область", "kind": "тривога", "t": "2026-09-08T02:03:00+03:00",
+             "hhmm": "02:03", "url": "https://t.me/a/1", "region": "Іванівська",
+             "text": "Ивановская область - опасность по БПЛА"},
+            {"scope": "точка", "kind": "фіксація", "lat": 57.0, "lon": 41.0,
+             "region": "Іванівська", "geo_conf": "region"}]}
+        o, = self.mk.alerts(raid)["onsets"]
+        self.assertEqual(o["reg"], "Ивановська")
+        self.assertFalse(o["silent"])

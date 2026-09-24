@@ -1888,3 +1888,125 @@ class TestBarePostKindFromContext(unittest.TestCase):
         e, = self._events([("lpr1_treugolnik", 1,
                             "Феодосия\nРеспублика Крым\nУчения", None)])
         self.assertEqual((e["kind"], e["kind_ctx"]), ("інше", None))
+
+
+@needs_gazetteer
+class TestRegionsOfPlaces(unittest.TestCase):
+    """Область поста, коли текст її не назвав або назвав хибно (24.09.2026)."""
+
+    @classmethod
+    def setUpClass(cls):
+        from tgmine import extract as E
+        cls.E = E
+        cls.cfg = E.Config.load(str(ROOT / "configs" / "ru-monitor.yaml"))
+        cls.gaz = GC.Gazetteer.load(GAZ / "RU.txt", GAZ / "UA.txt")
+        cls.a1 = cls.gaz.region_codes(cls.cfg.entities["регіон"], cls.cfg.geo)
+
+    def _post(self, text, channel="lpr1_treugolnik"):
+        posts = self.E.enrich([{"channel": channel, "id": 1, "text": text,
+                                "date": "2026-09-14T18:02:00+00:00",
+                                "url": f"https://t.me/{channel}/1"}], self.cfg)
+        GC.geocode_posts(posts, self.gaz, self.cfg.geo, aliases=self.cfg.geo_aliases,
+                         region_a1=self.a1, region_km=self.cfg.geo_km)
+        return posts[0]
+
+    def _event(self, text, channel="lpr1_treugolnik"):
+        st = ST.Store.__new__(ST.Store)
+        st._tidx = None
+        return ST.Store._event(st, self._post(text, channel), self.cfg)
+
+    def test_krymsk_is_kuban_not_crimea(self):
+        """«Крымск» — місто Кубані; `Крым\\w*` забирав його в Крим (283 події)."""
+        for text in ("Крымск и близлежащие / Краснодарский край / Тревога по БПЛА",
+                     "Новороссийск и близлежащие от Абинска, Крымска / Опасность по БПЛА"):
+            with self.subTest(text=text[:20]):
+                regs = {x["value"] for x in self.E.entities_of(text, self.cfg)
+                        if x["type"] == "регіон"}
+                self.assertNotIn("Крим", regs)
+                self.assertIn("Краснодарський", regs)
+        regs = {x["value"] for x in self.E.entities_of(
+            "Фиксации БПЛА на Крымском полуострове", self.cfg) if x["type"] == "регіон"}
+        self.assertEqual(regs, {"Крим"})
+
+    def test_region_from_the_point_when_text_names_none(self):
+        """«Курортный район / Санкт-Петербург», «Краснодар и близлежащие» —
+        область з полігона під надійною крапкою."""
+        for text, reg in (("Курортный район / Санкт-Петербург / Работа ПВО по БПЛА",
+                           "Ленінградська"),
+                          ("Краснодар и близлежащие / Тревога по БПЛА", "Краснодарський")):
+            with self.subTest(text=text[:20]):
+                self.assertEqual(self._event(text, "vrv_radar")["region"], reg)
+
+    def test_weak_point_gives_no_region(self):
+        """Вгадане за населенням (global) область не дає."""
+        e = self._event("Любимовка\nОпасность по БПЛА")
+        self.assertEqual(e["geo_conf"], "global")
+        self.assertIsNone(e["region"])
+
+    def test_wide_subject_reaches_its_far_towns(self):
+        """Від якоря Комі до Воркути 716 км, від Петрозаводська до Лоухів 481:
+        коло 400 км їх не діставало, і пост падав на центр субʼєкта."""
+        for text, name in (("г.Воркута, Республика Коми - опасность по БПЛА", "Vorkuta"),
+                           ("Инта, Республика Коми - опасность по БПЛА", "Inta"),
+                           ("Лоухи, Республика Карелия - опасность по БПЛА", "Loukhi")):
+            with self.subTest(name=name):
+                e = self._event(text, "locatorru")
+                self.assertEqual(e["place"], name)
+                self.assertNotIn(e["geo_conf"], ("centroid", "region-snap"))
+
+    def test_plural_districts_word_covers_the_list(self):
+        """«Белоглинский, …, Кавказский, …, Тихорецкий  районы» — кожен пункт
+        район, а не хутір-тезка на Ростовщині."""
+        p = self._post("Экстренная информация РСЧС: БЕСПИЛОТНАЯ ОПАСНОСТЬ на территории "
+                       "муниципальных образований: Белоглинский, Брюховецкий, Кавказский, "
+                       "Новопокровский, Тихорецкий  районы. 14.09.2026")
+        got = {e["value"]: e for e in p["entities"] if e["type"] == "нп" and "lat" in e}
+        for name in ("Кавказский", "Белоглинский", "Тихорецкий"):
+            with self.subTest(name=name):
+                self.assertTrue(got[name].get("geo_area"), "має бути район")
+                self.assertEqual(ST.point_region(got[name]["lat"], got[name]["lon"]),
+                                 "Краснодарський")
+
+    def test_district_list_after_a_city_is_not_its_label(self):
+        """Кубанські райони за 100+ км від Армавіра — не підписи Армавіра, а
+        райони Донецька — підписи Донецька."""
+        e = self._event("Экстренная информация РСЧС: БЕСПИЛОТНАЯ ОПАСНОСТЬ на территории "
+                        "муниципальных образований: г. Армавир, Белоглинский, Новопокровский, "
+                        "Кавказский районы.")
+        self.assertEqual(e["place"], "Armavir")
+        self.assertGreaterEqual(len(e["also"]), 2)
+        e = self._event("Донецк ДНР Петровский, Кировский районы и близлежащие / Опасность по БПЛА")
+        self.assertEqual((e["place"], e["also"]), ("Donetsk", []))
+
+    def test_single_far_district_stays_a_label(self):
+        """Одиночне «Село, X район» лишається підписом і коли далеко:
+        там далеко через хибний розвʼязок однієї з назв."""
+        e = self._event("Ильичево,  Ленинский район  в сторону  Тавриды / Фиксация БПЛА / "
+                        "Республика Крым")
+        self.assertEqual(e["also"], [])
+
+    def test_repeated_marker_after_from_is_a_source(self):
+        """«…от Крымск, Абинск»: «Крымск» — повторний маркер області поста, і
+        ланцюг джерел має дійти через нього до Абинська."""
+        e = self._event("Ильский, Афипский, Краснодарский край - опасность по БПЛА от Крымск, "
+                        "Абинск.", "locatorru")
+        self.assertEqual(e["place"], "Il’skiy")
+
+    def test_region_marker_in_a_district_list_is_a_district(self):
+        """«Красноармейский» — маркер Кубані; у переліку «… районы» він має
+        стати районом, а не хутором-тезкою на Ростовщині."""
+        p = self._post("Экстренная информация РСЧС: БЕСПИЛОТНАЯ ОПАСНОСТЬ на территории "
+                       "муниципальных образований: Абинский, Калининский, Красноармейский, "
+                       "Северский  районы.")
+        e, = [e for e in p["entities"] if e["type"] == "нп" and e["value"] == "Красноармейский"]
+        self.assertTrue(e.get("geo_area"))
+        self.assertEqual(ST.point_region(e["lat"], e["lon"]), "Краснодарський")
+
+    def test_city_before_a_district_list_stays_a_city(self):
+        """«г.Анапа, г. Новороссийск, Абинский, … районы»: Новоросійськ —
+        місто, перелік районів після нього не робить його пунктом переліку
+        (інакше він перебивав Анапу з першого місця)."""
+        e = self._event("Экстренная информация РСЧС: БЕСПИЛОТНАЯ ОПАСНОСТЬ на территории "
+                        "муниципальных образований: г.Анапа, г. Новороссийск, Абинский, "
+                        "Крымский, Темрюкский районы.")
+        self.assertEqual(e["place"], "Anapa")

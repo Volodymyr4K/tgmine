@@ -522,6 +522,14 @@ def alerts(raid):
         return (h + 24 if h < 12 else h, hhmm)
 
     from tgmine import store as ST
+    from tgmine.labels import REGION_LABEL
+    # Ніч (raid.py) несе області назвами для читача («Донеччина (ТОТ)»), а
+    # тут ключі — конфігу: без зворотного словника фіксації ТОТ і Іванівської
+    # не зараховувались своїй області, і чип лишався «німим».
+    unlabel = {v: k for k, v in REGION_LABEL.items()}
+
+    def key(r):
+        return unlabel.get(r, r)
     msgs = collections.defaultdict(list)          # регіон -> [(t, kind, url, hhmm, reminder)]
     for e in raid["events"]:
         if e.get("scope") != "область" or e.get("kind") not in ("тривога", "відбій"):
@@ -565,12 +573,28 @@ def alerts(raid):
                 continue
             if x["value"] not in regs:
                 regs.append(x["value"])
+        # Області МІСЦЬ тривоги — за полігонами, бо текст називає область не
+        # завжди: «…Северский район, г.Краснодар / Елизаветинская, Майкоп,
+        # Республика Адыгея» світив лише Адигею, «Курортный район /
+        # Санкт-Петербург» — нічого. Місця — крапка події (надійна, не ціль
+        # руху) і `also` (там уже нема цілей і джерел).
+        pts = [(x[1], x[2]) for x in e.get("also") or []]
+        if (e.get("lat") and not e.get("aim")
+                and e.get("geo_conf") in ST.POINT_REGION_CONF):
+            pts.insert(0, (e["lat"], e["lon"]))
+        for la, lo in pts:
+            r = ST.point_region(la, lo)
+            if r and r not in regs:
+                regs.append(r)
+        # Запасне — область події (`store._event` бере її й за крапкою).
+        if not regs and e.get("region"):
+            regs = [key(e["region"])]
         reminder = bool(ALERT_REMINDER.search(text))
         for r in regs:
             msgs[r].append((t, e["kind"], e.get("url", ""), e.get("hhmm", ""),
                             reminder, e.get("utype")))
     fixes = collections.Counter(
-        e.get("region") for e in raid["events"]
+        key(e.get("region")) for e in raid["events"]
         if e.get("scope") == "точка" and e.get("lat") and e.get("region")
         and e.get("geo_conf") not in ("centroid", "region-snap"))
     onsets, cover, muted, anchors = [], {}, [], {}

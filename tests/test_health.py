@@ -56,6 +56,17 @@ class TestOnRealHistory(unittest.TestCase):
         self.assertEqual([x["ch"] for x in live], ["vrv_radar"])
         self.assertGreaterEqual(live[0]["others"], H.LIMITS["vrv_radar"][0])
 
+    def test_mirror_pair_silent_together_is_caught(self):
+        """kupol дзеркалить lpr1 і замовкне разом із ним — тоді лік інших
+        тримають лише vrv і locator. На ночі 21.09 пару видно за 6 год."""
+        cut = _ts("2026-09-21T18:00:00Z")
+        now = _ts("2026-09-22T00:00:00Z")
+        t = {ch: [x for x in v if x <= now] for ch, v in self.t.items()}
+        for ch in ("lpr1_treugolnik", "kupolrussia"):
+            t[ch] = [x for x in t[ch] if x < cut]
+        live = {x["ch"] for x in H.gaps(t, now, SINCE) if x["to"] is None}
+        self.assertIn("lpr1_treugolnik", live)
+
 
 class TestLogic(unittest.TestCase):
 
@@ -71,6 +82,13 @@ class TestLogic(unittest.TestCase):
         g = [x for x in H.gaps(t, 7 * h, 0.0) if x["ch"] == "*"]
         self.assertEqual(len(g), 1)
         self.assertIsNone(g[0]["to"])
+
+    def test_everybody_silent_is_one_message_not_five(self):
+        """20 год тиші всіх: кожен канал окремо теж переходить межу в
+        годинах, але оператор має прочитати одне — стоїть збір."""
+        h = 3600.0
+        t = {ch: [0.0] for ch in H.LIMITS}
+        self.assertEqual([x["ch"] for x in H.gaps(t, 40 * h, 0.0) if x["to"] is None], ["*"])
 
     def test_silence_while_others_post_is_flagged_and_ongoing(self):
         h = 3600.0

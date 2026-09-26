@@ -1218,7 +1218,8 @@ const S={
                  // пуску нічим не пояснювався.
                  boomName:'Вибух',launchMarkName:'Пуск',fixName:'Фіксація',
                  missileName:'Ракета',jetName:'Реактивний БпЛА',
-                 alertName:'Лише оголошена небезпека',
+                 missileAlertName:'Ракетна небезпека',
+                 jetAlertName:'Небезпека реактивних БпЛА',
                  opacity:.9}},
   // Шапка — це чужа картка на чужій карті: назва, рядок під нею, заголовок,
   // дата й знак. Усе це має бути власним, зокрема знак картинкою.
@@ -2445,7 +2446,7 @@ function cityRoles(){
   // Підпис сцени: що змінює ролі — склад позначок і вузлів маршрутів.
   let key=vis.length+'|';
   for(const o of vis){
-    if(o.kind==='impact') key+='i'+o.la.toFixed(2)+','+o.lo.toFixed(2)+'x'+impactN(o);
+    if(o.kind==='impact') key+='i'+o.la.toFixed(2)+','+o.lo.toFixed(2)+'x'+impactN(o)+(o.alert?'a':'');
     else if(o.kind==='route'||o.kind==='arrow') key+='r'+o.pts.length+','+o.pts[0][0].toFixed(1);
   }
   if(ROLES.key===key) return ROLES.map;
@@ -2458,7 +2459,12 @@ function cityRoles(){
     return r;
   };
   for(const o of vis){
-    if(o.kind==='impact'){
+    // Знак засобу з самою лише оголошеною небезпекою — не подія в місті:
+    // «ракетна небезпека» в Ростові не має підписувати його як ціль удару.
+    if(o.kind==='impact'&&o.alert){
+      const r=bump(cityNear(o.la,o.lo,R_FLY),'fly');
+      if(r) r.fly++;
+    }else if(o.kind==='impact'){
       const r=bump(cityNear(o.la,o.lo,R_EVENT),'event');
       // Кратність позначки, а не сама позначка. Старі карти її в даних не
       // несуть — там вона лишилась тільки в підписі, тож звідти й беремо.
@@ -3427,6 +3433,10 @@ function inTimeWindow(o){
     return inWindow(t0,a,b)||inWindow(t1,a,b)
         || inWindow(a,t0,t1)||inWindow(b,t0,t1);
   }
+  // Знак засобу несе всі часи своїх постів: «Таганрог, 02:35 і 05:39» на
+  // фільтрі «після 04:00» лишається — о 05:39 небезпека там була.
+  if(Array.isArray(o.ts)&&o.ts.length)
+    return o.ts.some(t=>{const m=hhmmMin(t);return m!==null&&inWindow(m,a,b);});
   return inWindow(hhmmMin(o.t),a,b);
 }
 function objVisible(o){
@@ -3606,8 +3616,9 @@ function dedupeMarks(list){
   const place=o=>String(o.label||'').replace(/\s*×\s*\d+\s*$/,'').trim().toLowerCase();
   const out=[]; let dropped=0;
   for(const o of list||[]){
-    if(o.kind!=='impact'||o.la===undefined){out.push(o);continue;}
-    const twin=out.find(x=>x.kind==='impact'&&x.la!==undefined&&
+    // знаки засобів — власні id і власне злиття (mknight): не чіпати
+    if(o.kind!=='impact'||o.la===undefined||o.wpn){out.push(o);continue;}
+    const twin=out.find(x=>x.kind==='impact'&&x.la!==undefined&&!x.wpn&&
       catOf(x)===catOf(o)&&place(x)&&place(x)===place(o)&&
       Math.hypot((x.la-o.la)*111,(x.lo-o.lo)*111*Math.cos(o.la*Math.PI/180))<15);
     if(!twin){out.push(o);continue;}
@@ -3820,6 +3831,8 @@ function weaponGlyph(c,x,y,R,k,col,alpha){
 }
 // Той самий силует для панелі — SVG-рядком.
 function weaponSvg(k,col,px,faint){
+  // колір приходить зі стилю карти (файл може бути чужий) — лише #rgb[a]
+  if(!/^#[0-9a-f]{3,8}$/i.test(String(col||''))) col=k==='jet'?'#5b8cff':'#ff4d8d';
   const d=(WEAPON_SHAPE[k]||WEAPON_SHAPE.missile).map(q=>q[0]+q.slice(1).join(' ')).join(' ')+'Z';
   return `<svg width="${px}" height="${px}" viewBox="-1 -1 2 2" style="flex:none;opacity:${faint?.55:1}">`
     +`<path d="${d}" transform="rotate(-45)" fill="${col}" stroke="rgba(4,7,12,.85)" stroke-width="0.14" stroke-linejoin="round"/></svg>`;
@@ -3839,11 +3852,13 @@ function drawWeapon(o,c,sel){
       c.beginPath();c.arc(s[0],s[1],r*2,0,7);c.fillStyle=g;c.fill();
     }
     weaponGlyph(c,s[0],s[1],r*1.45,k,ST.col,o.alert?.6:1);
-    if(o.alert){
-      c.save();c.beginPath();c.arc(s[0],s[1],r*1.75,0,7);
-      c.strokeStyle=hexa(ST.col,.75);c.lineWidth=1.3;c.setLineDash([3,3]);
-      c.stroke();c.setLineDash([]);c.restore();
-    }
+  }
+  // пунктир «лише небезпека» — і при своєму знаку теж, інакше з емодзі
+  // небезпека й свідчення виглядали б однаково
+  if(o.alert){
+    c.save();c.beginPath();c.arc(s[0],s[1],r*1.75,0,7);
+    c.strokeStyle=hexa(ST.col,.75);c.lineWidth=1.3;c.setLineDash([3,3]);
+    c.stroke();c.setLineDash([]);c.restore();
   }
   markLabel(o,c,s,ST.col,r,sel);
   if(sel){c.beginPath();c.arc(s[0],s[1],r*2.6,0,7);c.strokeStyle='#fff';
@@ -4216,22 +4231,25 @@ function drawLegend(c,w,h){
     };
     // Засоби — той самий силует, що на карті. Блідий знак у пунктирі
     // пояснюється окремим рядком, лише коли такий на карті є.
-    const wpnRow=(k,name)=>{
+    // Суцільний рядок — лише коли засіб справді бачили; самі тривоги дають
+    // рядок «небезпека» свого класу, а не «Ракета»: легенда не має казати,
+    // що ракету бачили, коли її лише оголосили.
+    const wpnRows=(k,name,alertName)=>{
       const col=(S.style[k]||{}).col||(k==='jet'?'#5b8cff':'#ff4d8d');
-      rows.push({name,draw:(c,x,y)=>weaponGlyph(c,x+16,y,9,k,col,1)});
+      const vis=S.objs.filter(o=>o.kind==='impact'&&catOf(o)===k&&objVisible(o));
+      if(vis.some(o=>!o.alert))
+        rows.push({name,draw:(c,x,y)=>weaponGlyph(c,x+16,y,9,k,col,1)});
+      if(vis.some(o=>o.alert))
+        rows.push({name:alertName,draw:(c,x,y)=>{
+          weaponGlyph(c,x+16,y,8,k,col,.6);
+          c.save();c.beginPath();c.arc(x+16,y,10,0,7);c.strokeStyle=hexa(col,.75);
+          c.lineWidth=1.2;c.setLineDash([3,3]);c.stroke();c.setLineDash([]);c.restore();
+        }});
     };
-    if(shown('missile')) wpnRow('missile',LZ.missileName||'Ракета');
-    if(shown('jet')) wpnRow('jet',LZ.jetName||'Реактивний БпЛА');
-    const faint=S.objs.find(o=>o.kind==='impact'&&o.alert&&objVisible(o)
-                                &&(catOf(o)==='missile'||catOf(o)==='jet'));
-    if(faint){
-      const k=catOf(faint), col=(S.style[k]||{}).col||'#ff4d8d';
-      rows.push({name:LZ.alertName||'Лише оголошена небезпека',draw:(c,x,y)=>{
-        weaponGlyph(c,x+16,y,8,k,col,.6);
-        c.save();c.beginPath();c.arc(x+16,y,10,0,7);c.strokeStyle=hexa(col,.75);
-        c.lineWidth=1.2;c.setLineDash([3,3]);c.stroke();c.setLineDash([]);c.restore();
-      }});
-    }
+    if(shown('missile')) wpnRows('missile',LZ.missileName||'Ракета',
+                                  LZ.missileAlertName||'Ракетна небезпека');
+    if(shown('jet')) wpnRows('jet',LZ.jetName||'Реактивний БпЛА',
+                              LZ.jetAlertName||'Небезпека реактивних БпЛА');
     if(shown('ppo'))
       rows.push({name:LZ.ppoName||'Робота ППО',
                  draw:markIcon((S.style.ppo||{}).col||'#6fe3ff')});
@@ -7121,6 +7139,9 @@ function hourHist(){
     if(o.kind==='route'||o.kind==='arrow'){
       const t=hhmmMin(o.t0)!==null?hhmmMin(o.t0):hhmmMin(o.t1);
       if(t!==null) h[Math.floor(t/60)%24]++;
+    }else if(o.kind==='impact'&&Array.isArray(o.ts)&&o.ts.length){
+      // знак засобу — кожен пост у свою годину, а не всі в першу
+      for(const v of o.ts){ const t=hhmmMin(v); if(t!==null) h[Math.floor(t/60)%24]++; }
     }else if(o.kind==='impact'){
       const t=hhmmMin(o.t);
       if(t!==null) h[Math.floor(t/60)%24]+=impactN(o);
@@ -7275,6 +7296,10 @@ function putStrikes(){
     // Наслідки (`aft`) — окремий шар із власного джерела, не збиття: кнопка
     // збиття їх не зносить і не замінює.
     if(o.aft) return true;
+    // Засоби ночі (`wpn`) — так само окремий шар: без цього кнопка збиття
+    // мовчки зносила знаки ракет, а автоматично вони вже не повертаються
+    // (`aftSeen`).
+    if(o.wpn) return true;
     // Позначки, зроблені з фіксацій ночі (`sight`), — не збиття, і кнопка
     // збиття їх не зносить: інакше оператор бере десять фіксацій у роботу,
     // кладе збиття — і фіксації зникають мовчки.
@@ -7403,21 +7428,66 @@ function putWeapons(auto){
     return 0;
   }
   const seen=new Set(S.aftSeen);
-  const have=new Set(S.objs.filter(o=>o.wpn).map(o=>o.wpn));
-  const add=list.filter(x=>!have.has(x.id)&&!(auto&&seen.has(x.id)));
-  if(!add.length){ if(!auto) toast('усі знаки засобів уже на карті'); return 0; }
+  // `id` несе клас і координати голови злиття (mknight): коли щогодинний
+  // прогін додає поруч місто до району, голова й `id` міняються. Тоді знак
+  // на карті — той самий, якщо він свого класу ближче 5 км і його старого
+  // `id` у даних уже нема; так само «видалений» лишається видаленим.
+  const ids=new Set(list.map(x=>x.id));
+  const idPt=id=>{const m=/^wpn:(\w+):(-?[\d.]+),(-?[\d.]+)$/.exec(id||'');
+    return m?{cls:m[1],la:+m[2],lo:+m[3]}:null;};
+  const km=(a,la,lo)=>Math.hypot((a.la-la)*111,(a.lo-lo)*111*Math.cos(la*Math.PI/180));
+  const relink=[];
+  for(const x of list){
+    if(S.objs.some(o=>o.wpn===x.id)) continue;
+    const o=S.objs.find(o=>o.wpn&&!ids.has(o.wpn)&&!relink.some(r=>r[0]===o)
+                         &&catOf(o)===x.cls&&km(o,x.la,x.lo)<5);
+    if(o) relink.push([o,x.id]);
+  }
+  const have=new Set(S.objs.filter(o=>o.wpn).map(o=>o.wpn).concat(relink.map(r=>r[1])));
+  const seenNear=x=>seen.has(x.id)||[...seen].some(id=>{
+    const q=idPt(id); return q&&!ids.has(id)&&q.cls===x.cls&&km(q,x.la,x.lo)<5;});
+  const add=list.filter(x=>!have.has(x.id)&&!(auto&&seenNear(x)));
+  // Уже покладені знаки — оновити з даних. Щогодинний прогін додає пости:
+  // «Таганрог · ракетна небезпека ×3» стає «ракета ×5», коли зʼявилась
+  // фіксація. Підпис міняється, лише якщо оператор його не правив
+  // (`wlab` — підпис, який поставили ми); позиції не чіпаємо ніколи.
+  const byId=new Map(list.map(x=>[x.id,x]));
+  const lab=x=>(x.place||CAT_NAME[x.cls])+' · '+wpnWhat(x)+(x.n>1?' ×'+x.n:'');
+  // Знаки першої версії (26.09.2026) `wlab` не мають — для них наш підпис
+  // впізнаємо за формою «<місце> · …».
+  const ours=(o,x)=>o.wlab!==undefined?o.label===o.wlab
+    :String(o.label||'').startsWith((x.place||CAT_NAME[x.cls])+' · ');
+  const relinked=new Map(relink);
+  const upd=S.objs.filter(o=>{
+    if(relinked.has(o)) return true;
+    const x=o.wpn&&byId.get(o.wpn); if(!x) return false;
+    return o.n!==Math.max(1,x.n||1)||!!o.alert!==!x.obs||o.u!==x.u
+      ||(ours(o,x)&&o.label!==lab(x));
+  });
+  if(!add.length&&!upd.length){ if(!auto) toast('усі знаки засобів уже на карті'); return 0; }
   snapshot();
   const tag='night:'+(N.date||'');
+  for(const [o,id] of relink){ o.wpn=id; if(!seen.has(id)){ seen.add(id); S.aftSeen.push(id); } }
+  for(const o of upd){
+    const x=byId.get(o.wpn);
+    if(ours(o,x)){ o.label=lab(x); o.wlab=o.label; }
+    Object.assign(o,{u:x.u,n:Math.max(1,x.n||1),t:x.t0||'',
+      ts:Array.isArray(x.ts)?x.ts.slice():undefined,alert:!x.obs,src:uniqSrc(x.src||[])});
+  }
   for(const x of add){
+    const l=lab(x);
     S.objs.push({kind:'impact',cat:x.cls,wpn:x.id,u:x.u,type:typeForU(x.u).id,
       origin:tag,la:x.la,lo:x.lo,n:Math.max(1,x.n||1),t:x.t0||'',
-      alert:!x.obs,size:10,src:uniqSrc(x.src||[]),
-      label:(x.place||CAT_NAME[x.cls])+' · '+wpnWhat(x)+(x.n>1?' ×'+x.n:'')});
+      ts:Array.isArray(x.ts)?x.ts.slice():undefined,
+      alert:!x.obs,size:10,src:uniqSrc(x.src||[]),label:l,wlab:l});
     if(!seen.has(x.id)){ seen.add(x.id); S.aftSeen.push(x.id); }
   }
   refresh();
-  if(!auto) toast(`знаків засобів на карті: +${add.length}`);
-  jlog('weapons',{date:N.date,add:add.length,auto:!!auto});
+  // І на старті теж кажемо: знаки лягають на вже готову карту цієї ночі, і
+  // повторний експорт без цього рядка забрав би їх непомітно.
+  if(!auto||add.length) toast(`знаки засобів ночі (ракети, реактивні БпЛА): +${add.length}`
+    +(upd.length?`, оновлено ${upd.length}`:'')+' — перелік у «Засобах ночі»');
+  jlog('weapons',{date:N.date,add:add.length,upd:upd.length,auto:!!auto});
   return add.length;
 }
 // Зведення засобів ночі нагорі панелі: що було, скільки постів, де і коли.
@@ -7434,7 +7504,13 @@ function renderWeapons0(){
   const box=document.getElementById('wpn'); if(!box||!WPN||!WPN_NAME) return;
   const N=window.NIGHT, W=N&&N.weapons;
   const onMap=S.objs.filter(o=>o.wpn).map(o=>o.wpn+(o.hidden?'h':'')).join(',');
-  const key=(N?N.date:'-')+'|'+(W?1:0)+'|'+onMap+'|'+S.objs.filter(o=>o.aft).length;
+  // Ключ — усе, що видно в блоці: сама ніч (перезавантажена та сама дата —
+  // інший обʼєкт), кольори класів, знаки й наслідки на карті.
+  if(N&&!N.__wk) N.__wk=String(Math.random());
+  const key=(N?N.date+N.__wk:'-')+'|'+(W?1:0)+'|'+onMap+'|'
+    +S.objs.filter(o=>o.aft).map(o=>o.aft).join(',')+'|'
+    +((S.style.missile||{}).col||'')+((S.style.jet||{}).col||'')
+    +'|'+(S.ready&&N?mapOfNight(N.date):'');
   if(key===WPN.key) return;
   const cnt=document.getElementById('wpnCnt');
   // Ключ ставиться лише після малювання: виняток посередині інакше лишав
@@ -7466,13 +7542,18 @@ function renderWeapons0(){
       +(tl?`<br>типи: ${tl}`:'')+'</div></div>';
   }
   const rows=[];
+  // На карті іншої ночі знаки цієї не кладуться — і «видалено» тут неправда.
+  const mine=!S.ready||mapOfNight(N.date);
+  if(!mine) h+='<div class="hint">На карті обʼєкти іншої ночі — знаки цієї на неї '
+    +'не кладуться. Перелік нижче — з даних ночі.</div>';
   const have=new Map(S.objs.filter(o=>o.wpn).map(o=>[o.wpn,o]));
   for(const x of W.points||[]){
     const o=have.get(x.id);
-    rows.push({t:x.t0,html:`<div class="wrow${o?'':' off'}" data-w="${esc(x.id)}" title="${o?'показати на карті':'знак видалено з карти — «Повернути видалені» нижче'}">`
+    const gone=!o&&mine;
+    rows.push({t:x.t0,html:`<div class="wrow${o?'':' off'}" data-w="${esc(x.id)}" title="${o?'показати на карті':gone?'знак видалено з карти — «Повернути видалені» нижче':'знака на цій карті нема'}">`
       +weaponSvg(x.cls,col(x.cls),18,!x.obs)
       +`<span class="wt">${tspan(x.t0,x.t1)}</span>`
-      +`<span class="wp" title="${esc(x.place+' · '+wpnWhat(x)+' · постів '+x.n)}">${o?'':'<s>'}${esc(x.place)}${o?'':'</s>'} · ${esc(wpnName(x.u))}${x.n>1?' ×'+x.n:''}</span>`
+      +`<span class="wp" title="${esc(x.place+' · '+wpnWhat(x)+' · постів '+x.n)}">${gone?'<s>':''}${esc(x.place)}${gone?'</s>':''} · ${esc(wpnName(x.u))}${x.n>1?' ×'+x.n:''}</span>`
       +(x.obs?`<span class="wb obs" title="пости, що свідчать про сам засіб: фіксація, «ещё ракеты на порт», збиття">свідчення ${x.obs}</span>`
              :'<span class="wb" title="лише оголошена небезпека">небезпека</span>')+'</div>'});
   }
@@ -7480,14 +7561,17 @@ function renderWeapons0(){
   for(const x of W.hits||[]){
     const o=aft.get(x.id);
     rows.push({t:x.t,html:`<div class="wrow${o?'':' off'}" data-a="${esc(x.id)}" title="влучання з каналу наслідків; засіб — із тексту його постів">`
-      +weaponSvg(x.cls[0],col(x.cls[0]),18)
+      +weaponSvg(x.cls.includes('missile')?'missile':'jet',col(x.cls.includes('missile')?'missile':'jet'),18)
       +`<span class="wt">${esc(x.t||'')}</span>`
       +`<span class="wp">${esc(x.place)}${x.objs&&x.objs[0]?' · '+esc(x.objs[0]):''} · ${esc(x.u.map(wpnName).join(' / '))}</span>`
       +'<span class="wb obs">влучання</span></div>'});
   }
   const nk=t=>{const m=/^(\d\d):(\d\d)/.exec(t||'');if(!m) return 9e9;const h=+m[1];return (h<12?h+24:h)*60+ +m[2];};
   rows.sort((a,b)=>nk(a.t)-nk(b.t));
-  if(rows.length) h+='<div class="wsub">на карті</div>'+rows.map(r=>r.html).join('');
+  // Рядків буває під сорок: без межі висоти «Вибране» з властивостями
+  // вибраного знака опинялось під краєм панелі.
+  if(rows.length) h+='<div class="wsub">на карті</div><div style="max-height:260px;overflow:auto">'
+    +rows.map(r=>r.html).join('')+'</div>';
   if((W.areas||[]).length){
     h+='<div class="wsub" title="пост назвав лише область (крапка в її центрі була б вигадкою) або місце на підконтрольній Україні території">без знака на карті</div>';
     for(const x of W.areas){
@@ -7503,7 +7587,7 @@ function renderWeapons0(){
       +'60–90 км до лінії фронту — '+W.front.map(f=>`${esc(f.reg)} ${f.n}`).join(', ')
       +'. На карту не кладеться: там вона щоденна і означає РСЗО, а не удар углиб.</div>';
   }
-  const gone=(W.points||[]).filter(x=>!have.has(x.id)).length;
+  const gone=mine?(W.points||[]).filter(x=>!have.has(x.id)).length:0;
   if(gone) h+=`<button id="wpnBack" style="margin-top:6px">Повернути видалені знаки (${gone})</button>`;
   box.innerHTML=h;
   WPN.key=key;
@@ -7775,6 +7859,9 @@ function sightR(cnt){ return Math.min(8, 2.4+1.5*Math.log2(cnt+1)); }
 function sightCovered(s){
   for(const o of S.objs){
     if(o.kind!=='impact'||o.la===undefined||!fromNight(o)) continue;
+    // Знак засобу — про інше: «Таганрог · ракетна небезпека ×3» не має
+    // гасити крапку Таганрога з дванадцятьма фіксаціями дронів.
+    if(o.wpn) continue;
     const dla=(o.la-s.la)*111, dlo=(o.lo-s.lo)*111*Math.cos(s.la*Math.PI/180);
     if(Math.hypot(dla,dlo)<3) return true;
   }

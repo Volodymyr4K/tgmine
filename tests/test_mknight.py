@@ -546,3 +546,45 @@ class TestWeapons(unittest.TestCase):
         w = self.mk.weapons(raid, [])
         self.assertEqual(w["points"], [])
         self.assertEqual([a["reg"] for a in w["areas"]], ["Кременчук (Україна)"])
+
+    def test_city_and_its_district_are_one_sign(self):
+        """«Сімферопольський район» за 0.8 км від «Сімферополя» — один знак із
+        назвою міста, і `id` не залежить від того, де більше постів."""
+        ev = [self._ev("реактивний БпЛА", place="Simferopol Raion", lat=44.955, lon=34.10,
+                       region="Крим", hhmm="15:21"),
+              self._ev("реактивний БпЛА", place="Simferopol", lat=44.952, lon=34.11,
+                       region="Крим", hhmm="17:37", kind="фіксація")]
+        a = self.mk.weapons({"events": ev}, [])["points"]
+        b = self.mk.weapons({"events": ev + [self._ev("реактивний БпЛА", place="Simferopol Raion",
+                                                     lat=44.955, lon=34.10, region="Крим",
+                                                     hhmm="18:00")]}, [])["points"]
+        self.assertEqual([(p["place"], p["n"], p["obs"]) for p in a], [("Сімферополь", 2, 1)])
+        self.assertEqual([p["n"] for p in b], [3])
+        self.assertEqual(a[0]["id"], b[0]["id"])
+        self.assertEqual(a[0]["ts"], ["15:21", "17:37"])
+
+    def test_air_defence_missile_is_not_the_strike_weapon(self):
+        wu = self.mk._weapon_types_used
+        self.assertEqual(wu("На кадрах виден пуск ракеты из комплекса Панцирь."), [])
+        self.assertEqual(wu("Після ракетного удару в Бєлгороді загорілися склади."), ["ракета"])
+
+    def test_heading_to_a_place_is_not_a_sighting(self):
+        """«в направлении Луганск ракетная опасность» — крапка на цілі руху."""
+        raid = {"events": [self._ev("ракета", kind="фіксація", aim=True)]}
+        p = self.mk.weapons(raid, [])["points"][0]
+        self.assertEqual((p["n"], p["obs"]), (1, 0))
+
+    def test_named_non_weapon_blocks_generic_class(self):
+        """Порядок store.UTYPES: РСЗО, HIMARS, «Циркон» гасять генеричні класи."""
+        wt = self.mk._weapon_types
+        self.assertEqual(wt("Удар реактивних систем залпового вогню"), [])
+        self.assertEqual(wt("удар ракетами HIMARS"), [])
+        self.assertEqual(wt("детонація двох ракет «Циркон»"), [])
+        self.assertEqual(wt("Тревога по БПЛА с неуправляемыми ракетами"), [])
+        self.assertEqual(wt("удар ракетами «Нептун» і HIMARS"), ["Нептун"])
+        wu = self.mk._weapon_types_used
+        self.assertEqual(wu("ніби по ньому було завдано ракетного удару"), [])
+        self.assertEqual(wu("оголошено ракетну небезпеку, дрони атакували завод"), [])
+        self.assertEqual(wu("Два дрона атакували пускові установки."), [])
+        self.assertEqual(wu("склад, де зберігались ракети, атакували дрони"), [])
+        self.assertEqual(wu("Це НЕ «Фламінго», удар дронами."), [])

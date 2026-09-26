@@ -129,6 +129,10 @@ WEAPON_CLASS = {
     "FP-9": "missile", "Сапсан": "missile", "Грім-2": "missile", "Точка-У": "missile",
     "реактивний БпЛА": "jet", "Пекло": "jet", "Паляниця": "jet", "Рута": "jet",
 }
+#: Названі НЕ-засоби, що в тексті звуться «ракетами» чи «реактивними»:
+#: РСЗО, КАР, УАБ і російські ракети (ціль або чужий удар, не наш засіб).
+WEAPON_BLOCK = {"Вільха", "HIMARS", "РСЗО", "УАБ", "AGM", "керована авіаційна ракета",
+                "Іскандер", "Кинджал", "Калібр", "Циркон", "Онікс", "Х-101", "Х-59", "Х-22"}
 #: Генеричні назви класу: модель чи підклас у тому ж місці важить більше.
 WEAPON_GENERIC = {"ракета", "реактивний БпЛА"}
 #: Зведення на кілька абзаців («#Сводка на утро…») — не спостереження: слово
@@ -136,6 +140,12 @@ WEAPON_GENERIC = {"ракета", "реактивний БпЛА"}
 WEAPON_MAXLEN = 700
 #: Точка події — місце, а не центр області чи здогад за населенням.
 WEAPON_POINT_GEO = ("city-marker", "region", "consensus", "alias")
+#: Ближче за це два місця одного класу — один знак (місто й його район).
+WEAPON_MERGE_KM = 5.0
+#: Речення про ППО — не про засіб удару: «пуск ракеты из комплекса Панцирь»
+#: (Сочі, 2.09.2026) ставало засобом наслідку.
+WEAPON_AD = re.compile(r"панцир|pantsir|\bзрк\b|\bс-?[34]00\b|\bбук\b|\bбук-|зенітн|зенитн|"
+                       r"\bппо\b|\bпво\b|перехоплюв|перехватчик", re.I)
 #: Що в пості свідчить про сам засіб, а не лише про небезпеку.
 WEAPON_OBS_KINDS = ("фіксація", "інше", "вибух", "збиття", "ППО", "пуск")
 
@@ -148,7 +158,24 @@ def _weapon_types(text):
     класом чи моделлю не додається.
     """
     from tgmine import store as ST
-    got = [name for name, rx in ST.UTYPES if name in WEAPON_CLASS and rx.search(text or "")]
+    # Порядок `store.UTYPES` — це й є правила: РСЗО стоїть вище за
+    # «реактивний», «БпЛА з ракетами» — вище за «ракету», і перший збіг
+    # виграє. Тут збігів кілька, тож названий НЕ-засіб (РСЗО, HIMARS,
+    # «Вільха», КАР, російські «Калібр»/«Циркон»…) гасить генеричні класи
+    # далі по списку: «удар реактивних систем залпового вогню» — не
+    # реактивний БпЛА, «детонація двох ракет «Циркон»» — не наша ракета
+    # (рецензія 26.09.2026: 14 таких речень у каналі наслідків).
+    got, blocked, drone_seen = [], False, False
+    for name, rx in ST.UTYPES:
+        first_drone = name == "БпЛА" and not drone_seen
+        drone_seen = drone_seen or name == "БпЛА"
+        if not rx.search(text or ""):
+            continue
+        if name in WEAPON_CLASS:
+            if not (blocked and name in WEAPON_GENERIC):
+                got.append(name)
+        elif name in WEAPON_BLOCK or first_drone:
+            blocked = True
     # «Ракетная опасность / По реактивным БПЛА» — сигнал, а не ракета
     # (так само, як у `store.utype_of`, де реактивний БпЛА стоїть вище).
     if "реактивний БпЛА" in got and "ракета" in got:
@@ -167,10 +194,23 @@ def _weapon_types(text):
 #: грім???» (Самара -> «Грім-2») і «залучений до виробництва ракет Х-59».
 WEAPON_USE = re.compile(r"застосов|застосув|применя|применил|удар|прил[іеё]т|прильот|"
                         r"працювал|работал|атакува|атакова|рейд|налет|наліт|"
-                        r"засоби ураження|засобы поражения|запущ|пуск", re.I)
+                        r"засоби ураження|засобы поражения|запущ|"
+                        # «пуск ракет», але не «пускові установки» (ціль)
+                        r"\bпуск(?:и|ом|у|ів|ов)?\b", re.I)
+#: Не про цю подію: припущення, намір, чужий удар, оголошена небезпека
+#: («ніби по ньому було завдано ракетного удару», «готуються до ракетних
+#: ударів», «оголошено ракетну небезпеку, дрони атакували завод»).
+WEAPON_NOT_THIS = re.compile(r"\bніби\b|\bнібито\b|\bбудто\b|\bякобы\b|\bб\b|\bбы\b|"
+                             r"готу[ює]ть|готов[ия]т|\bякщо\b|\bесли\b|можуть|могут|"
+                             r"небезпек|опасност|тривог|тревог|\bмогл|\bмогут|"
+                             # сховище й чужі удари — «де зберігались ракети»,
+                             # «причетний до ракетних ударів по українських містах»
+                             r"зберіга|хранил|хранят|причетн|причастн|"
+                             r"по україн|по украин|українських міст|по наш", re.I)
 #: Звідси до кінця речення — опис цілі: що завод виробляє, куди залучений.
 WEAPON_PRODUCT = re.compile(r"виробництв|производств|спеціаліз|специализ|залучен|"
-                            r"привлеч|продукц|выпуска|випуска|разработ|розробл", re.I)
+                            r"привлеч|продукц|выпуска|випуска|разработ|розробл|"
+                            r"виготовл|изготовл|виготовля|штампу|виробля|производит", re.I)
 
 
 def _weapon_types_used(text):
@@ -181,15 +221,19 @@ def _weapon_types_used(text):
     """
     got = []
     for sent in re.split(r"(?<=[.!?…])\s+|\n+", text or ""):
-        if "?" in sent:
+        if "?" in sent or WEAPON_AD.search(sent) or WEAPON_NOT_THIS.search(sent):
             continue
         m = WEAPON_PRODUCT.search(sent)
         if m:
             sent = sent[:m.start()]
-        sent = re.sub(r"\b[нН][еі]\s+\w+", " ", sent)
+        sent = re.sub(r"\bн[еі]\s+[«\"'“]?\w+", " ", sent, flags=re.I)
         if not WEAPON_USE.search(sent):
             continue
         for u in _weapon_types(sent):
+            # «Пекло» — слово, а не лише ракета-дрон («запуск … прямо в
+            # пекло»): модель — лише назвою в лапках або з великої.
+            if u == "Пекло" and not re.search(r"[«\"“]\s*пекл|\bПекл", sent):
+                continue
             if u not in got:
                 got.append(u)
     return got
@@ -210,6 +254,14 @@ def _post_texts():
                     txt[d["url"]] = d.get("text") or ""
         _CACHE["aft_txt"] = txt
     return _CACHE["aft_txt"]
+
+
+def _km(la1, lo1, la2, lo2):
+    """Відстань по сфері, км."""
+    p1, p2 = math.radians(la1), math.radians(la2)
+    a = (math.sin((p2 - p1) / 2) ** 2
+         + math.cos(p1) * math.cos(p2) * math.sin(math.radians(lo2 - lo1) / 2) ** 2)
+    return 2 * 6371.0 * math.asin(math.sqrt(min(1.0, a)))
 
 
 def _night_key(hhmm):
@@ -253,7 +305,9 @@ def weapons(raid, aft):
             f["n"] += 1
             f["ts"].append(t)
             continue
-        obs = e.get("kind") in WEAPON_OBS_KINDS
+        # «в направлении Луганск ракетная опасность»: крапка стоїть на цілі
+        # руху (`aim`), там засіб ніхто не бачив — це не свідчення.
+        obs = e.get("kind") in WEAPON_OBS_KINDS and not e.get("aim")
         # Глибина ≤ 0 — підконтрольна Україні територія: «F-16 от Кременчуг
         # … возможно носители Штормов» (18.09.2026). Це свідчення про ніч,
         # але знак ракети в Кременчуці на карті ударів по РФ був би хибою.
@@ -295,11 +349,38 @@ def weapons(raid, aft):
         return {"cls": b["cls"], "u": top(b["types"]), "types": dict(b["types"]),
                 "kinds": dict(b["kinds"]), "n": b["n"], "obs": b["obs"],
                 "t0": ts[0] if ts else "", "t1": ts[-1] if ts else "",
+                # усі часи — для фільтра годин у редакторі, як у фіксацій
+                "ts": ts,
                 "reg": b["reg"],
                 "src": sorted(b["src"], key=lambda q: _night_key(q["t"] or "12:00"))[:12]}
 
+    # Той самий пост геокодується то в місто, то в район: «Сімферопольський
+    # район» і «Сімферополь» за 0.8 км давали два силуети один на одному
+    # (замір 26.09.2026, 40 ночей: 7 пар ближче 4 км). Місця одного класу
+    # ближче WEAPON_MERGE_KM зливаються; головне — не район, далі найраніше.
+    # Порядок не залежить від ліку постів, тож `id` не міняється, коли
+    # щогодинний прогін додає пости (інакше знак на карті задвоювався б).
+    def is_district(b):
+        return bool(AREA_NAME.search(b["place"] or "")) or b["place"] == ""
+    order = sorted(pts.items(), key=lambda kv: (is_district(kv[1]),
+                                                min((_night_key(t) for t in kv[1]["ts"]),
+                                                    default=(99, "")),
+                                                kv[0]))
+    heads = []
+    for key, b in order:
+        h = next((hb for hk, hb in heads if hk[0] == key[0]
+                  and _km(hb["lat"], hb["lon"], b["lat"], b["lon"]) < WEAPON_MERGE_KM), None)
+        if h is None:
+            heads.append((key, b))
+            continue
+        h["n"] += b["n"]
+        h["obs"] += b["obs"]
+        h["types"].update(b["types"])
+        h["kinds"].update(b["kinds"])
+        h["ts"] += b["ts"]
+        h["src"] += b["src"]
     points = []
-    for (cls, la, lo), b in pts.items():
+    for (cls, la, lo), b in heads:
         r = fin(b)
         r.update({"id": f"wpn:{cls}:{la:.2f},{lo:.2f}", "la": la, "lo": lo,
                   "place": nm.place(b["place"], b["lat"], b["lon"])})
@@ -665,7 +746,10 @@ def _add_sighting(by, e, pt, launch_area):
         # повідомленнях: хоч одне «тут бачили» робить його місцем.
         b["aim"] = b.get("aim", True) and bool(e.get("aim")) and pt is None
         b["kinds"][e["kind"]] += 1
-        if e.get("utype"):
+        # Тип із багатоабзацного зведення («#Сводка») не про це місце:
+        # «ракетному обстрелу» з абзацу про Бєлгород ставало «Невинномиськ ·
+        # ракета», щойно підпис почав показувати всі типи (uMix).
+        if e.get("utype") and len(e.get("text") or "") <= WEAPON_MAXLEN:
             b["types"][e["utype"]] += 1
         if e.get("hhmm"):
             b["ts"].append(e["hhmm"])

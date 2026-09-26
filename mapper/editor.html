@@ -7444,6 +7444,12 @@ function putWeapons(auto){
     if(o) relink.push([o,x.id]);
   }
   const have=new Set(S.objs.filter(o=>o.wpn).map(o=>o.wpn).concat(relink.map(r=>r[1])));
+  // Злитий: `id` зник, а поруч (5 км) уже стоїть знак свого класу з даних —
+  // «Сімферопольський район» при «Сімферополі». Прибираємо, лише якщо
+  // підпис наш: правлений оператором знак — його рішення.
+  const merged=S.objs.filter(o=>o.wpn&&!ids.has(o.wpn)&&!relink.some(r=>r[0]===o)
+    &&(o.wlab!==undefined?o.label===o.wlab:/ · /.test(String(o.label||'')))
+    &&S.objs.some(q=>q!==o&&q.wpn&&ids.has(q.wpn)&&catOf(q)===catOf(o)&&km(q,o.la,o.lo)<5));
   const seenNear=x=>seen.has(x.id)||[...seen].some(id=>{
     const q=idPt(id); return q&&!ids.has(id)&&q.cls===x.cls&&km(q,x.la,x.lo)<5;});
   const add=list.filter(x=>!have.has(x.id)&&!(auto&&seenNear(x)));
@@ -7464,8 +7470,9 @@ function putWeapons(auto){
     return o.n!==Math.max(1,x.n||1)||!!o.alert!==!x.obs||o.u!==x.u
       ||(ours(o,x)&&o.label!==lab(x));
   });
-  if(!add.length&&!upd.length){ if(!auto) toast('усі знаки засобів уже на карті'); return 0; }
+  if(!add.length&&!upd.length&&!merged.length){ if(!auto) toast('усі знаки засобів уже на карті'); return 0; }
   snapshot();
+  if(merged.length) S.objs=S.objs.filter(o=>!merged.includes(o));
   const tag='night:'+(N.date||'');
   for(const [o,id] of relink){ o.wpn=id; if(!seen.has(id)){ seen.add(id); S.aftSeen.push(id); } }
   for(const o of upd){
@@ -7485,9 +7492,10 @@ function putWeapons(auto){
   refresh();
   // І на старті теж кажемо: знаки лягають на вже готову карту цієї ночі, і
   // повторний експорт без цього рядка забрав би їх непомітно.
-  if(!auto||add.length) toast(`знаки засобів ночі (ракети, реактивні БпЛА): +${add.length}`
-    +(upd.length?`, оновлено ${upd.length}`:'')+' — перелік у «Засобах ночі»');
-  jlog('weapons',{date:N.date,add:add.length,upd:upd.length,auto:!!auto});
+  if(!auto||add.length||merged.length) toast(`знаки засобів ночі (ракети, реактивні БпЛА): +${add.length}`
+    +(upd.length?`, оновлено ${upd.length}`:'')+(merged.length?`, злито ${merged.length}`:'')
+    +' — перелік у «Засобах ночі»');
+  jlog('weapons',{date:N.date,add:add.length,upd:upd.length,merged:merged.length,auto:!!auto});
   return add.length;
 }
 // Зведення засобів ночі нагорі панелі: що було, скільки постів, де і коли.

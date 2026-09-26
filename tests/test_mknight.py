@@ -471,3 +471,78 @@ class TestAlertRegionsFromPlaces(unittest.TestCase):
         o, = self.mk.alerts(raid)["onsets"]
         self.assertEqual(o["reg"], "Ивановська")
         self.assertFalse(o["silent"])
+
+
+class TestWeapons(unittest.TestCase):
+    """Засоби ночі (ракети, реактивні БпЛА) — окремий шар і зведення.
+
+    Ніч 25→26 вересня 2026: 33 події «ракета» і 8 «реактивний БпЛА» в даних,
+    на карті — нуль (тривога в області, що вже під тривогою по дронах;
+    меншість у фіксаціях зникала під «найчастішим типом»)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.mk = load_script("mapper/mknight.py")
+
+    def _ev(self, u, kind="тривога", conf="city-marker", lat=47.107, lon=39.415,
+            place="Azov", region="Ростовська", hhmm="02:38", depth=217, **kw):
+        e = {"utype": u, "kind": kind, "geo_conf": conf, "lat": lat, "lon": lon,
+             "place": place, "region": region, "hhmm": hhmm, "depth": depth,
+             "url": f"https://t.me/a/{hhmm}{kind}{u}", "text": "Азов - ракетная опасность!",
+             "scope": "область"}
+        e.update(kw)
+        return e
+
+    def test_place_point_area_and_front(self):
+        raid = {"events": [
+            self._ev("ракета"),
+            self._ev("ракета", kind="інше", hhmm="02:39"),          # «ещё ракеты на порт»
+            self._ev("ракета", kind="відбій", hhmm="04:58"),        # відбій — не подія
+            self._ev("ракета", conf="centroid", place="Ростовська", hhmm="02:41"),
+            self._ev("ракета", place="Horlivka", region="Донеччина (ТОТ)", depth=12),
+            self._ev("БпЛА", kind="фіксація"),                       # не засіб шару
+            self._ev("ракета", hhmm="09:31", text="#Сводка " + "х" * 800),  # зведення
+            self._ev("ракета", dup_of="x"),
+        ]}
+        w = self.mk.weapons(raid, [])
+        self.assertEqual([(p["cls"], p["n"], p["obs"], p["t0"], p["t1"]) for p in w["points"]],
+                         [("missile", 2, 1, "02:38", "02:39")])
+        self.assertEqual(w["points"][0]["place"], "Азов")
+        self.assertEqual([(a["reg"], a["n"]) for a in w["areas"]], [("Ростовська", 1)])
+        self.assertEqual([(f["reg"], f["n"]) for f in w["front"]], [("Донеччина (ТОТ)", 1)])
+        self.assertEqual(w["stats"]["missile"]["posts"], 3)
+        self.assertNotIn("jet", w["stats"])
+
+    def test_named_model_beats_generic_class(self):
+        raid = {"events": [self._ev("ракета", hhmm=f"02:{i:02d}") for i in range(5)]
+                          + [self._ev("Фламінго", hhmm="03:00")]}
+        p = self.mk.weapons(raid, [])["points"][0]
+        self.assertEqual((p["u"], p["n"]), ("Фламінго", 6))
+
+    def test_weapon_types_of_aftermath_posts(self):
+        wt = self.mk._weapon_types
+        self.assertEqual(wt("застосували реактивні БПЛА або крилаті ракети"),
+                         ["крилата ракета", "реактивний БпЛА"])
+        self.assertEqual(wt("Ракетная опасность / По реактивным БПЛА"), ["реактивний БпЛА"])
+        self.assertEqual(wt("удар Нептунами, ракетна атака"), ["Нептун"])
+        self.assertEqual(wt("Губернатор сообщает об атаке БПЛА"), [])
+
+    def test_aftermath_weapon_only_when_used(self):
+        """Засіб інциденту — лише з речення про застосування (замір 26.09.2026)."""
+        wu = self.mk._weapon_types_used
+        self.assertEqual(wu("Не балістика, видихаємо."), [])
+        self.assertEqual(wu("Якщо є читачі з Самари це був грім??? Напишіть"), [])
+        self.assertEqual(wu("атака на завод «Іскра», залучений до виробництва ракет Х-59"), [])
+        self.assertEqual(wu("У результаті ракетного удару українськими ракетами «Нептун» по "
+                            "«Атлант Аэро», підприємству, яке спеціалізується на виробництві БпЛА"),
+                         ["Нептун"])
+        self.assertEqual(wu("По Ілському НПЗ були також застосовні реактивні засоби ураження."),
+                         ["реактивний БпЛА"])
+
+    def test_ukraine_held_place_is_not_a_map_point(self):
+        """«F-16 от Кременчуг … возможно носители Штормов» — у зведення, не на карту."""
+        raid = {"events": [self._ev("Storm Shadow / SCALP", kind="фіксація", place="Kremenchuk",
+                                    region="Полтавська", depth=0, lat=49.07, lon=33.42)]}
+        w = self.mk.weapons(raid, [])
+        self.assertEqual(w["points"], [])
+        self.assertEqual([a["reg"] for a in w["areas"]], ["Кременчук (Україна)"])

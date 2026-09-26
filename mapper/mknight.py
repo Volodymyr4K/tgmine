@@ -108,10 +108,251 @@ def aftermath(raid):
         out.append({"id": x["id"], "la": x["lat"], "lo": x["lon"],
                     "place": nm.place(x["place"], x["plat"], x["plon"]),
                     "t": x["t"], "objs": x["objs"], "names": x["names"],
-                    "conf": x["conf"], "n": x["n"],
+                    "conf": x["conf"], "n": x["n"], "wpn": x.get("wpn") or [],
                     "src": [{"u": q["u"], "t": q["t"], "k": q["k"], "d": q["d"]}
                             for q in x["src"][:12]]})
     return out
+
+
+#: Засоби, які редактор показує окремим знаком: ракети (будь-якого класу чи
+#: моделі) і реактивні БпЛА. Рішення власника 26.09.2026: ніч 25→26 вересня
+#: (Ільський НПЗ, Азов, Таганрог) дала в даних 33 події «ракета» і 8
+#: «реактивний БпЛА», а на карті — нуль: тривога ракетна приходила в
+#: область, що вже була під тривогою по дронах, а в фіксаціях місце
+#: підписувалось найчастішим типом («Таганрог: БпЛА 9, ракета 3» -> «БпЛА»).
+#: Українська номенклатура: «Іскандер», «Калібр», «Кинджал» тут нема — ними
+#: бʼють у зворотний бік; РСЗО («Вільха», HIMARS) — тактика фронту.
+WEAPON_CLASS = {
+    "ракета": "missile", "крилата ракета": "missile", "балістична ракета": "missile",
+    "ПКР": "missile", "Фламінго": "missile", "Нептун": "missile",
+    "Storm Shadow / SCALP": "missile", "ATACMS": "missile", "Taurus": "missile",
+    "FP-9": "missile", "Сапсан": "missile", "Грім-2": "missile", "Точка-У": "missile",
+    "реактивний БпЛА": "jet", "Пекло": "jet", "Паляниця": "jet", "Рута": "jet",
+}
+#: Генеричні назви класу: модель чи підклас у тому ж місці важить більше.
+WEAPON_GENERIC = {"ракета", "реактивний БпЛА"}
+#: Зведення на кілька абзаців («#Сводка на утро…») — не спостереження: слово
+#: «ракетному» з абзацу про Бєлгород ставило «вибух · ракета» в Невинномиськ.
+WEAPON_MAXLEN = 700
+#: Точка події — місце, а не центр області чи здогад за населенням.
+WEAPON_POINT_GEO = ("city-marker", "region", "consensus", "alias")
+#: Що в пості свідчить про сам засіб, а не лише про небезпеку.
+WEAPON_OBS_KINDS = ("фіксація", "інше", "вибух", "збиття", "ППО", "пуск")
+
+
+def _weapon_types(text):
+    """Усі засоби з WEAPON_CLASS, названі в тексті (а не лише перший).
+
+    «Застосували реактивні БПЛА або крилаті ракети» — обидва: канал сам не
+    знає, і вибір одного з двох був би вигадкою. Генерична «ракета» поруч із
+    класом чи моделлю не додається.
+    """
+    from tgmine import store as ST
+    got = [name for name, rx in ST.UTYPES if name in WEAPON_CLASS and rx.search(text or "")]
+    # «Ракетная опасность / По реактивным БПЛА» — сигнал, а не ракета
+    # (так само, як у `store.utype_of`, де реактивний БпЛА стоїть вище).
+    if "реактивний БпЛА" in got and "ракета" in got:
+        got.remove("ракета")
+    spec = [g for g in got if g not in WEAPON_GENERIC]
+    if spec:
+        got = [g for g in got if g not in WEAPON_GENERIC or WEAPON_CLASS[g] not in
+               {WEAPON_CLASS[x] for x in spec}]
+    return got
+
+
+#: Речення про застосування засобу, а не про ціль: «застосували реактивні
+#: БПЛА», «ракетного удару … ракетами «Нептун»», «момент прильоту чогось
+#: реактивного», «працювали FP-5». Замір 26.09.2026 на 8 ночах: без цієї
+#: вимоги засобом інциденту ставало «Не балістика, видихаємо», «це був
+#: грім???» (Самара -> «Грім-2») і «залучений до виробництва ракет Х-59».
+WEAPON_USE = re.compile(r"застосов|застосув|применя|применил|удар|прил[іеё]т|прильот|"
+                        r"працювал|работал|атакува|атакова|рейд|налет|наліт|"
+                        r"засоби ураження|засобы поражения|запущ|пуск", re.I)
+#: Звідси до кінця речення — опис цілі: що завод виробляє, куди залучений.
+WEAPON_PRODUCT = re.compile(r"виробництв|производств|спеціаліз|специализ|залучен|"
+                            r"привлеч|продукц|выпуска|випуска|разработ|розробл", re.I)
+
+
+def _weapon_types_used(text):
+    """Засоби, про які пост каже, що ними БИЛИ (`WEAPON_USE`).
+
+    Питання («це був грім???») не свідчить; «не балістика» — заперечення;
+    хвіст речення від «виробництва»/«залучений» описує ціль.
+    """
+    got = []
+    for sent in re.split(r"(?<=[.!?…])\s+|\n+", text or ""):
+        if "?" in sent:
+            continue
+        m = WEAPON_PRODUCT.search(sent)
+        if m:
+            sent = sent[:m.start()]
+        sent = re.sub(r"\b[нН][еі]\s+\w+", " ", sent)
+        if not WEAPON_USE.search(sent):
+            continue
+        for u in _weapon_types(sent):
+            if u not in got:
+                got.append(u)
+    return got
+
+
+def _post_texts():
+    """Тексти постів каналу наслідків за адресою — для засобу інциденту."""
+    if "aft_txt" not in _CACHE:
+        txt = {}
+        path = os.path.join(ROOT, "data", "exilenova_plus.jsonl")
+        if os.path.exists(path):
+            for line in open(path, encoding="utf-8"):
+                try:
+                    d = json.loads(line)
+                except ValueError:
+                    continue
+                if d.get("url"):
+                    txt[d["url"]] = d.get("text") or ""
+        _CACHE["aft_txt"] = txt
+    return _CACHE["aft_txt"]
+
+
+def _night_key(hhmm):
+    h = int(hhmm[:2]) if hhmm[:2].isdigit() else 12
+    return (h + 24 if h < 12 else h, hhmm)
+
+
+def weapons(raid, aft):
+    """Ракети й реактивні БпЛА за ніч — окремий шар знаків і зведення.
+
+    `points` — місця, названі в постах (місто, село, порт): редактор ставить
+    туди знак ракети чи реактивного дрона одразу, як наслідки. `obs` —
+    скільки з постів свідчать про сам засіб («ещё ракеты на порт»,
+    фіксація, збиття), решта — оголошена небезпека; знак без жодного
+    свідчення малюється блідим. `areas` — пости, що називають лише область
+    («Ростовская область / Ракетная опасность»): крапка в центрі області
+    бреше, тож вони йдуть у зведення, а не на карту. `front` — генерична
+    «ракетна небезпека» ближче до лінії фронту, ніж `store.FRONT_KM`: там
+    вона щоденна (Бєлгород 251 подія за вересень) і означає РСЗО, а не
+    удар углиб. `stats` — по класу: пости, місця, області, час.
+    """
+    from tgmine import store as ST
+    from tgmine.labels import REGION_LABEL
+    unlabel = {v: k for k, v in REGION_LABEL.items()}
+    nm = _namer(raid)
+    pts, areas, front = {}, {}, {}
+    for e in raid["events"]:
+        u = e.get("utype")
+        cls = WEAPON_CLASS.get(u)
+        if not cls or e.get("noise") or e.get("dup_of") or e.get("kind") == "відбій":
+            continue
+        if len(e.get("text") or "") > WEAPON_MAXLEN:
+            continue
+        reg = e.get("region") or ""
+        t = e.get("hhmm", "")
+        src = {"u": e.get("url"), "t": t, "k": e.get("kind", ""), "ty": u}
+        depth = e.get("depth")
+        if (u == "ракета" and depth is not None
+                and depth <= ST.FRONT_KM_BY_REGION.get(unlabel.get(reg, reg), ST.FRONT_KM)):
+            f = front.setdefault(reg or "—", {"reg": reg, "n": 0, "ts": []})
+            f["n"] += 1
+            f["ts"].append(t)
+            continue
+        obs = e.get("kind") in WEAPON_OBS_KINDS
+        # Глибина ≤ 0 — підконтрольна Україні територія: «F-16 от Кременчуг
+        # … возможно носители Штормов» (18.09.2026). Це свідчення про ніч,
+        # але знак ракети в Кременчуці на карті ударів по РФ був би хибою.
+        home = depth is not None and depth <= 0
+        if e.get("lat") and e.get("geo_conf") in WEAPON_POINT_GEO and not home:
+            key = (cls, round(e["lat"], 2), round(e["lon"], 2))
+            b = pts.setdefault(key, {"cls": cls, "lat": e["lat"], "lon": e["lon"],
+                                     "place": e.get("place") or "", "reg": reg,
+                                     "types": collections.Counter(),
+                                     "kinds": collections.Counter(),
+                                     "n": 0, "obs": 0, "ts": [], "src": []})
+        else:
+            if home:
+                # область поста тут часто ціль руху («в направлении ЛДНР»),
+                # тож підпис — саме місце
+                reg = (nm.place(e["place"], e["lat"], e["lon"]) if e.get("place") and e.get("lat")
+                       else "") + " (Україна)"
+            b = areas.setdefault((cls, reg or "—"), {"cls": cls, "reg": reg,
+                                                      "types": collections.Counter(),
+                                                      "kinds": collections.Counter(),
+                                                      "n": 0, "obs": 0, "ts": [], "src": []})
+        b["n"] += 1
+        b["obs"] += obs
+        b["types"][u] += 1
+        b["kinds"][e.get("kind", "")] += 1
+        if t:
+            b["ts"].append(t)
+        if e.get("url"):
+            b["src"].append(src)
+
+    def top(types):
+        # Модель чи підклас важить більше за генеричну назву класу, навіть
+        # коли її згадали раз: «Фламінго 1, ракета 5» — це Фламінго.
+        spec = [(n, u) for u, n in types.items() if u not in WEAPON_GENERIC]
+        return max(spec)[1] if spec else types.most_common(1)[0][0]
+
+    def fin(b):
+        ts = sorted(b["ts"], key=_night_key)
+        return {"cls": b["cls"], "u": top(b["types"]), "types": dict(b["types"]),
+                "kinds": dict(b["kinds"]), "n": b["n"], "obs": b["obs"],
+                "t0": ts[0] if ts else "", "t1": ts[-1] if ts else "",
+                "reg": b["reg"],
+                "src": sorted(b["src"], key=lambda q: _night_key(q["t"] or "12:00"))[:12]}
+
+    points = []
+    for (cls, la, lo), b in pts.items():
+        r = fin(b)
+        r.update({"id": f"wpn:{cls}:{la:.2f},{lo:.2f}", "la": la, "lo": lo,
+                  "place": nm.place(b["place"], b["lat"], b["lon"])})
+        points.append(r)
+    points.sort(key=lambda r: (_night_key(r["t0"] or "12:00"), -r["n"]))
+    arealist = sorted((fin(b) for b in areas.values()),
+                      key=lambda r: (_night_key(r["t0"] or "12:00"), -r["n"]))
+    # Засіб у наслідках: «по Ільському НПЗ були застосовані реактивні засоби»,
+    # «по Азову — реактивні БПЛА або крилаті ракети». Інцидент уже стоїть на
+    # карті влучанням; тут лише ЧИМ, і це йде і в підпис влучання, і в
+    # зведення.
+    txt = _post_texts()
+    hits = []
+    for x in aft:
+        got = []
+        for q in x.get("src") or []:
+            for u in _weapon_types_used(txt.get(q["u"], "")):
+                if u not in got:
+                    got.append(u)
+        # Генеричний клас поруч із моделлю того ж класу — по ВСЬОМУ
+        # інциденту, а не по посту: «ракетно-дроновий рейд» в одному пості
+        # і «працювали FP-5» в іншому — це Фламінго, а не «Фламінго / ракета».
+        spec = {WEAPON_CLASS[u] for u in got if u not in WEAPON_GENERIC}
+        got = [u for u in got if u not in WEAPON_GENERIC or WEAPON_CLASS[u] not in spec]
+        if got:
+            x["wpn"] = got
+            hits.append({"id": x["id"], "place": nm.place(x["place"], x["plat"], x["plon"]),
+                         "objs": x["objs"], "names": x["names"], "t": x["t"], "u": got,
+                         "cls": sorted({WEAPON_CLASS[u] for u in got}),
+                         "la": x["lat"], "lo": x["lon"]})
+    stats = {}
+    for cls in ("missile", "jet"):
+        P = [r for r in points if r["cls"] == cls]
+        A = [r for r in arealist if r["cls"] == cls]
+        H = [h for h in hits if cls in h["cls"]]
+        if not (P or A or H):
+            continue
+        ts = sorted([t for r in P + A for t in (r["t0"], r["t1"]) if t], key=_night_key)
+        types = collections.Counter()
+        for r in P + A:
+            types.update(r["types"])
+        stats[cls] = {"posts": sum(r["n"] for r in P + A),
+                      "obs": sum(r["obs"] for r in P + A),
+                      "places": len(P), "hits": len(H),
+                      "regions": sorted({r["reg"] for r in P + A if r["reg"]}),
+                      "types": dict(types.most_common()),
+                      "t0": ts[0] if ts else "", "t1": ts[-1] if ts else ""}
+    fr = [{"reg": f["reg"], "n": f["n"],
+           "t0": min(f["ts"], key=_night_key) if f["ts"] else "",
+           "t1": max(f["ts"], key=_night_key) if f["ts"] else ""}
+          for f in sorted(front.values(), key=lambda f: -f["n"])]
+    return {"points": points, "areas": arealist, "hits": hits,
+            "front": fr, "stats": stats}
 
 
 def bearings(raid):
@@ -721,20 +962,22 @@ def main(src, out=None):
     br = bearings(raid)
     sg = sightings(raid)
     al = alerts(raid)
+    wp = weapons(raid, raid["_aft"])       # до aftermath: дописує інцидентам `wpn`
     af = aftermath(raid)
     dec = sum(l == "declared" for r in rs for l in r["legs"])
     open(out, "w", encoding="utf-8").write(
         "window.NIGHT=" + json.dumps({"date": raid.get("date"), "routes": rs,
                                       "strikes": st, "bearings": br,
                                       "sightings": sg, "alerts": al,
-                                      "aftermath": af},
+                                      "aftermath": af, "weapons": wp},
                                      ensure_ascii=False, separators=(",", ":")) + ";\n")
     rear = [o for o in al["onsets"] if o["reg"] not in al["muted"]]
     print(f"{raid.get('date')}: маршрутів {len(rs)}, ланок {meta['in_routes']}, "
           f"з них заявлено текстом {dec}, збиття/ППО у точці {len(st)}, "
           f"курсів словами {len(br)}, місць із фіксаціями {len(sg)}, "
           f"стартів тривоги в тилу {len(rear)} (німих {sum(o['silent'] for o in rear)}), "
-          f"наслідків {len(af)}")
+          f"наслідків {len(af)}, засобів: "
+          + (", ".join(f"{k} {v['posts']}" for k, v in wp["stats"].items()) or "0"))
     print("->", out)
 
 

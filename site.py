@@ -685,6 +685,9 @@ def night_index(nights: Path):
                     "bearings": len(d.get("bearings") or []),
                     "sightings": len(d.get("sightings") or []),
                     "aftermath": len(d.get("aftermath") or []),
+                    # засоби ночі (mknight.weapons): пости про ракети й реактивні БпЛА
+                    "missiles": ((d.get("weapons") or {}).get("stats") or {}).get("missile", {}).get("posts", 0),
+                    "jets": ((d.get("weapons") or {}).get("stats") or {}).get("jet", {}).get("posts", 0),
                     "alerts": sum(1 for o in (d.get("alerts") or {}).get("onsets", [])
                                   if o.get("reg") not in ((d.get("alerts") or {}).get("muted") or []))})
     out.sort(key=lambda r: r["date"], reverse=True)

@@ -5088,7 +5088,10 @@ function hit(sx,sy,skipBase){
     // Схований не малюється, тож і не вибирається. Замкнений видно, але він
     // не чіпляється курсором: інакше велика зона під усім кадром перехоплює
     // кожен клік, і дістати обʼєкт під нею неможливо.
-    if(o.hidden||o.locked) continue;
+    // Те саме для вимкненого шару й фільтра годин (objVisible): після кнопки
+    // «Прибрати з карти знаки ракет…» невидимий знак інакше ловив клік і
+    // тягнувся мишею.
+    if(o.hidden||o.locked||!objVisible(o)) continue;
     if(o.kind==='route'||o.kind==='arrow'){
       for(const p of o.pts){const s=P(p[0],p[1]);
         if(Math.hypot(s[0]-sx,s[1]-sy)<9) return {o,vertex:o.pts.indexOf(p)};}
@@ -7518,7 +7521,8 @@ function renderWeapons0(){
   const key=(N?N.date+N.__wk:'-')+'|'+(W?1:0)+'|'+onMap+'|'
     +S.objs.filter(o=>o.aft).map(o=>o.aft).join(',')+'|'
     +((S.style.missile||{}).col||'')+((S.style.jet||{}).col||'')
-    +'|'+(S.ready&&N?mapOfNight(N.date):'');
+    +'|'+(S.ready&&N?mapOfNight(N.date):'')
+    +'|'+(S.layers.missiles===false?0:1)+(S.layers.jets===false?0:1);
   if(key===WPN.key) return;
   const cnt=document.getElementById('wpnCnt');
   // Ключ ставиться лише після малювання: виняток посередині інакше лишав
@@ -7532,6 +7536,15 @@ function renderWeapons0(){
   cnt.textContent=['missile','jet'].filter(k=>ST[k])
     .map(k=>(k==='jet'?'реакт. ':'ракети ')+ST[k].posts).join(' · ')||'нема';
   let h='';
+  // Один натиск — усі знаки ракет і реактивних геть із карти, другий —
+  // назад (прохання оператора 26.09.2026). Це вимикач двох шарів, а не
+  // видалення: знаки не йдуть в експорт і легенду, але правлені підписи й
+  // посунуті позиції лишаються, і нові знаки ночі теж лягають схованими.
+  const wOn=S.objs.filter(o=>o.kind==='impact'&&(catOf(o)==='missile'||catOf(o)==='jet'));
+  const wOff=S.layers.missiles===false&&S.layers.jets===false;
+  if(wOn.length) h+=`<button id="wpnToggle" style="width:100%;margin:0 0 8px">`
+    +(wOff?`Показати на карті знаки ракет і реактивних (${wOn.length})`
+          :`Прибрати з карти знаки ракет і реактивних (${wOn.length})`)+'</button>';
   if(!ST.missile&&!ST.jet){
     h+='<div class="hint">Цієї ночі ракет і реактивних БпЛА в постах нема — '
       +'ні тривог, ні фіксацій.</div>';
@@ -7599,6 +7612,16 @@ function renderWeapons0(){
   if(gone) h+=`<button id="wpnBack" style="margin-top:6px">Повернути видалені знаки (${gone})</button>`;
   box.innerHTML=h;
   WPN.key=key;
+  const tg=document.getElementById('wpnToggle');
+  if(tg) tg.onclick=()=>{
+    const on=S.layers.missiles===false&&S.layers.jets===false;
+    // Без snapshot: шари, як і тумблери панелі «Шари», в історію не йдуть;
+    // «назад» інакше знімав би порожній крок. Скасування — ця ж кнопка.
+    S.layers.missiles=on; S.layers.jets=on;
+    jlog('wpnToggle',{on:on?1:0});
+    renderLayers(); touch(); refresh();
+    toast(on?'знаки ракет і реактивних — на карті':'знаки ракет і реактивних сховано з карти й експорту');
+  };
   const back=document.getElementById('wpnBack');
   if(back) back.onclick=()=>{
     if(!mapOfNight(N.date)){ toast('на карті обʼєкти іншої ночі — спершу вибери цю ніч у списку'); return; }
@@ -7612,6 +7635,11 @@ document.getElementById('wpn').addEventListener('click',e=>{
   const id=r.dataset.w||r.dataset.a; if(!id) return;
   const o=S.objs.find(o=>(r.dataset.w?o.wpn:o.aft)===id);
   if(!o){ toast('знака на карті нема — його видалено'); return; }
+  if(!objVisible(o)){
+    toast(S.layers[CAT_LAYER[catOf(o)]]===false
+      ?'знаки сховано — кнопка «Показати на карті…» вище':'знак зараз прихований (фільтр годин або «сховати»)');
+    return;
+  }
   S.sel=o; S.selMore=[];
   if(S.view&&S.view.k>0){
     const b=baseXY(o.la,o.lo);

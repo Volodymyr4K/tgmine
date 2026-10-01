@@ -4597,15 +4597,16 @@ function draw(){
   // обʼєкти: заливка й штрих накривали кожну крапку в Криму й на ТОТ, тобто
   // саме там, де їх найбільше (власник, 1.10.2026: «щоб вони всі були над
   // картою»). Над мітками — підказки й усе намальоване, як і було.
-  const dlist=drawList();
-  const drawObjs=zones=>{
-    for(const o of dlist){
-      if((o.kind==='zone')!==zones||!objVisible(o)) continue;
+  const dlist=drawList(), zcut=zoneCut(dlist);
+  const drawObjs=(from,to)=>{
+    for(let i=from;i<to;i++){
+      const o=dlist[i];
+      if(!objVisible(o)) continue;
       const src=o.__src||o;
       drawObj(o,ctx,src===S.sel||S.selMore.includes(src));
     }
   };
-  drawObjs(true);
+  drawObjs(0,zcut);
   drawSights(ctx);
   // Шар-привид: підказки з наших даних. Малюються ПО-РІЗНОМУ за впевненістю,
   // бо вони різні за силою: ланцюг із кількох заявлених ланок — це рух,
@@ -4701,7 +4702,7 @@ function draw(){
   // drawList() — це S.objs, поки режим коридорів вимкнений, і зведений
   // список, коли ввімкнений. Підміна тут, а не в S.objs: обʼєкти не мають
   // мінятись від того, як їх показують.
-  drawObjs(false);
+  drawObjs(zcut,dlist.length);
   drawCityInk(ctx);               // назви міст лягають ПОВЕРХ маршрутів і позначок
   // Вибраний підпис міста обводиться — інакше незрозуміло, що саме
   // прибере Delete. Тільки на екрані: в експорт рамка не йде.
@@ -5245,6 +5246,9 @@ function snap(la,lo,sx,sy){
   return best?[best[0],best[1]]:[la,lo];
 }
 let drag=null, pan=null, freehand=null;
+// Натиснута мітка зведення. Вибір стається на ВІДПУСКАННІ й лише без руху:
+// у Криму міток сотні, і панорама, почата на одній із них, інакше не їхала б.
+let sightPress=null;
 cv.addEventListener('pointerdown',e=>{
   const r=cv.getBoundingClientRect(), sx=e.clientX-r.left, sy=e.clientY-r.top;
   jlog('down',{tool:S.tool,btn:e.button,sx:Math.round(sx),sy:Math.round(sy),
@@ -5382,11 +5386,12 @@ cv.addEventListener('pointerdown',e=>{
   if(S.tool==='select'&&S.sightSpan){
     const top=hit(sx,sy,true), sm=(!top||top.o.kind==='zone')?sightAt(sx,sy):null;
     if(sm){
-      if(!e.shiftKey) S.sightSel=[sm];
-      else S.sightSel=S.sightSel.includes(sm)?S.sightSel.filter(x=>x!==sm):S.sightSel.concat(sm);
-      if(!e.shiftKey){ S.sel=null;S.selMore=[]; }
+      sightPress={s:sm,shift:e.shiftKey,vx:S.view.x,vy:S.view.y};
       S.selCity=null;
-      refresh();draw();return;
+      // далі — як на порожньому місці: тягнути = панорама, Shift+тягнути = рамка
+      if(e.shiftKey) S.marquee={x:sx,y:sy,w:0,h:0,sx,sy};
+      else pan={sx,sy,vx:S.view.x,vy:S.view.y};
+      return;
     }
     if(!e.shiftKey) S.sightSel=[];
   }
@@ -5507,6 +5512,16 @@ cv.addEventListener('pointermove',e=>{
   touch();draw();
 });
 addEventListener('pointerup',()=>{
+  if(sightPress){
+    const p=sightPress; sightPress=null;
+    const moved=p.shift?!!(S.marquee&&(S.marquee.w>4||S.marquee.h>4))
+                       :(Math.abs(S.view.x-p.vx)+Math.abs(S.view.y-p.vy))*S.view.k>4;
+    if(!moved&&S.sightSpan&&S.sight.includes(p.s)){
+      if(!p.shift){ S.sightSel=[p.s]; S.sel=null; S.selMore=[]; }
+      else S.sightSel=S.sightSel.includes(p.s)?S.sightSel.filter(x=>x!==p.s):S.sightSel.concat(p.s);
+      refresh(); draw();
+    }
+  }
   // Стрілка готова саме тут: на натиску вона ще нульової довжини, і судити
   // про її видимість було б зарано.
   if(drag&&drag.newArrow) jadd(drag.newArrow,'протяг');
@@ -8174,10 +8189,18 @@ document.getElementById('bearings').onclick=()=>{
 // зведення фіксацій (воно — сама карта; нічні фіксації в експорт не йдуть),
 // далі все намальоване. Одна функція на PNG і SVG, щоб гілки не розійшлись.
 function drawExportObjs(g){
-  const list=drawList();
-  for(const o of list) if(o.kind==='zone'&&objVisible(o)) drawObj(o,g,false);
+  const list=drawList(), cut=zoneCut(list);
+  for(let i=0;i<cut;i++) if(objVisible(list[i])) drawObj(list[i],g,false);
   if(S.sightSpan) drawSights(g,true);
-  for(const o of list) if(o.kind!=='zone'&&objVisible(o)) drawObj(o,g,false);
+  for(let i=cut;i<list.length;i++) if(objVisible(list[i])) drawObj(list[i],g,false);
+}
+// Де в списку малювання кінчаються зони: мітки фіксацій лягають одразу за
+// ОСТАННЬОЮ зоною. Саме індекс, а не «спершу всі зони, потім решта»: порядок
+// обʼєктів між собою від міток мінятись не має — зображення, покладене під
+// зону, лишається під нею.
+function zoneCut(list){
+  for(let i=list.length-1;i>=0;i--) if(list[i].kind==='zone') return i+1;
+  return 0;
 }
 function sightTimes(s){ return (s.ts||[]).map(hhmmMin).filter(t=>t!==null); }
 // Скільки повідомлень цього місця лежить у вікні годин (усі, якщо вікна нема).
@@ -8630,9 +8653,12 @@ document.getElementById('sightStats').onclick=e=>{
   }
   if(el.dataset.sx!==undefined){
     const r=row(el.dataset.sx); if(!r) return;
-    snapshot(); spanDrop(r.places.map(p=>p.s)); S.sightSel=[];
-    jlog('sightDrop',{reg:r.key,n:r.places.length});
-    toast(`${r.name}: прибрано міток ${r.places.length} · Ctrl+Z повертає`);
+    // усі місця області, не лише ті, що зараз у вікні годин: інакше решта
+    // вигулькне, щойно вікно розширять
+    const drop=S.sight.filter(s=>(s.reg||'')===r.key);
+    snapshot(); spanDrop(drop); S.sightSel=[];
+    jlog('sightDrop',{reg:r.key,n:drop.length});
+    toast(`${r.name}: прибрано міток ${drop.length} · Ctrl+Z повертає`);
     refresh(); return;
   }
   if(el.dataset.su!==undefined){

@@ -2,7 +2,7 @@
 // підробленого GitHub Contents API. Кожен випадок — із затирань, знайдених в
 // історії mapper/maps 1 жовтня 2026. Запуск: node tests/js/store_write.mjs
 import assert from "node:assert/strict";
-import { write, read } from "../../functions/api/_store.js";
+import { write, read, mapHash } from "../../functions/api/_store.js";
 
 const st = { token: "t", repo: "o/r", branch: "main" };
 let repo, race, calls;
@@ -78,7 +78,7 @@ const tests = {
   },
   async "без sha з loose — теж ні"() {
     reset(finished);
-    const out = await write(st, "x", mapOf(11), "", "editor", { loose: true });
+    const out = await write(st, "x", mapOf(11), "", "editor", { loose: [mapHash(finished.map)] });
     assert.equal(out.conflict, true);
     assert.equal(await objsNow(), 58);
   },
@@ -95,21 +95,28 @@ const tests = {
     assert.equal(out.conflict, true);
     assert.equal(await objsNow(), 58);
   },
-  async "sha застарів після запису на закритті вкладки (loose, той самий користувач) — пишемо"() {
+  async "sha застарів, бо у файлі мій же запис із закриття вкладки — пишемо"() {
     reset(finished);
-    const out = await write(st, "x", mapOf(59), "shaOLD", "editor", { loose: true });
+    const out = await write(st, "x", mapOf(59), "shaOLD", "editor", { loose: ["0:0", mapHash(finished.map)] });
     assert.ok(out.sha && !out.conflict);
     assert.equal(await objsNow(), 59);
   },
-  async "loose не відкриває чужий файл"() {
+  // той самий логін у двох браузерах: у файлі вже не те, що я посилав
+  async "loose з чужим відбитком не відкриває файл навіть тому самому користувачу"() {
     reset(finished);
-    const out = await write(st, "x", mapOf(19), "shaOLD", "volodymyr", { loose: true });
+    const out = await write(st, "x", mapOf(19), "shaOLD", "editor", { loose: [mapHash(mapOf(57))] });
     assert.equal(out.conflict, true);
     assert.equal(await objsNow(), 58);
   },
+  async "відбиток чутливий до вмісту, а не лише до довжини"() {
+    const a = mapOf(3), b = mapOf(3); b.objs[1].i = 7;
+    assert.equal(JSON.stringify(a).length, JSON.stringify(b).length);
+    assert.notEqual(mapHash(a), mapHash(b));
+    assert.equal(mapHash(a), mapHash(JSON.parse(JSON.stringify(a))));
+  },
   async "файл, відновлений з історії (без імені в коміті), нічий"() {
     reset({ map: mapOf(58), message: "карти: повернуто затерті версії з історії" });
-    const out = await write(st, "x", mapOf(10), "shaOLD", "editor", { loose: true });
+    const out = await write(st, "x", mapOf(10), "shaOLD", "editor", { loose: [mapHash(mapOf(57))] });
     assert.equal(out.conflict, true); assert.equal(out.by, "");
     assert.equal(await objsNow(), 58);
   },
@@ -166,8 +173,13 @@ tests["PUT: конфлікт віддається як 409 з тим, що ле�
 };
 tests["PUT: force і loose доходять до правила лише як справжнє true"] = async () => {
   reset(finished);
-  let r = await call({ map: mapOf(16), force: "так", loose: 1, sha: "shaOLD" }, "editor");
+  let r = await call({ map: mapOf(16), force: "так", loose: true, sha: "shaOLD" }, "editor");
   assert.equal(r.status, 409);
+  r = await call({ map: mapOf(16), loose: mapHash(finished.map), sha: "shaOLD" }, "editor");
+  assert.equal(r.status, 409);          // loose — лише список відбитків
+  r = await call({ map: mapOf(59), loose: [mapHash(finished.map)], sha: "shaOLD" }, "editor");
+  assert.equal(r.status, 200);
+  reset(finished);
   r = await call({ map: mapOf(16), force: true }, "volodymyr");
   assert.equal(r.status, 200);
   assert.ok((await r.json()).sha);

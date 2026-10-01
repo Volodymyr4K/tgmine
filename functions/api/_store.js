@@ -91,6 +91,17 @@ export async function lastWriter(st, id) {
   return { by: m ? m[1] : "", at: (c.commit.committer && c.commit.committer.date) || "" };
 }
 
+// Відбиток тексту карти: довжина + FNV-1a по кодових одиницях рядка. Той
+// самий рахунок робить редактор (`srvHash` в editor.html) над своїм
+// JSON.stringify — тут над JSON.stringify того, що лежить у файлі. Це не
+// захист від зловмисника, а спосіб упізнати власний запис.
+export function mapHash(map) {
+  const t = JSON.stringify(map);
+  let h = 0x811c9dc5;
+  for (let i = 0; i < t.length; i++) { h ^= t.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+  return t.length + ":" + (h >>> 0).toString(16);
+}
+
 // Запис карти. Правило одне: редактор САМ пише лише у файл, який він знає —
 // тобто приніс sha тієї версії, що зараз лежить у репо. Усе інше — конфлікт,
 // і поверх пишеться тільки з `force` (кнопка «Зберегти» після запитання).
@@ -108,8 +119,10 @@ export async function lastWriter(st, id) {
 //   sha нема, файл є                  -> конфлікт (чужа або давня карта);
 //   sha не збігається                 -> конфлікт, КРІМ `loose`: редактор
 //     послав запис на закритті вкладки (keepalive) і відповіді з новим sha
-//     не дочекався. Тоді останнім автором має бути той самий користувач —
-//     це його ж запис, а не чужий.
+//     не дочекався. Він приносить відбитки того, що тоді послав; якщо у
+//     файлі лежить рівно це — то його ж запис, і новіший стан його заміщає.
+//     Перша версія звіряла імʼя останнього автора; одного логіна у двох
+//     браузерах вистачало б, щоб затерти свіжішу роботу.
 // 409 від GitHub буває й без зміни файла (гілку посунув коміт CI) — тоді
 // sha той самий, і запис просто повторюється.
 export async function write(st, id, map, sha, user, opt = {}) {
@@ -148,7 +161,7 @@ export async function write(st, id, map, sha, user, opt = {}) {
     if (cur.sha === sha) continue;            // файл той самий, посунулась гілка
     if (!opt.force) {
       const w = await lastWriter(st, id);
-      const own = !!(sha && opt.loose && w.by && w.by === user);
+      const own = !!sha && Array.isArray(opt.loose) && opt.loose.includes(mapHash(cur.map));
       if (!own)
         return { conflict: true, sha: cur.sha, by: w.by, at: w.at,
                  objs: Array.isArray(cur.map && cur.map.objs) ? cur.map.objs.length : 0,

@@ -26,7 +26,9 @@ export async function onRequestPut({ request, env, params, data }) {
     return noStore({ error: "у тілі нема карти" }, 400);
   try {
     const out = await write(st, params.id, body.map, body.sha || "", data && data.user,
-                            { force: body.force === true, loose: body.loose === true });
+                            { force: body.force === true,
+                              loose: Array.isArray(body.loose)
+                                ? body.loose.filter((x) => typeof x === "string").slice(0, 4) : [] });
     // Конфлікт — не помилка сервера: на файлі лежить версія, якої цей редактор
     // не знає. Він сам вирішить, питати людину чи мовчки відступити.
     if (out.conflict)

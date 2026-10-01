@@ -340,7 +340,7 @@ button.primary{background:rgba(255,62,165,.16);border-color:rgba(255,62,165,.45)
         <button id="bearings" style="margin-top:6px" title="Жирні стрілки напрямку з тексту: курси словами («пролёт на восток», «с юго-запада») і рух на цілу область («далее на Тамбовскую область» — стрілка в бік області з підписом). Відомий лише напрямок, не шлях. Звичайні стрілки: можна правити й стирати; повторний клік замінює попередній шар">Покласти напрямки з тексту</button>
         <label style="margin-top:6px">Фіксації</label>
         <div style="display:flex;gap:6px;align-items:center">
-          <select id="sightSpan" style="flex:1" title="За яку добу чи період показувати фіксації. Місяць — календарний: з 00:00 першого дня до 23:59 останнього за МСК, а не «ночами». «Свої дати» — так само, обидва дні включно. Період — зведення: одна крапка на місце, розмір від кількості повідомлень. Іде в експорт і в легенду; у роботу з нього позначки не беруться"><option value="">цієї ночі</option></select>
+          <select id="sightSpan" style="flex:1" title="За яку добу чи період показувати фіксації. Місяць — календарний: з 00:00 першого дня до 23:59 останнього за МСК, а не «ночами». «Свої дати» — так само, обидва дні включно. Період — зведення: одна крапка на місце, розмір від кількості повідомлень. Іде в експорт і в легенду; у роботу з нього позначки не беруться. Мітку прибирає клік по ній і Delete; Shift+тягнути — рамка для кількох; Ctrl+Z повертає"><option value="">цієї ночі</option></select>
           <input id="sightCol" type="color" value="#7fd3ff" style="width:46px;flex:none;padding:2px;height:30px" title="Колір крапок фіксацій. У ночі й у періоду він свій">
         </div>
         <div id="sightDates" style="display:none;gap:6px;align-items:center;margin-top:6px">
@@ -1279,9 +1279,11 @@ const S={
   // Фіксації ночі — шар свідчень: кожне місце, де тієї ночі щось бачили.
   // Підказка, не обʼєкт: в експорт не йде, клік робить із неї позначку.
   sight:[], sightHover:null,
-  // Зведення за період (тиждень, місяць): {key,label,nights,from,to}. Поки
-  // воно показане, S.sight — зведені місця, і в історію кроків не йде.
+  // Зведення за період (місяць, свої дати): {key,label,from,to,days,all,gone}.
+  // `all` — усі зведені місця, `gone` — ключі прибраних оператором; S.sight —
+  // те, що лишилось. Самі місця в історію кроків не йдуть, лише `gone`.
   sightSpan:null,
+  sightSel:[],                  // вибрані мітки зведення (клік, Shift+рамка)
   // Старти тривог у тилу — хронологія «куди пішли далі». Дані з ночі,
   // показ вмикається кнопкою; в експорт не йде, клік по чіпу робить підпис.
   alerts:null, alertsOn:false,
@@ -4590,8 +4592,20 @@ function draw(){
   // Штрих німих областей — просто на підкладці, під усім іншим. Це
   // підказка: у чистому вигляді й в експорті її нема.
   if(!S.clean) drawAlertHatch(ctx); else ALERT_CHIPS=[];
-  // Фіксації ночі — під підказками й обʼєктами: це тло зі свідчень, поверх
-  // якого оператор малює.
+  // Зони — першими, мітки фіксацій — одразу над ними. Раніше крапки лежали
+  // ПІД усіма обʼєктами, а зони (Україна, окуповані території) — теж
+  // обʼєкти: заливка й штрих накривали кожну крапку в Криму й на ТОТ, тобто
+  // саме там, де їх найбільше (власник, 1.10.2026: «щоб вони всі були над
+  // картою»). Над мітками — підказки й усе намальоване, як і було.
+  const dlist=drawList();
+  const drawObjs=zones=>{
+    for(const o of dlist){
+      if((o.kind==='zone')!==zones||!objVisible(o)) continue;
+      const src=o.__src||o;
+      drawObj(o,ctx,src===S.sel||S.selMore.includes(src));
+    }
+  };
+  drawObjs(true);
   drawSights(ctx);
   // Шар-привид: підказки з наших даних. Малюються ПО-РІЗНОМУ за впевненістю,
   // бо вони різні за силою: ланцюг із кількох заявлених ланок — це рух,
@@ -4687,11 +4701,7 @@ function draw(){
   // drawList() — це S.objs, поки режим коридорів вимкнений, і зведений
   // список, коли ввімкнений. Підміна тут, а не в S.objs: обʼєкти не мають
   // мінятись від того, як їх показують.
-  for(const o of drawList()){
-    if(!objVisible(o)) continue;
-    const src=o.__src||o;
-    drawObj(o,ctx,src===S.sel||S.selMore.includes(src));
-  }
+  drawObjs(false);
   drawCityInk(ctx);               // назви міст лягають ПОВЕРХ маршрутів і позначок
   // Вибраний підпис міста обводиться — інакше незрозуміло, що саме
   // прибере Delete. Тільки на екрані: в експорт рамка не йде.
@@ -5051,6 +5061,9 @@ function snapState(){
   // Зведення за період у крок не йде: це тисячі місць (місяць — ~0.7 МБ на
   // крок, а кроків 80), і воно не правиться — лише вмикається й вимикається.
   return JSON.stringify({objs:S.objs, ghosts:S.ghosts, sight:S.sightSpan?[]:S.sight, hideCity:S.hideCity,
+                         // прибрані мітки зведення — крок історії, самі місця — ні
+                         sspan:S.sightSpan?spanId():undefined,
+                         sgone:S.sightSpan?[...S.sightSpan.gone]:undefined,
                          aftSeen:S.aftSeen||[]});
 }
 function applyState(j){
@@ -5058,7 +5071,9 @@ function applyState(j){
   // записи, зроблені до цієї правки, — плаский масив обʼєктів
   if(Array.isArray(d)){ S.objs=d; return; }
   S.objs=d.objs||[]; S.ghosts=d.ghosts||[]; S.sightHover=null;
+  S.sightSel=[];
   if(!S.sightSpan) S.sight=d.sight||[];
+  else if(d.sspan===spanId()){ S.sightSpan.gone=new Set(d.sgone||[]); spanApply(); }
   // Прибраний підпис міста теж крок історії: інакше Delete по назві був
   // незворотним, а виглядав як звичайне видалення.
   if(d.hideCity) S.hideCity=d.hideCity.slice();
@@ -5361,6 +5376,20 @@ cv.addEventListener('pointerdown',e=>{
       refresh();return;
     }
   }
+  // Мітка зведення за період: клік вибирає, Shift+клік додає або знімає,
+  // Delete прибирає. Мітки лежать над зонами, тож зона під курсором їм не
+  // заважає; усе інше намальоване — вище за мітку й забирає клік собі.
+  if(S.tool==='select'&&S.sightSpan){
+    const top=hit(sx,sy,true), sm=(!top||top.o.kind==='zone')?sightAt(sx,sy):null;
+    if(sm){
+      if(!e.shiftKey) S.sightSel=[sm];
+      else S.sightSel=S.sightSel.includes(sm)?S.sightSel.filter(x=>x!==sm):S.sightSel.concat(sm);
+      if(!e.shiftKey){ S.sel=null;S.selMore=[]; }
+      S.selCity=null;
+      refresh();draw();return;
+    }
+    if(!e.shiftKey) S.sightSel=[];
+  }
   // Підпис міста. Перевіряємо ПІСЛЯ обʼєктів і підказок: назва — частина
   // підкладки, і перехоплювати нею клік по намальованому не можна.
   if(S.tool==='select'&&!hit(sx,sy,true)&&!ghostAt(sx,sy)){
@@ -5494,8 +5523,12 @@ addEventListener('pointerup',()=>{
         const pts=o.pts?o.pts.map(p=>P(p[0],p[1])):[P(o.la,o.lo)];
         return pts.some(s2=>s2[0]>=m.x&&s2[0]<=m.x+m.w&&s2[1]>=m.y&&s2[1]<=m.y+m.h);
       };
-      const got=S.objs.filter(inside);
+      // Рамка бере те саме, що бере клік: не замкнене, не сховане, не
+      // підкладку. Раніше вона брала все — і рамка довкола міток у Криму
+      // чіпляла зони України й ТОТ, а Delete зносив їх разом із мітками.
+      const got=S.objs.filter(o=>!o.locked&&!o.hidden&&!isBaseZone(o)&&objVisible(o)&&inside(o));
       S.sel=got[0]||null;S.selMore=got.slice(1);
+      S.sightSel=S.sightSpan?S.sight.filter(s=>sightVisible(s)&&inside(s)):[];
     }
     refresh();
   }
@@ -5639,7 +5672,7 @@ addEventListener('keydown',e=>{
     // повернутись у «вибір»
     if(S.ruler&&S.ruler.pts&&S.ruler.pts.length){S.ruler=null;draw();return;}
     if(S.draft){S.draft=null;toast('скасовано');}
-    else if(S.sel||S.selMore.length){S.sel=null;S.selMore=[];}
+    else if(S.sel||S.selMore.length||S.sightSel.length){S.sel=null;S.selMore=[];S.sightSel=[];}
     else setTool('select');
     hideMenu();hidePop();refresh();
   }
@@ -5841,10 +5874,13 @@ function delSel(){
   // Вибрано підпис міста — прибираємо його, а не обʼєкти.
   if(S.selCity){ hideCity(S.selCity); toast('підпис прибрано'); return; }
   const all=[S.sel,...S.selMore].filter(Boolean);
-  if(!all.length)return;
-  jlog('del',{n:all.length,kinds:all.map(o=>o.kind).join(',')});
+  const marks=S.sightSpan?S.sightSel.filter(s=>S.sight.includes(s)):[];
+  if(!all.length&&!marks.length)return;
+  jlog('del',{n:all.length,kinds:all.map(o=>o.kind).join(','),sights:marks.length});
   snapshot();S.objs=S.objs.filter(o=>!all.includes(o));
-  S.sel=null;S.selMore=[];refresh();
+  if(marks.length) spanDrop(marks);
+  S.sel=null;S.selMore=[];S.sightSel=[];refresh();
+  if(marks.length) toast(`прибрано міток: ${marks.length} · Ctrl+Z повертає`);
 }
 
 // ==========================================================================
@@ -6196,7 +6232,7 @@ function refresh(){
   document.getElementById('undo').disabled=!S.undo.length;
   document.getElementById('redo').disabled=!S.redo.length;
   document.getElementById('dup').disabled=!S.sel;
-  document.getElementById('del').disabled=!S.sel;
+  document.getElementById('del').disabled=!S.sel&&!S.sightSel.length;
   // список
   const l=document.getElementById('list');
   const q=(document.getElementById('listSearch')||{}).value||'';
@@ -6847,11 +6883,10 @@ document.getElementById('export').onclick=async ()=>{
   g.fillStyle=S.style.base.bg||'#04070c';g.fillRect(f.x,f.y,f.w,f.h);
   seedChrome();                  // місце під плашки — щоб підпис під них не ліз
   drawBase(g);
-  if(S.sightSpan) drawSights(g,true);   // зведення за період — це сама карта
   // сховані обʼєкти (око у списку шарів) не малюються ні на екрані, ні у
   // SVG — тут їх забули відсіяти, і на PNG вони поверталися
   endPass();                      // експорт — теж окремий прохід
-  for(const o of drawList()){ if(objVisible(o)) drawObj(o,g,false); }
+  drawExportObjs(g);
   drawCityInk(g);                 // назви міст лягають ПОВЕРХ маршрутів і позначок
   // легенда, шапка й лінійка кладуться відносно РАМКИ
   g.save();g.translate(f.x,f.y);
@@ -7040,9 +7075,8 @@ document.getElementById('exportSvg').onclick=async ()=>{
   if(!NOBG){ g.fillStyle=S.style.base.bg||'#04070c'; g.fillRect(f.x,f.y,f.w,f.h); }
   seedChrome();
   drawBase(g);
-  if(S.sightSpan) drawSights(g,true);
   endPass();                      // експорт — теж окремий прохід
-  for(const o of drawList()){ if(objVisible(o)) drawObj(o,g,false); }
+  drawExportObjs(g);
   drawCityInk(g);                 // назви міст лягають ПОВЕРХ маршрутів і позначок
   g.save();g.translate(f.x,f.y);
   drawWatermark(g,f.w,f.h);
@@ -8136,6 +8170,15 @@ document.getElementById('bearings').onclick=()=>{
 // Клік робить із неї звичайну позначку «фіксація» з підписом, кількістю
 // й джерелами. Ліній, хмар і «зон» із цих крапок не будується — це була б
 // вигадана геометрія.
+// Обʼєкти в експорті — тим самим порядком, що на екрані: зони, над ними
+// зведення фіксацій (воно — сама карта; нічні фіксації в експорт не йдуть),
+// далі все намальоване. Одна функція на PNG і SVG, щоб гілки не розійшлись.
+function drawExportObjs(g){
+  const list=drawList();
+  for(const o of list) if(o.kind==='zone'&&objVisible(o)) drawObj(o,g,false);
+  if(S.sightSpan) drawSights(g,true);
+  for(const o of list) if(o.kind!=='zone'&&objVisible(o)) drawObj(o,g,false);
+}
 function sightTimes(s){ return (s.ts||[]).map(hhmmMin).filter(t=>t!==null); }
 // Скільки повідомлень цього місця лежить у вікні годин (усі, якщо вікна нема).
 function sightCount(s){
@@ -8243,6 +8286,14 @@ function drawSights(c,exporting){
     }
   }
   // Наведення: кільце і картка з місцем, кількістю, часом і складом.
+  // Вибрані мітки зведення — обведені: видно, що саме прибере Delete.
+  if(!exporting&&S.sightSpan) for(const s of S.sightSel){
+    if(!S.sight.includes(s)||!sightVisible(s)) continue;
+    const p=P(s.la,s.lo), r=sightR(sightCount(s))+3.5;
+    c.beginPath();c.arc(p[0],p[1],r,0,7);
+    c.strokeStyle='rgba(4,7,12,.8)';c.lineWidth=3.6;c.stroke();
+    c.strokeStyle='#ff3ea5';c.lineWidth=1.8;c.stroke();
+  }
   const h=exporting?null:S.sightHover;
   if(h&&S.sight.includes(h)&&sightVisible(h)&&!sightCovered(h)){
     const p=P(h.la,h.lo), cnt=sightCount(h);
@@ -8534,6 +8585,7 @@ function renderSightStats(){
       +(Object.keys(r.types).length?`<div>чим: ${pairs(r.types)}</div>`:'')
       +(win?'<div style="color:#5f7386">склад — за весь період, без вікна годин</div>':'')
       +`<span class="schip" data-sz="${esc(r.key)}" style="margin-top:6px">показати область на карті</span>`
+      +`<span class="schip" data-sx="${esc(r.key)}" style="margin-top:6px" title="Прибрати з карти всі мітки цієї області. Повертається через Ctrl+Z або «повернути прибрані»">прибрати її мітки</span>`
       +'</div>';
   };
   box.innerHTML=
@@ -8549,7 +8601,8 @@ function renderSightStats(){
     }).join('')
     +(st.rows.length>LIM?`<span class="schip" data-sa="1" style="margin-top:6px">${STATUI.all?'лише перші '+LIM:'усі області — '+st.rows.length}</span>`:'')
     +`<span class="schip" data-sc="1" style="margin-top:6px" title="Список областей із числами — текстом у буфер обміну">скопіювати списком</span>`
-    +'<div class="hint" style="margin-top:6px">Число — повідомлення каналів моніторингу, а не кількість апаратів: де більше спостерігачів, там більше повідомлень. Клік по області — дні, місця й склад.</div>';
+    +(sp.gone.size?`<span class="schip" data-su="1" style="margin-top:6px" title="Повернути на карту всі мітки, прибрані вручну">повернути прибрані — ${nfmt(sp.gone.size)}</span>`:'')
+    +'<div class="hint" style="margin-top:6px">Число — повідомлення каналів моніторингу, а не кількість апаратів: де більше спостерігачів, там більше повідомлень. Клік по області — дні, місця й склад. Мітку на карті прибирає клік по ній і Delete; Shift+тягнути — рамка для кількох.</div>';
 }
 function statsText(){
   const st=STAT||spanStats(), sp=S.sightSpan;
@@ -8560,7 +8613,7 @@ function statsText(){
     +`${nfmt(st.places)} ${plur(st.places,'місце','місця','місць')}.`;
 }
 document.getElementById('sightStats').onclick=e=>{
-  const el=e.target.closest('[data-sp],[data-sz],[data-sa],[data-sc],[data-sr]');
+  const el=e.target.closest('[data-sp],[data-sz],[data-sx],[data-su],[data-sa],[data-sc],[data-sr]');
   if(!el||!STAT) return;
   const row=k=>STAT.rows.find(r=>r.key===k);
   if(el.dataset.sp!==undefined){
@@ -8574,6 +8627,16 @@ document.getElementById('sightStats').onclick=e=>{
     const r=row(el.dataset.sz);
     if(r) zoomTo(r.rings?r.rings.map(pts=>({pts})):r.places.map(p=>({la:p.s.la,lo:p.s.lo})));
     return;
+  }
+  if(el.dataset.sx!==undefined){
+    const r=row(el.dataset.sx); if(!r) return;
+    snapshot(); spanDrop(r.places.map(p=>p.s)); S.sightSel=[];
+    jlog('sightDrop',{reg:r.key,n:r.places.length});
+    toast(`${r.name}: прибрано міток ${r.places.length} · Ctrl+Z повертає`);
+    refresh(); return;
+  }
+  if(el.dataset.su!==undefined){
+    snapshot(); S.sightSpan.gone.clear(); spanApply(); refresh(); return;
   }
   if(el.dataset.sa!==undefined){ STATUI.all=!STATUI.all; renderSightStats(); return; }
   if(el.dataset.sc!==undefined){
@@ -8737,10 +8800,11 @@ async function putSpan(key){
   await Promise.all(Array.from({length:6},work));
   if(tok!==SPAN.tok) return;       // поки вантажилось, вибрали інше або сховали
   if(miss.length>=need.length){toast('ночі не завантажились');refresh();return;}
-  S.sight=mergeSights(need,lists,from,to); S.sightHover=null;
+  const all=mergeSights(need,lists,from,to);
+  S.sight=all; S.sightHover=null; S.sightSel=[];
   STATUI.open.clear(); STATUI.all=false;
   const days=Math.round((Date.parse(to)-Date.parse(from))/864e5)+1;
-  S.sightSpan={key,from,to,days,label:rangeLabel(from,to)};
+  S.sightSpan={key,from,to,days,label:rangeLabel(from,to),all,gone:new Set()};
   const msgs=S.sight.reduce((a,s)=>a+s.n,0);
   const cut=from!==want.from||to!==want.to;
   toast(`фіксації ${dm(from)} 00:00 – ${dm(to)} 23:59 МСК: ${S.sight.length} місць, ${msgs} повідомлень`
@@ -8749,8 +8813,21 @@ async function putSpan(key){
   jlog('sightSpan',{key,from,to,days,nights:need.length,miss:miss.length,places:S.sight.length,msgs});
   refresh();
 }
+// Прибрані мітки зведення. Місця лишаються в `all`: Ctrl+Z і «повернути»
+// знімають ключ із `gone`, а не відновлюють обʼєкт із пам'яті кроку.
+function sightKey(s){ return s.la+','+s.lo; }
+function spanId(){ const p=S.sightSpan; return p?p.key+'|'+p.from+'|'+p.to:''; }
+function spanApply(){
+  const p=S.sightSpan;
+  S.sight=p.gone.size?p.all.filter(s=>!p.gone.has(sightKey(s))):p.all;
+  S.sightHover=null;
+}
+function spanDrop(list){
+  for(const s of list) S.sightSpan.gone.add(sightKey(s));
+  spanApply();
+}
 function hideSights(){
-  SPAN.tok++;
+  SPAN.tok++; S.sightSel=[];
   if(S.sightSpan){ S.sightSpan=null; S.sight=[]; S.sightHover=null; return; }
   if(S.sight.length){ snapshot(); S.sight=[]; S.sightHover=null; }
 }

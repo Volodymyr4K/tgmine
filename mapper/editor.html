@@ -69,6 +69,26 @@ button.primary{background:rgba(255,62,165,.16);border-color:rgba(255,62,165,.45)
 .type{display:flex;align-items:center;gap:6px;padding:6px 7px;border:1px solid var(--line);
   border-radius:6px;cursor:pointer;font-size:11.5px;color:var(--dim);background:#0c121a}
 .type.on{border-color:#3a4c60;color:var(--ink);background:#111a24}
+/* статистика зведення фіксацій за областями */
+.srow{display:grid;grid-template-columns:20px 1fr auto;gap:6px;align-items:center;
+  position:relative;overflow:hidden;padding:5px 7px;margin-top:3px;border:1px solid var(--line);
+  border-radius:6px;cursor:pointer;font-size:11.5px;color:var(--ink);background:#0c121a}
+.srow:hover{border-color:#2f3f52}
+.srow.on{border-color:#3a4c60;border-radius:6px 6px 0 0}
+.srow>*{position:relative}
+.srow .sbar{position:absolute;left:0;top:0;bottom:0;pointer-events:none}
+.srow .srk{color:#5f7386;font-variant-numeric:tabular-nums;text-align:right}
+.srow .snm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.srow .snm em{font-style:normal;font-size:10px;color:#8fa3b8;margin-left:4px}
+.srow b{font-variant-numeric:tabular-nums;font-weight:600}
+.sdet{padding:6px 8px 8px;border:1px solid #3a4c60;border-top:none;border-radius:0 0 6px 6px;
+  font-size:11px;color:#9fb3c8;line-height:1.55;background:#0a1017}
+.sdet b{color:var(--ink);font-weight:600}
+.sdays{display:flex;gap:1px;align-items:flex-end;height:30px;margin:5px 0 2px}
+.sdays i{flex:1;min-width:0;display:block;border-radius:1px 1px 0 0}
+.schip{display:inline-block;padding:1px 7px;margin:3px 3px 0 0;border:1px solid var(--line);
+  border-radius:10px;cursor:pointer;color:#c7d3df;white-space:nowrap;font-size:11px;line-height:1.55}
+.schip:hover{border-color:#3a4c60;background:#111a24}
 .sw{width:16px;height:3px;border-radius:2px;flex:none}
 /* Колір обʼєкта. Оператор малює одним типом і фарбує КОЖНУ стрілку окремо,
    тож колір для нього — не налаштування, а щоденна дія: палітра тут
@@ -328,6 +348,7 @@ button.primary{background:rgba(255,62,165,.16);border-color:rgba(255,62,165,.45)
           <input id="sightTo" type="date" style="flex:1" title="останній день періоду, до 23:59 МСК">
         </div>
         <button id="sights" style="margin-top:6px" title="Кожне місце, де щось бачили: крапка тим більша, чим більше повідомлень; порожнє кільце — центр району, не село. Фіксації ночі — підказка: в експорт не йдуть, клік робить позначку. Фіксації за період — зведення: ідуть в експорт. Повторний клік ховає шар">Показати фіксації ночі</button>
+        <div id="sightStats"></div>
         <div style="display:flex;gap:6px;align-items:center;margin-top:6px">
           <button id="sightAll" style="flex:1" title="Робить позначки з усіх показаних фіксацій, у яких повідомлень не менше за число праворуч">Узяти фіксації в роботу</button>
           <input id="sightMin" type="number" min="1" max="99" value="3" style="width:52px" title="від скількох повідомлень брати: дві третини місць ночі мають одне-єдине">
@@ -5943,6 +5964,7 @@ function refresh(){
   const sb=document.getElementById('sights');
   if(sb) sb.textContent=(S.sight.length?'Сховати фіксації':'Показати фіксації')+spanSuffix();
   syncSightCol();
+  renderSightStats();
   const cb=document.getElementById('cones');
   if(cb) cb.textContent=conesShown()?'Сховати конуси на область':'Показати конуси на область';
   const ab=document.getElementById('alerts');
@@ -8311,6 +8333,192 @@ function putSights(){
 // іде в експорт і в легенду, позначками ночі не гаситься, у роботу з нього
 // нічого не береться (позначка «за місяць» не належала б жодній ночі) і в
 // історію кроків воно не пишеться.
+// --------------------------------------------------------------------------
+// СТАТИСТИКА ЗВЕДЕННЯ ЗА ОБЛАСТЯМИ
+//
+// Поки показано фіксації за період, під випадайкою — те саме зведення
+// списком: область, скільки повідомлень, і за кліком — деталі (дні, місця,
+// склад). Список рахується з тих самих місць, що й крапки, і слухається
+// вікна годин: число в рядку — сума того, що зараз на карті.
+//
+// Область місця — точка в полігоні підкладки (BASE.regions, ті самі, що в
+// штриху тривог); у файлах ночей області нема, а міняти конвеєр заради
+// списку не варто. Заміряно на серпні 2026: у полігони лягає 98.1%
+// повідомлень; решта — причали й миси за спрощеним берегом (Фіолент, Форос,
+// Тамань — беруться найближчою областю в межах REG_NEAR_KM) і місця на
+// підконтрольній Україні території (джерела пусків) — окремим рядком.
+//
+// Число — ПОВІДОМЛЕННЯ каналів, а не апарати: де більше спостерігачів, там
+// більше повідомлень (CLAUDE.md, «Обмеження даних»). Це написано і в панелі,
+// і в тексті, який копіюється.
+const REG_NEAR_KM=12;
+const STATUI={open:new Set(),all:false};
+var REGIDX=null;      // var: refresh() буває раніше за це місце скрипта
+function regIndex(){
+  if(REGIDX) return REGIDX;
+  const R=window.BASE&&BASE.regions;
+  if(!R) return [];
+  REGIDX=Object.keys(R).map(key=>{
+    let a=90,b=-90,c=360,d=-360;
+    for(const r of R[key]) for(const p of r){
+      if(p[0]<a) a=p[0]; if(p[0]>b) b=p[0]; if(p[1]<c) c=p[1]; if(p[1]>d) d=p[1];
+    }
+    // Крим і окуповані частини чотирьох областей — не області РФ
+    return {key,rings:R[key],box:[a,b,c,d],name:key,tot:key==='Крим'||key.startsWith('ТОТ_')};
+  });
+  // людська назва («Воронезька обл.») — з підписів підкладки: підпис стоїть
+  // усередині своєї області
+  for(const l of (BASE.regionLabels||[])){ const r=regionAt(l.la,l.lo,0); if(r) r.name=l.n; }
+  return REGIDX;
+}
+function inRings(la,lo,rings){
+  let c=false;
+  for(const r of rings) for(let i=0,j=r.length-1;i<r.length;j=i++){
+    const yi=r[i][0], xi=r[i][1], yj=r[j][0], xj=r[j][1];
+    if((yi>la)!==(yj>la)&&lo<(xj-xi)*(la-yi)/(yj-yi)+xi) c=!c;
+  }
+  return c;
+}
+function regionAt(la,lo,nearKm){
+  const idx=REGIDX||regIndex();
+  for(const r of idx){
+    const b=r.box;
+    if(la<b[0]||la>b[1]||lo<b[2]||lo>b[3]) continue;
+    if(inRings(la,lo,r.rings)) return r;
+  }
+  if(!nearKm) return null;
+  let best=null, bd=nearKm;
+  const kx=111*Math.cos(la*Math.PI/180), pad=nearKm/100;
+  for(const r of idx){
+    const b=r.box;
+    if(la<b[0]-pad||la>b[1]+pad||lo<b[2]-2*pad||lo>b[3]+2*pad) continue;
+    for(const ring of r.rings) for(let i=0,j=ring.length-1;i<ring.length;j=i++){
+      const ax=(ring[j][1]-lo)*kx, ay=(ring[j][0]-la)*111;
+      const dx=(ring[i][1]-lo)*kx-ax, dy=(ring[i][0]-la)*111-ay, l2=dx*dx+dy*dy;
+      let t=l2?-(ax*dx+ay*dy)/l2:0; t=t<0?0:t>1?1:t;
+      const d=Math.hypot(ax+t*dx,ay+t*dy);
+      if(d<bd){ bd=d; best=r; }
+    }
+  }
+  return best;
+}
+// Повідомлення місця по днях — лише ті, що у вікні годин.
+function sightDayCounts(s){
+  const F=S.tfilter, a=F&&F.on?hhmmMin(F.from):null, b=F&&F.on?hhmmMin(F.to):null;
+  const m=new Map(), ts=s.ts||[], td=s.td||[];
+  for(let i=0;i<ts.length;i++){
+    if(a!==null&&b!==null){ const t=hhmmMin(ts[i]); if(t===null||!inWindow(t,a,b)) continue; }
+    m.set(td[i],(m.get(td[i])||0)+1);
+  }
+  return m;
+}
+function spanStats(){
+  const by=new Map(); let msgs=0, places=0;
+  for(const s of S.sight){
+    const dc=sightDayCounts(s); let cnt=0;
+    for(const v of dc.values()) cnt+=v;
+    if(!cnt) continue;
+    msgs+=cnt; places++;
+    let r=by.get(s.reg||'');
+    if(!r){ r={key:s.reg||'',msgs:0,places:[],days:new Map(),kinds:{},types:{}}; by.set(r.key,r); }
+    r.msgs+=cnt; r.places.push({s,cnt});
+    for(const [d,v] of dc) r.days.set(d,(r.days.get(d)||0)+v);
+    for(const k in s.kinds||{}) r.kinds[k]=(r.kinds[k]||0)+s.kinds[k];
+    for(const k in s.types||{}) r.types[k]=(r.types[k]||0)+s.types[k];
+  }
+  const idx=new Map(regIndex().map(r=>[r.key,r]));
+  const rows=[...by.values()].sort((a,b)=>b.msgs-a.msgs||a.key.localeCompare(b.key));
+  for(const r of rows){
+    const g=idx.get(r.key);
+    r.name=g?g.name:'Поза РФ і ТОТ'; r.tot=!!(g&&g.tot); r.rings=g?g.rings:null;
+    r.places.sort((a,b)=>b.cnt-a.cnt);
+  }
+  return {rows,msgs,places};
+}
+const nfmt=n=>String(n).replace(/\B(?=(\d{3})+(?!\d))/g,'\u202f');
+var STAT=null;
+// 1 місце, 2 місця, 5 місць, 11 місць, 21 місце
+function plur(n,one,few,many){
+  const a=n%10, b=n%100;
+  return a===1&&b!==11?one:a>=2&&a<=4&&(b<12||b>14)?few:many;
+}
+function renderSightStats(){
+  const box=document.getElementById('sightStats'); if(!box) return;
+  if(!S.sightSpan||!S.sight.length||S.layers.sights===false){ box.innerHTML=''; STAT=null; return; }
+  const st=STAT=spanStats(), sp=S.sightSpan, col=sightCol();
+  const win=S.tfilter&&S.tfilter.on?`, ${S.tfilter.from}–${S.tfilter.to}`:'';
+  if(!st.rows.length){
+    box.innerHTML=`<div class="hint">За ${esc(sp.label)}${win} у цьому вікні годин фіксацій нема.</div>`; return; }
+  const top=st.rows[0].msgs, LIM=10, shown=STATUI.all?st.rows:st.rows.slice(0,LIM);
+  // дні періоду — спільна вісь для стовпчиків у всіх областях
+  const days=[]; for(let d=sp.from; d<=sp.to; d=dayAdd(d,1)) days.push(d);
+  const pairs=o=>Object.entries(o).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`${esc(k)} <b>${nfmt(v)}</b>`).join(' · ');
+  const det=r=>{
+    const mx=Math.max(1,...r.days.values());
+    return '<div class="sdet">'
+      +`місць <b>${nfmt(r.places.length)}</b> · днів із фіксаціями <b>${r.days.size}</b> з ${days.length}`
+      +'<div class="sdays">'+days.map(d=>{ const v=r.days.get(d)||0;
+          return `<i title="${dm(d)} — ${v}" style="height:${v?Math.max(2,Math.round(v/mx*30)):1}px;background:${v?col:'#223041'}"></i>`; }).join('')+'</div>'
+      +`<div style="display:flex;justify-content:space-between;color:#5f7386;font-size:10px"><span>${dm(sp.from)}</span><span>найбільше за день — ${nfmt(mx)}</span><span>${dm(sp.to)}</span></div>`
+      +'<div style="margin-top:4px">'+r.places.slice(0,8).map((p,i)=>
+          `<span class="schip" data-sp="${esc(r.key)}|${i}" title="показати на карті">${esc((p.s.aim?'курс на ':'')+(p.s.place||'без назви'))} <b>${nfmt(p.cnt)}</b></span>`).join('')
+        +(r.places.length>8?`<span style="color:#5f7386"> і ще ${nfmt(r.places.length-8)}</span>`:'')+'</div>'
+      +`<div style="margin-top:5px">${pairs(r.kinds)}</div>`
+      +(Object.keys(r.types).length?`<div>чим: ${pairs(r.types)}</div>`:'')
+      +(win?'<div style="color:#5f7386">склад — за весь період, без вікна годин</div>':'')
+      +`<span class="schip" data-sz="${esc(r.key)}" style="margin-top:6px">показати область на карті</span>`
+      +'</div>';
+  };
+  box.innerHTML=
+    `<label style="margin-top:8px">За областями · ${esc(sp.label)}${win}`
+      +`<span class="cnt" style="margin-left:6px">${nfmt(st.msgs)} повідомл. · ${nfmt(st.places)} місць</span></label>`
+    +shown.map((r,i)=>{
+      const on=STATUI.open.has(r.key);
+      return `<div class="srow${on?' on':''}" data-sr="${esc(r.key)}" title="клік — деталі області">`
+        +`<span class="sbar" style="width:${Math.max(1.5,r.msgs/top*100).toFixed(1)}%;background:${hexa(col,.16)}"></span>`
+        +`<span class="srk">${i+1}</span>`
+        +`<span class="snm">${esc(r.name)}${r.tot?'<em>ТОТ</em>':''}</span>`
+        +`<b>${nfmt(r.msgs)}</b></div>`+(on?det(r):'');
+    }).join('')
+    +(st.rows.length>LIM?`<span class="schip" data-sa="1" style="margin-top:6px">${STATUI.all?'лише перші '+LIM:'усі області — '+st.rows.length}</span>`:'')
+    +`<span class="schip" data-sc="1" style="margin-top:6px" title="Список областей із числами — текстом у буфер обміну">скопіювати списком</span>`
+    +'<div class="hint" style="margin-top:6px">Число — повідомлення каналів моніторингу, а не кількість апаратів: де більше спостерігачів, там більше повідомлень. Клік по області — дні, місця й склад.</div>';
+}
+function statsText(){
+  const st=STAT||spanStats(), sp=S.sightSpan;
+  const win=S.tfilter&&S.tfilter.on?`, ${S.tfilter.from}–${S.tfilter.to}`:'';
+  return `Фіксації за ${sp.label}${win} — повідомлення каналів моніторингу за областями:\n`
+    +st.rows.map((r,i)=>`${i+1}. ${r.name}${r.tot?' (ТОТ)':''} — ${nfmt(r.msgs)}`).join('\n')
+    +`\nРазом: ${nfmt(st.msgs)} ${plur(st.msgs,'повідомлення','повідомлення','повідомлень')}, `
+    +`${nfmt(st.places)} ${plur(st.places,'місце','місця','місць')}.`;
+}
+document.getElementById('sightStats').onclick=e=>{
+  const el=e.target.closest('[data-sp],[data-sz],[data-sa],[data-sc],[data-sr]');
+  if(!el||!STAT) return;
+  const row=k=>STAT.rows.find(r=>r.key===k);
+  if(el.dataset.sp!==undefined){
+    const i=el.dataset.sp.lastIndexOf('|'), r=row(el.dataset.sp.slice(0,i));
+    const p=r&&r.places[+el.dataset.sp.slice(i+1)];
+    // кадр ~90 км навколо місця: одна точка не дає zoomTo розміру
+    if(p) zoomTo([{pts:[[p.s.la-.4,p.s.lo-.65],[p.s.la+.4,p.s.lo+.65]]}]);
+    return;
+  }
+  if(el.dataset.sz!==undefined){
+    const r=row(el.dataset.sz);
+    if(r) zoomTo(r.rings?r.rings.map(pts=>({pts})):r.places.map(p=>({la:p.s.la,lo:p.s.lo})));
+    return;
+  }
+  if(el.dataset.sa!==undefined){ STATUI.all=!STATUI.all; renderSightStats(); return; }
+  if(el.dataset.sc!==undefined){
+    const text=statsText(), done=ok=>toast(ok?'список областей скопійовано':'не скопіювалось — браузер не дав буфера');
+    if(navigator.clipboard&&navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(()=>done(true),()=>done(false));
+    else done(false);
+    return;
+  }
+  const k=el.dataset.sr;
+  if(STATUI.open.has(k)) STATUI.open.delete(k); else STATUI.open.add(k);
+  renderSightStats();
+};
 function dm(d){ return d?d.slice(8,10)+'.'+d.slice(5,7):''; }
 const MONTH_UK=['січень','лютий','березень','квітень','травень','червень',
                 'липень','серпень','вересень','жовтень','листопад','грудень'];
@@ -8401,10 +8609,12 @@ function mergeSights(nights,lists,from,to){
       if(!part) continue;
       const k=s.la+','+s.lo;
       let b=by.get(k);
-      if(!b){ b={la:s.la,lo:s.lo,n:0,place:'',kinds:{},types:{},ts:[],src:[],
+      if(!b){ b={la:s.la,lo:s.lo,n:0,place:'',kinds:{},types:{},ts:[],td:[],src:[],
                  dset:new Set(),aim:true,area:'',allArea:true}; by.set(k,b); }
       b.n+=part;
-      for(const t of ts){ b.ts.push(t); b.dset.add(dayOf(t)); }
+      // `td` — день кожного часу з `ts`, тим самим порядком: статистика за
+      // днями має слухатись вікна годин так само, як крапки.
+      for(const t of ts){ const d=dayOf(t); b.ts.push(t); b.td.push(d); b.dset.add(d); }
       if(!b.place&&s.place) b.place=s.place;
       let kinds=s.kinds, types=s.types;
       if(part<n){
@@ -8427,6 +8637,7 @@ function mergeSights(nights,lists,from,to){
     if(!b.allArea) b.area='';
     const ds=[...b.dset].sort();
     b.days=ds.length; b.d0=ds[0]; b.d1=ds[ds.length-1];
+    const rg=regionAt(b.la,b.lo,REG_NEAR_KM); b.reg=rg?rg.key:'';
     delete b.allArea; delete b.dset;
   }
   return out.sort((a,b)=>b.n-a.n);
@@ -8460,6 +8671,7 @@ async function putSpan(key){
   if(tok!==SPAN.tok) return;       // поки вантажилось, вибрали інше або сховали
   if(miss.length>=need.length){toast('ночі не завантажились');refresh();return;}
   S.sight=mergeSights(need,lists,from,to); S.sightHover=null;
+  STATUI.open.clear(); STATUI.all=false;
   const days=Math.round((Date.parse(to)-Date.parse(from))/864e5)+1;
   S.sightSpan={key,from,to,days,label:rangeLabel(from,to)};
   const msgs=S.sight.reduce((a,s)=>a+s.n,0);

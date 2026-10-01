@@ -6410,9 +6410,17 @@ function srvQueue(){
   clearTimeout(SRV.t);
   SRV.t=setTimeout(()=>srvPush(false),SRV_WAIT);
 }
+// Карта з самої підкладки (Україна, ТОТ) — порожня: роботи на ній нема.
+// Сама вона на сервер не йде, бо файл там називається за ніччю з
+// підзаголовка, і «прибрав усе, щоб глянути на фіксації» затирало готову
+// карту цієї ночі. Так 1.10.2026 о 09:58 карта ночі на 1 жовтня (58
+// обʼєктів, 35 маршрутів) стала сімома зонами підкладки. Кнопкою —
+// можна: це вже рішення, а не побічний наслідок.
+function srvWorthless(){ return !S.objs.some(o=>!isBaseZone(o)); }
 async function srvPush(manual){
   clearTimeout(SRV.t);
   if(!S.objs.length){ if(manual) toast('порожню карту зберігати нема сенсу'); return; }
+  if(!manual&&srvWorthless()) return;
   if(SRV.busy){ SRV.pend=true; return; }
   const id=srvId();
   if(id!==SRV.id){ SRV.id=id; SRV.sha=''; }   // нова назва — новий файл
@@ -6440,7 +6448,7 @@ async function srvPush(manual){
 // Вкладку закривають — дочекатись дебаунсу вже нема кому. keepalive дає
 // браузеру доправити запит після того, як сторінка пішла.
 function srvFlush(){
-  if(SRV.on===false||!S.objs.length||SRV.busy) return;
+  if(SRV.on===false||srvWorthless()||SRV.busy) return;
   clearTimeout(SRV.t);
   const id=srvId();
   try{

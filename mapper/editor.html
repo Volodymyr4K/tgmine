@@ -334,6 +334,7 @@ button.primary{background:rgba(255,62,165,.16);border-color:rgba(255,62,165,.45)
         </div>
         <button id="alerts" style="margin-top:6px" title="Хронологія стартів тривог у тилу: коли яка область почала тривожити. Фронт і ТОТ з добовою тривогою не показуються. Штрихом — області, де тривога була, а фіксацій нема. Клік по рядку — підлетіти, клік по чіпу на карті — підпис із часом">Показати тривоги ночі</button>
         <div id="alertList" style="margin-top:4px"></div>
+        <button id="nightWipe" style="margin-top:6px" title="Чистий аркуш без зміни ночі: прибирає маршрути-підказки, конуси, стрілки, позначки, наслідки, тривоги й фіксації ночі — усе, крім підкладки (Україна, окуповані території) і фіксацій за період. Для карти, де мають лишитись самі фіксації за місяць. Повертається через Ctrl+Z">Прибрати все з ночі</button>
 
         <label style="margin-top:10px">Години нальоту <span id="tfCnt" class="cnt" style="margin-left:4px"></span></label>
         <div id="thist" class="thist"></div>
@@ -8291,6 +8292,29 @@ function hideSights(){
   if(S.sightSpan){ S.sightSpan=null; S.sight=[]; S.sightHover=null; return; }
   if(S.sight.length){ snapshot(); S.sight=[]; S.sightHover=null; }
 }
+// «Прибрати все з ночі» — той самий чистий аркуш, що при зміні ночі, але
+// без нової ночі: лишається підкладка (Україна, ТОТ) і зведення за період.
+// Навіщо: ніч сама кладе підказки, наслідки й засоби, а вимкнути їх разом
+// було нічим — «Нова карта» зносила й підкладку, і саме зведення. Власник
+// хотів карту «лише фіксації за вересень» і не міг її отримати (1.10.2026).
+document.getElementById('nightWipe').onclick=()=>{
+  const keep=S.objs.filter(isBaseZone), drop=S.objs.length-keep.length;
+  const hand=S.objs.filter(o=>!isBaseZone(o)&&!fromNight(o)).length;
+  const sights=S.sightSpan?0:S.sight.length;
+  if(!drop&&!S.ghosts.length&&!sights&&!S.alertsOn){toast('з ночі на карті й так нічого нема');return;}
+  // Намальоване руками — це робота, а не дані ночі: про неї питаємо.
+  if(hand&&!confirm(`На карті ${hand} обʼєктів, намальованих вручну. Прибрати їх теж?\n`+
+                    'Скасувати можна через Ctrl+Z.')) return;
+  snapshot();
+  jlog('nightWipe',{drop,hand,ghosts:S.ghosts.length,sights,span:!!S.sightSpan});
+  S.objs=keep; S.ghosts=[]; S.alertsOn=false; S.sel=null; S.selMore=[]; S.draft=null;
+  if(!S.sightSpan){ S.sight=[]; S.sightHover=null; }
+  endPass();
+  toast('з ночі прибрано все'+(drop?` · обʼєктів ${drop}`:'')
+        +(S.sightSpan?` · лишились фіксації: ${S.sightSpan.label}`:'')
+        +(keep.length?' · підкладка на місці':''));
+  refresh();
+};
 document.getElementById('sightSpan').onchange=()=>{
   // Вибір періоду одразу показує його — як будь-яка випадайка.
   hideSights();

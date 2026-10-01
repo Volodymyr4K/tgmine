@@ -78,32 +78,85 @@ export async function read(st, id) {
   return { sha: f.sha, map: JSON.parse(new TextDecoder().decode(bin)) };
 }
 
-export async function write(st, id, map, sha, user) {
+// Хто й коли писав файл востаннє. Імʼя береться з повідомлення коміту —
+// `write` сам кладе його в дужках у кінці («карта: … (editor)»); коміт,
+// зроблений не редактором (відновлення з історії), імені не має.
+export async function lastWriter(st, id) {
+  const res = await gh(st, `/repos/${st.repo}/commits?path=${encodeURIComponent(path(id))}` +
+    `&sha=${encodeURIComponent(st.branch)}&per_page=1`);
+  if (!res.ok) return { by: "", at: "" };
+  const c = (await res.json())[0];
+  if (!c || !c.commit) return { by: "", at: "" };
+  const m = /\(([^()]+)\)\s*$/.exec(c.commit.message || "");
+  return { by: m ? m[1] : "", at: (c.commit.committer && c.commit.committer.date) || "" };
+}
+
+// Запис карти. Правило одне: редактор САМ пише лише у файл, який він знає —
+// тобто приніс sha тієї версії, що зараз лежить у репо. Усе інше — конфлікт,
+// і поверх пишеться тільки з `force` (кнопка «Зберегти» після запитання).
+//
+// До 1 жовтня 2026 будь-яка розбіжність sha лікувалась перечитуванням і
+// записом поверх («інакше робота лишиться незбереженою»). Файл зветься за
+// ніччю з підзаголовка, один на всіх, автозбереження — на кожну зміну, тож
+// поверх готових карт лягало що завгодно: чужий екран із завислим
+// підзаголовком, напівстерта вчорашня карта, порожня підкладка. Аудит історії
+// `mapper/maps/` знайшов 12 затертих карт із 19.
+//
+// Що вважається «знає»:
+//   sha збігається з файлом           -> пишемо;
+//   sha нема, файла нема              -> створюємо;
+//   sha нема, файл є                  -> конфлікт (чужа або давня карта);
+//   sha не збігається                 -> конфлікт, КРІМ `loose`: редактор
+//     послав запис на закритті вкладки (keepalive) і відповіді з новим sha
+//     не дочекався. Тоді останнім автором має бути той самий користувач —
+//     це його ж запис, а не чужий.
+// 409 від GitHub буває й без зміни файла (гілку посунув коміт CI) — тоді
+// sha той самий, і запис просто повторюється.
+export async function write(st, id, map, sha, user, opt = {}) {
   const text = JSON.stringify(map);
   const bytes = new TextEncoder().encode(text);
   let bin = "";
   for (const b of bytes) bin += String.fromCharCode(b);
   const title = (map && map.title) || id;
   const sub = (map && map.sub) || "";
-  const res = await gh(st, `/repos/${st.repo}/contents/${path(id)}`, {
-    method: "PUT",
-    body: JSON.stringify({
-      message: `карта: ${title}${sub ? " · " + sub : ""} (${user || "редактор"})`,
-      content: btoa(bin),
-      branch: st.branch,
-      ...(sha ? { sha } : {}),
-    }),
-  });
-  if (res.status === 409 || res.status === 422) {
-    // Файл змінився з того часу, як редактор брав його sha. Пишемо поверх
-    // свіжого sha, а не мовчимо: інакше робота лишиться незбереженою.
+  let last = 0;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const res = await gh(st, `/repos/${st.repo}/contents/${path(id)}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        message: `карта: ${title}${sub ? " · " + sub : ""} (${user || "редактор"})`,
+        content: btoa(bin),
+        branch: st.branch,
+        ...(sha ? { sha } : {}),
+      }),
+    });
+    if (res.ok) {
+      const out = await res.json();
+      return { sha: out.content.sha };
+    }
+    if (res.status !== 409 && res.status !== 422 && res.status !== 404)
+      throw new Error(`GitHub ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    last = res.status;
     const cur = await read(st, id);
-    if (cur && cur.sha !== sha) return write(st, id, map, cur.sha, user);
-    throw new Error(`GitHub ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    if (!cur) {
+      // Файла нема. З sha — його прибрали, поки редактор працював: це та
+      // сама карта того самого сеансу, створюємо наново. Без sha — гонка
+      // за гілку при створенні: повтор.
+      sha = "";
+      continue;
+    }
+    if (cur.sha === sha) continue;            // файл той самий, посунулась гілка
+    if (!opt.force) {
+      const w = await lastWriter(st, id);
+      const own = !!(sha && opt.loose && w.by && w.by === user);
+      if (!own)
+        return { conflict: true, sha: cur.sha, by: w.by, at: w.at,
+                 objs: Array.isArray(cur.map && cur.map.objs) ? cur.map.objs.length : 0,
+                 sub: (cur.map && cur.map.sub) || "" };
+    }
+    sha = cur.sha;
   }
-  if (!res.ok) throw new Error(`GitHub ${res.status}: ${(await res.text()).slice(0, 200)}`);
-  const out = await res.json();
-  return { sha: out.content.sha };
+  throw new Error(`GitHub ${last}: запис не вдався після пʼяти спроб`);
 }
 
 export async function remove(st, id, sha, user) {

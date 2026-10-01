@@ -25,7 +25,14 @@ export async function onRequestPut({ request, env, params, data }) {
   if (!body || typeof body.map !== "object" || !body.map || !Array.isArray(body.map.objs))
     return noStore({ error: "у тілі нема карти" }, 400);
   try {
-    const out = await write(st, params.id, body.map, body.sha || "", data && data.user);
+    const out = await write(st, params.id, body.map, body.sha || "", data && data.user,
+                            { force: body.force === true, loose: body.loose === true });
+    // Конфлікт — не помилка сервера: на файлі лежить версія, якої цей редактор
+    // не знає. Він сам вирішить, питати людину чи мовчки відступити.
+    if (out.conflict)
+      return noStore({ error: "на сервері вже є інша версія цієї карти", conflict: true,
+                       id: params.id, sha: out.sha, by: out.by, at: out.at,
+                       objs: out.objs, sub: out.sub }, 409);
     return noStore({ id: params.id, sha: out.sha, at: new Date().toISOString() });
   } catch (e) {
     return noStore({ error: String(e.message || e) }, 502);

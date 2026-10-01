@@ -354,3 +354,20 @@ class TestEditorLegendCoversEveryMarkCategory(unittest.TestCase):
         """Контроль: тест має падати, якщо рядок прибрати."""
         src = self._editor().replace("shown('launch')", "shown('НЕМА')")
         self.assertNotIn("shown('launch')", src)
+
+
+class TestServerMapsWriteRule(unittest.TestCase):
+    """Правило запису карт на сервер: редактор сам пише лише у файл, який знає.
+
+    1 жовтня 2026 аудит історії `mapper/maps/` знайшов 12 затертих карт із 19:
+    сервер на будь-яку розбіжність sha перечитував файл і писав поверх. Самі
+    випадки — у `tests/js/store_write.mjs` проти підробленого GitHub."""
+
+    def test_store_write_rule(self):
+        import shutil, subprocess
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("нема node")
+        r = subprocess.run([node, "tests/js/store_write.mjs"], cwd=ROOT,
+                           capture_output=True, text=True, timeout=120)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)

@@ -6331,8 +6331,18 @@ function wireSlots(){
 // та переживає «очистити дані сайту». Сервера нема (file://, локальний
 // перегляд, не налаштований секрет) — редактор мовчки лишається на
 // localStorage: малювати це не заважає.
-const SRV={on:null,id:'',sha:'',at:0,busy:false,pend:false,err:'',t:0};
+// `sha` — версія файла, яку цей браузер сам поклав або відкрив; `at` — коли;
+// `n` — скільки на ній було обʼєктів без підкладки; `loose` — останній запис
+// пішов на закритті вкладки, і відповіді з новим sha могло не бути; `block`
+// — чому автозбереження в цей файл стоїть.
+const SRV={on:null,id:'',sha:'',at:0,n:0,loose:false,block:null,told:'',
+           busy:false,pend:false,err:'',t:0};
 const SRV_WAIT=20000;             // тиша після останньої правки, потім запис
+// Скільки файл на сервері лишається «своїм» без жодного запису. Робота над
+// картою — година з паузами до пів години (історія mapper/maps); наступного
+// ранку — це вже готова карта, і чіпати її саме автозбереження не має.
+const SRV_TTL=3*3600e3;
+const SRV_OWN='tgmine-srv';
 const UAMON=['січня','лютого','березня','квітня','травня','червня','липня',
              'серпня','вересня','жовтня','листопада','грудня'];
 const TRANSLIT={а:'a',б:'b',в:'v',г:'h',ґ:'g',д:'d',е:'e',є:'ie',ж:'zh',з:'z',
@@ -6364,13 +6374,29 @@ function srvHint(text){
   const el=document.getElementById('srvHint');
   if(el) el.textContent=text;
 }
+function srvAgo(at){
+  const s2=Math.round((Date.now()-at)/1000);
+  return s2<60?'щойно':s2<3600?Math.round(s2/60)+' хв тому':Math.round(s2/3600)+' год тому';
+}
+// Чому автозбереження стоїть — словами, з тим, що робити далі.
+function srvBlockText(b){
+  const i=b.info||{}, who=i.by?`, зберіг ${i.by}`:'';
+  if(b.why==='collapse')
+    return `На карті ${i.now} обʼєктів замість ${i.objs} збережених — сама на сервер не кладу, щоб не затерти готову. «Зберегти зараз», якщо так і треба.`;
+  if(b.why==='changed')
+    return `Карту «${b.id}» на сервері змінили з іншого місця (${i.objs} обʼєктів${who}). Сама не перезаписую: «Зберегти зараз» — замінити, «Відкрити» — взяти ту.`;
+  return `На сервері вже є карта «${b.id}» (${i.objs} обʼєктів${who}). Сама її не заміню: «Зберегти зараз» — замінити, «Відкрити» — взяти її.`;
+}
+function srvBlocked(){ return !!(SRV.block&&SRV.block.id===srvId()); }
 function srvTick(){
+  const el=document.getElementById('srvHint');
+  if(el) el.style.color=srvBlocked()&&SRV.on!==false?'#ffb86b':'';
   if(SRV.on===false){ srvHint(SRV.err||'сервера нема — карта лише в браузері'); return; }
   if(SRV.busy){ srvHint('кладу на сервер…'); return; }
+  if(srvBlocked()){ srvHint(srvBlockText(SRV.block)); return; }
   if(SRV.err){ srvHint('сервер: '+SRV.err); return; }
-  if(!SRV.at){ srvHint('на сервері ще не збережено'); return; }
-  const s2=Math.round((Date.now()-SRV.at)/1000);
-  srvHint(`на сервері: ${SRV.id} · ${s2<60?'щойно':s2<3600?Math.round(s2/60)+' хв тому':Math.round(s2/3600)+' год тому'}`);
+  if(!SRV.sha||!SRV.at){ srvHint('на сервері ще не збережено'); return; }
+  srvHint(`на сервері: ${SRV.id} · ${srvAgo(SRV.at)}`);
 }
 setInterval(srvTick,5000);
 async function srvFetch(url,opt){
@@ -6379,7 +6405,7 @@ async function srvFetch(url,opt){
   try{ body=await r.json(); }catch(e){}
   if(!r.ok){
     const err=new Error((body&&body.error)||('HTTP '+r.status));
-    err.status=r.status; throw err;
+    err.status=r.status; err.body=body; throw err;
   }
   return body;
 }
@@ -6410,59 +6436,167 @@ function srvQueue(){
   clearTimeout(SRV.t);
   SRV.t=setTimeout(()=>srvPush(false),SRV_WAIT);
 }
-// Карта з самої підкладки (Україна, ТОТ) — порожня: роботи на ній нема.
-// Сама вона на сервер не йде, бо файл там називається за ніччю з
-// підзаголовка, і «прибрав усе, щоб глянути на фіксації» затирало готову
-// карту цієї ночі. Так 1.10.2026 о 09:58 карта ночі на 1 жовтня (58
-// обʼєктів, 35 маршрутів) стала сімома зонами підкладки. Кнопкою —
-// можна: це вже рішення, а не побічний наслідок.
-function srvWorthless(){ return !S.objs.some(o=>!isBaseZone(o)); }
-async function srvPush(manual){
+// ---- чий файл -------------------------------------------------------------
+// Файл на сервері зветься за ніччю з підзаголовка, один на всіх, а
+// автозбереження спрацьовує на кожну зміну. До 1 жовтня 2026 воно писало
+// поверх будь-чого, і аудит історії mapper/maps знайшов 12 затертих карт із
+// 19 — трьома способами:
+//   1. чужий екран: у власника підзаголовок завис на «ніч на 26 вересня»
+//      (сам він оновлюється лише в «Покласти збиття / ППО»), і все, що було
+//      на його екрані, щодня лягало в карту оператора за 26-те; двоє на одній
+//      ночі переписували одне одного по черзі (24.09);
+//   2. наступного ранку: браузер відновлює вчорашню карту, оператор стирає
+//      її, щоб почати нову, — і напівстерта лягає поверх готової (17, 18,
+//      19, 25, 28 вересня);
+//   3. «прибрав усе, щоб глянути»: готова карта стає порожньою (20, 22,
+//      23 вересня, 1 жовтня).
+// Тепер автозбереження пише лише у файл, який цей браузер сам створив,
+// відкрив із сервера або свідомо замінив, — і лише поки це та сама робота:
+//   - нема свого sha (або він старший за SRV_TTL) -> тільки створення; файл
+//     уже є — стоїмо й кажемо про це (сервер відповідає 409);
+//   - обʼєктів стало менше половини від збереженого -> стоїмо;
+//   - чистий аркуш («Нова карта», інша ніч, «Прибрати все з ночі») -> файл
+//     більше не свій;
+//   - карта з самої підкладки не йде взагалі.
+// Кнопка «Зберегти зараз» пише завжди; якщо замінює чуже — питає.
+// Правило на сервері — functions/api/_store.js, тести — tests/js/.
+function srvCount(){ return S.objs.reduce((a,o)=>a+(isBaseZone(o)?0:1),0); }
+function srvWorthless(){ return !srvCount(); }
+function srvOwns(){ return !!SRV.sha&&Date.now()-SRV.at<SRV_TTL; }
+function srvOwnSave(){
+  try{ localStorage.setItem(SRV_OWN,JSON.stringify(
+    {id:SRV.id,sha:SRV.sha,at:SRV.at,n:SRV.n,loose:SRV.loose})); }catch(e){}
+}
+// Нова назва — новий файл. Свій він лише тоді, коли цей браузер уже писав
+// саме в нього (перезавантаження сторінки посеред роботи).
+function srvAdopt(id){
+  let o={};
+  try{ o=JSON.parse(localStorage.getItem(SRV_OWN)||'null')||{}; }catch(e){}
+  const mine=o.id===id&&!!o.sha;
+  SRV.id=id; SRV.block=null;
+  SRV.sha=mine?o.sha:''; SRV.at=mine?(o.at||0):0; SRV.n=mine?(o.n||0):0;
+  SRV.loose=mine&&!!o.loose;
+}
+// Чистий аркуш: на екрані вже не та карта, що лежить у файлі.
+function srvDisown(){
+  SRV.sha=''; SRV.at=0; SRV.n=0; SRV.loose=false; SRV.block=null;
+  try{ localStorage.removeItem(SRV_OWN); }catch(e){}
+  srvTick();
+}
+function srvOwned(id,sha,n){
+  SRV.id=id; SRV.sha=sha; SRV.at=Date.now(); SRV.n=n; SRV.loose=false;
+  SRV.block=null; SRV.on=true; SRV.err='';
+  srvOwnSave();
+}
+function srvBlock(id,why,info){
+  SRV.block={id,why,info:info||{}};
+  jlog('srv-block',{id,why,objs:(info||{}).objs,by:(info||{}).by});
+  // один раз на причину: далі висить рядок під кнопками й позначка в HUD
+  if(SRV.told!==id+'|'+why){
+    SRV.told=id+'|'+why;
+    toast(why==='collapse'?'на сервер сама не кладу: обʼєктів стало вдвічі менше, ніж збережено'
+                          :`на сервері вже є карта «${id}» — сама її не заміню`);
+  }
+  srvTick(); savedTick();
+}
+// Чи можна писати самому. Знімає «обвал», щойно обʼєкти повернулись (undo).
+function srvAutoOk(id){
+  if(srvWorthless()) return false;
+  const n=srvCount(), fell=srvOwns()&&SRV.n>=10&&n<SRV.n*0.5;
+  if(SRV.block&&SRV.block.id===id){
+    if(SRV.block.why==='collapse'&&!fell){ SRV.block=null; savedTick(); }
+    else return false;
+  }
+  if(fell){ srvBlock(id,'collapse',{objs:SRV.n,now:n}); return false; }
+  return true;
+}
+function srvBody(n,force){
+  const own=srvOwns();
+  return JSON.stringify({map:mapPayload(),sha:own?SRV.sha:undefined,
+                         loose:own&&SRV.loose?true:undefined,force:force?true:undefined});
+}
+async function srvPush(manual,force){
   clearTimeout(SRV.t);
   if(!S.objs.length){ if(manual) toast('порожню карту зберігати нема сенсу'); return; }
-  if(!manual&&srvWorthless()) return;
-  if(SRV.busy){ SRV.pend=true; return; }
   const id=srvId();
-  if(id!==SRV.id){ SRV.id=id; SRV.sha=''; }   // нова назва — новий файл
+  if(id!==SRV.id) srvAdopt(id);
+  if(!manual&&!srvAutoOk(id)) return;
+  if(SRV.busy){ SRV.pend=true; return; }
   SRV.busy=true; srvTick();
+  const n=srvCount(), owned=srvOwns();
+  let ask=null;
   try{
     const d=await srvFetch('/api/maps/'+id,{
       method:'PUT',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({map:mapPayload(),sha:SRV.sha||undefined})});
-    SRV.sha=d.sha; SRV.at=Date.now(); SRV.on=true; SRV.err='';
+      body:srvBody(n,force)});
+    srvOwned(id,d.sha,n); savedTick();
     if(manual) toast('на сервері: '+id);
   }catch(e){
-    if(e.status===503||e.status===401||!e.status){
+    if(e.status===409&&e.body&&e.body.conflict){
+      SRV.on=true; SRV.err='';
+      if(manual&&!force) ask=e.body;
+      else srvBlock(id,owned?'changed':'exists',e.body);
+    } else if(e.status===503||e.status===401||!e.status){
       SRV.on=false;
       SRV.err=e.status===503?'сховище не налаштоване (нема GH_TOKEN)':
               e.status===401?'сесія скінчилась — увійти заново':
               'сервер недоступний';
-    } else SRV.err=e.message;
-    if(manual) toast('не поклалось: '+(SRV.err||e.message));
+      if(manual) toast('не поклалось: '+SRV.err);
+    } else {
+      SRV.err=e.message;
+      if(manual) toast('не поклалось: '+e.message);
+    }
   }finally{
     SRV.busy=false; srvTick();
     if(SRV.pend){ SRV.pend=false; srvQueue(); }
   }
+  // Кнопка — це рішення, але замінити чуже чи давнє треба свідомо.
+  if(ask){
+    const who=ask.by?`, зберіг ${ask.by}`:'';
+    if(confirm(`На сервері вже є карта «${id}»: ${ask.objs} обʼєктів${who}`
+               +(ask.sub?` («${ask.sub}»)`:'')+'.\n'
+               +`Замінити її тим, що зараз на екрані (${S.objs.length} обʼєктів)?\n`
+               +'Стара версія лишиться в історії.')) return srvPush(true,true);
+    srvBlock(id,owned?'changed':'exists',ask);
+  }
 }
 // Вкладку закривають — дочекатись дебаунсу вже нема кому. keepalive дає
-// браузеру доправити запит після того, як сторінка пішла.
+// браузеру доправити запит після того, як сторінка пішла. Лише у СВІЙ файл:
+// створити на закритті файл, про який цей браузер потім не знатиме, що він
+// його, означало б застрягти на власній карті після перезавантаження.
 function srvFlush(){
-  if(SRV.on===false||srvWorthless()||SRV.busy) return;
-  clearTimeout(SRV.t);
+  if(SRV.on===false||SRV.busy) return;
   const id=srvId();
+  if(id!==SRV.id) srvAdopt(id);
+  if(!srvOwns()||!srvAutoOk(id)) return;
+  clearTimeout(SRV.t);
+  const n=srvCount(), body=srvBody(n,false);
+  // Відповіді може не бути (сторінка піде) — тоді файл на сервері вже новий,
+  // а sha тут старий. Позначка каже серверу, що розбіжність — від цього.
+  SRV.loose=true; srvOwnSave();
+  SRV.busy=true;
+  let p;
   try{
-    fetch('/api/maps/'+id,{method:'PUT',keepalive:true,credentials:'same-origin',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({map:mapPayload(),sha:SRV.sha||undefined})});
-  }catch(e){}
+    p=fetch('/api/maps/'+id,{method:'PUT',keepalive:true,credentials:'same-origin',
+      headers:{'Content-Type':'application/json'},body});
+  }catch(e){ SRV.busy=false; return; }
+  // Вкладку лише сховали — відповідь прийде, і sha знову точний.
+  p.then(async r=>{
+    let d=null; try{ d=await r.json(); }catch(e){}
+    if(r.ok&&d&&d.sha) srvOwned(id,d.sha,n);
+    else if(r.status===409&&d&&d.conflict) srvBlock(id,'changed',d);
+  }).catch(()=>{}).finally(()=>{
+    SRV.busy=false; srvTick();
+    if(SRV.pend){ SRV.pend=false; srvQueue(); }
+  });
 }
 addEventListener('pagehide',srvFlush);
 addEventListener('visibilitychange',()=>{ if(document.visibilityState==='hidden') srvFlush(); });
 function wireSrv(){
   const sel=document.getElementById('srvSel');
   if(!sel) return;
-  SRV.id=srvId();
+  srvAdopt(srvId());
   document.getElementById('srvSave').onclick=()=>srvPush(true);
   document.getElementById('srvOpen').onclick=async ()=>{
     const id=sel.value;
@@ -6470,8 +6604,8 @@ function wireSrv(){
     try{
       const d=await srvFetch('/api/maps/'+id);
       snapshot(); applyMap(d.map);
-      SRV.id=id; SRV.sha=d.sha; SRV.at=Date.now(); SRV.err='';
-      toast('відкрито з сервера: '+id); srvTick();
+      srvOwned(id,d.sha,srvCount());
+      toast('відкрито з сервера: '+id); srvTick(); savedTick();
     }catch(e){ toast('не відкрилось: '+(e.message||e)); }
   };
   document.getElementById('srvDel').onclick=async ()=>{
@@ -6480,13 +6614,12 @@ function wireSrv(){
     if(!confirm(`Прибрати «${id}» з сервера? Файл лишиться в історії репозиторію.`)) return;
     try{
       await srvFetch('/api/maps/'+id,{method:'DELETE'});
-      if(SRV.id===id) SRV.sha='';
+      if(SRV.id===id) srvDisown();
       toast('прибрано: '+id); srvRenderList(true);
     }catch(e){ toast('не прибралось: '+(e.message||e)); }
   };
   srvRenderList(true);
 }
-// Один шлях застосування карти: із файла, зі слота, з перетягування.
 function applyMap(d){
   if(!d) return;
   migrateMarks(d.objs); dedupeMarks(d.objs);
@@ -7785,6 +7918,7 @@ function loadNight(cb){
       const drop=S.objs.length-keep.length;
       jlog('night',{date:sel.value,drop,keep:keep.length});
       if(drop||S.ghosts.length) snapshot();
+      srvDisown();              // інша ніч — це вже не карта з того файла
       S.objs=keep; S.ghosts=[]; S.sight=[]; S.sightSpan=null; SPAN.tok++; S.sightHover=null; S.alerts=null; S.alertsOn=false; S.sel=null; S.selMore=[]; endPass();
       S.aftSeen=[];             // чистий аркуш — і наслідки нової ночі з нуля
       loadNight(ok=>{
@@ -8314,6 +8448,7 @@ document.getElementById('nightWipe').onclick=()=>{
   if(hand&&!confirm(`На карті ${hand} обʼєктів, намальованих вручну. Прибрати їх теж?\n`+
                     'Скасувати можна через Ctrl+Z.')) return;
   snapshot();
+  srvDisown();                  // чистий аркуш: готова карта ночі на сервері лишається як є
   jlog('nightWipe',{drop,hand,ghosts:S.ghosts.length,sights,span:!!S.sightSpan});
   S.objs=keep; S.ghosts=[]; S.alertsOn=false; S.sel=null; S.selMore=[]; S.draft=null;
   if(!S.sightSpan){ S.sight=[]; S.sightHover=null; }
@@ -8847,11 +8982,18 @@ let SAVED_AT=0;
 function savedTick(){
   const el=document.getElementById('saved');
   if(!el) return;
-  if(!SAVED_AT){ el.textContent='не збережено'; return; }
   const s2=Math.round((Date.now()-SAVED_AT)/1000);
-  el.textContent = s2<5?'збережено щойно'
+  let text = !SAVED_AT?'не збережено'
+    : s2<5?'збережено щойно'
     : s2<60?`збережено ${s2} с тому`
     : `збережено ${Math.round(s2/60)} хв тому`;
+  // «Збережено» — це браузер. Якщо на сервер карта сама не йде, це має бути
+  // видно тут, а не лише рядком у згорнутій панелі.
+  const held=SRV.on!==false&&srvBlocked();
+  if(held) text+=' · на сервер не йде';
+  el.textContent=text;
+  el.style.color=held?'#ffb86b':'';
+  el.title=held?srvBlockText(SRV.block):'Робота зберігається в цьому браузері';
 }
 setInterval(savedTick,5000);
 const HELP=[
@@ -8948,6 +9090,7 @@ function wireClear(){
     if(!confirm(`Стерти все намальоване? Обʼєктів: ${S.objs.length}.\n`+
                 'Скасувати можна через Ctrl+Z.')) return;
     snapshot();
+    srvDisown();                // нова карта — у старий файл сама не пише
     S.objs=[];S.sel=null;S.selMore=[];S.ghosts=[];S.sight=[];S.sightSpan=null;SPAN.tok++;S.sightHover=null;S.alertsOn=false;S.draft=null;
     refresh();toast('карта порожня');
   };

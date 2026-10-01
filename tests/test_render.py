@@ -371,3 +371,55 @@ class TestServerMapsWriteRule(unittest.TestCase):
         r = subprocess.run([node, "tests/js/store_write.mjs"], cwd=ROOT,
                            capture_output=True, text=True, timeout=120)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+
+class TestRegionContours(unittest.TestCase):
+    """Контур області — це ЇЇ контур, а не всіх, чия назва на неї закінчується.
+
+    До 1 жовтня 2026 `mkregions.MATCH` зіставлявся підрядком, і «Омская
+    область» ловила «Т-омская» й «Костр-омская»: область «Омська» складалась
+    із трьох. Підпис стояв у Томській, штрих німої області накривав Кострому,
+    статистика редактора віддавала костромські фіксації Омську. Знайдено
+    звіркою з повними контурами Natural Earth."""
+
+    @staticmethod
+    def _shared(regions):
+        seen, bad = {}, []
+        for key, rings in regions.items():
+            for r in rings:
+                if len(r) < 20:
+                    continue                      # острівці: збіг сигнатури нічого не каже
+                sig = (len(r), tuple(r[0]), tuple(r[len(r) // 2]))
+                if seen.setdefault(sig, key) != key:
+                    bad.append((seen[sig], key, len(r)))
+        return bad
+
+    def test_no_contour_belongs_to_two_regions(self):
+        regions = json.loads((ROOT / "regions.json").read_text(encoding="utf-8"))
+        self.assertEqual(self._shared(regions), [])
+
+    def test_basemap_regions_too(self):
+        s = (ROOT / "mapper" / "basemap.js").read_text(encoding="utf-8")
+        base, _ = json.JSONDecoder().raw_decode(s[s.index("{"):])
+        self.assertEqual(self._shared(base["regions"]), [])
+        # і підпис області стоїть у ній самій: «Омська обл.» жила на 82° сх. д.
+        lab = {x["n"]: x for x in base["regionLabels"]}
+        self.assertLess(lab["Омська обл."]["lo"], 77)
+
+    def test_name_match_is_exact(self):
+        try:
+            import mkregions
+        except ImportError:
+            self.skipTest("нема pyshp")
+        m = mkregions.matches
+        self.assertTrue(m("Омская область", ["Омская область"]))
+        self.assertTrue(m(" омская ОБЛАСТЬ ", ["Омская область"]))
+        for other in ("Томская область", "Костромская область"):
+            self.assertFalse(m(other, ["Омская область"]), other)
+        for other in ("Северная Карелия", "Южная Карелия"):
+            self.assertFalse(m(other, ["Карелия"]), other)
+        self.assertFalse(m(None, ["Карелия"]))
+        # кожна назва в MATCH — повна: підрядком вона більше не знайдеться
+        for key, pats in mkregions.MATCH.items():
+            for p in pats:
+                self.assertEqual(p, p.strip(), key)

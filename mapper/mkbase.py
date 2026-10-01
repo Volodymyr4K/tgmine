@@ -23,7 +23,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 import shapefile
-from mkregions import rings_of, rdp, MATCH
+from mkregions import rings_of, rdp, MATCH, matches
 
 NE = os.path.join(HERE, "ne")
 ADMIN = f"{ROOT}/gazetteer/ne_10m_admin_1_states_provinces"
@@ -145,9 +145,9 @@ def admin_rings(box):
         if not rings:
             continue
         admin.setdefault(a3, []).extend(rings)
-        nr = (rec.get("name_ru") or "").lower()
+        nr = rec.get("name_ru") or ""
         for key, pats in MATCH.items():
-            if any(pt.lower() in nr for pt in pats):
+            if matches(nr, pats):
                 named.setdefault(key, []).extend(rings)
     return admin, named
 

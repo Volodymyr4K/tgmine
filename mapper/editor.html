@@ -495,7 +495,7 @@ button.primary{background:rgba(255,62,165,.16);border-color:rgba(255,62,165,.45)
 
 <!-- версія в адресі: браузер інакше тримає стару підкладку в кеші й
      нові шари (наприклад контури держав) просто не доїжджають -->
-<script src="basemap.js?v=4"></script>
+<script src="basemap.js?v=5"></script>
 <script src="targets.js"></script>
 <script src="labels.js"></script>
 <script>
@@ -8343,10 +8343,11 @@ function putSights(){
 //
 // Область місця — точка в полігоні підкладки (BASE.regions, ті самі, що в
 // штриху тривог); у файлах ночей області нема, а міняти конвеєр заради
-// списку не варто. Заміряно на серпні 2026: у полігони лягає 98.1%
-// повідомлень; решта — причали й миси за спрощеним берегом (Фіолент, Форос,
-// Тамань — беруться найближчою областю в межах REG_NEAR_KM) і місця на
-// підконтрольній Україні території (джерела пусків) — окремим рядком.
+// списку не варто. Заміряно на всьому архіві (5217 місць, 64 055
+// повідомлень): у полігони лягає 97.7%; причали й миси за спрощеним берегом
+// (Фіолент, Форос, Тамань) беруться найближчою областю в межах REG_NEAR_KM —
+// 0.6%; решта 1.6% — підконтрольна Україні територія (джерела пусків),
+// окремим рядком. Що це саме вона, каже контур країни, а не здогад.
 //
 // Число — ПОВІДОМЛЕННЯ каналів, а не апарати: де більше спостерігачів, там
 // більше повідомлень (CLAUDE.md, «Обмеження даних»). Це написано і в панелі,
@@ -8354,21 +8355,40 @@ function putSights(){
 const REG_NEAR_KM=12;
 const STATUI={open:new Set(),all:false};
 var REGIDX=null;      // var: refresh() буває раніше за це місце скрипта
+function ringArea(r){
+  let a=0;
+  for(let i=0,j=r.length-1;i<r.length;j=i++) a+=r[i][1]*r[j][0]-r[j][1]*r[i][0];
+  return Math.abs(a)/2;
+}
+function regBox(rings){
+  let a=90,b=-90,c=360,d=-360;
+  for(const r of rings) for(const p of r){
+    if(p[0]<a) a=p[0]; if(p[0]>b) b=p[0]; if(p[1]<c) c=p[1]; if(p[1]>d) d=p[1];
+  }
+  return [a,b,c,d];
+}
+// Чотири області, де окупована лише частина: контур у підкладці — ВСЯ
+// область (Краматорськ і Запоріжжя-місто лежать у «ТОТ_…»), бо лінії фронту
+// в даних нема. Тож позначка в них — «частково ТОТ», а не «ТОТ».
+const REG_UA={'Крим':'ТОТ','ТОТ_Донецьк':'частково ТОТ','ТОТ_Луганськ':'частково ТОТ',
+              'ТОТ_Запоріжжя':'частково ТОТ','ТОТ_Херсон':'частково ТОТ'};
+// Рядки для місць поза областями конфіга: що це за територія, каже контур
+// країни, а не здогад.
+const REG_OTHER={'~ua':{key:'~ua',name:'Підконтрольна Україні територія',tag:'',rings:null},
+                 '~ru':{key:'~ru',name:'Інші регіони РФ',tag:'',rings:null},
+                 '':{key:'',name:'Поза підкладкою',tag:'',rings:null}};
 function regIndex(){
   if(REGIDX) return REGIDX;
   const R=window.BASE&&BASE.regions;
   if(!R) return [];
-  REGIDX=Object.keys(R).map(key=>{
-    let a=90,b=-90,c=360,d=-360;
-    for(const r of R[key]) for(const p of r){
-      if(p[0]<a) a=p[0]; if(p[0]>b) b=p[0]; if(p[1]<c) c=p[1]; if(p[1]>d) d=p[1];
-    }
-    // Крим і окуповані частини чотирьох областей — не області РФ
-    return {key,rings:R[key],box:[a,b,c,d],name:key,tot:key==='Крим'||key.startsWith('ТОТ_')};
-  });
+  REGIDX=Object.keys(R).map(key=>({key,rings:R[key],box:regBox(R[key]),name:key,
+    area:R[key].reduce((a,r)=>a+ringArea(r),0),tag:REG_UA[key]||''}));
   // людська назва («Воронезька обл.») — з підписів підкладки: підпис стоїть
   // усередині своєї області
-  for(const l of (BASE.regionLabels||[])){ const r=regionAt(l.la,l.lo,0); if(r) r.name=l.n; }
+  for(const l of (BASE.regionLabels||[])){ const r=regionIn(l.la,l.lo); if(r) r.name=l.n; }
+  const C=BASE.countries||{};
+  REGIDX.ua=C.UKR?{rings:C.UKR,box:regBox(C.UKR)}:null;
+  REGIDX.ru=C.RUS?{rings:C.RUS,box:regBox(C.RUS)}:null;
   return REGIDX;
 }
 function inRings(la,lo,rings){
@@ -8379,28 +8399,74 @@ function inRings(la,lo,rings){
   }
   return c;
 }
-function regionAt(la,lo,nearKm){
-  const idx=REGIDX||regIndex();
-  for(const r of idx){
-    const b=r.box;
-    if(la<b[0]||la>b[1]||lo<b[2]||lo>b[3]) continue;
-    if(inRings(la,lo,r.rings)) return r;
+function inBoxed(la,lo,g,pad){
+  if(!g) return false;
+  const b=g.box, p=pad||0;
+  return !(la<b[0]-p||la>b[1]+p||lo<b[2]-2*p||lo>b[3]+2*p);
+}
+// Відстань від точки до найближчого відрізка контурів, км.
+function ringsKm(la,lo,rings,lim){
+  let bd=lim; const kx=111*Math.cos(la*Math.PI/180);
+  for(const ring of rings) for(let i=0,j=ring.length-1;i<ring.length;j=i++){
+    const ax=(ring[j][1]-lo)*kx, ay=(ring[j][0]-la)*111;
+    const dx=(ring[i][1]-lo)*kx-ax, dy=(ring[i][0]-la)*111-ay, l2=dx*dx+dy*dy;
+    let t=l2?-(ax*dx+ay*dy)/l2:0; t=t<0?0:t>1?1:t;
+    const d=Math.hypot(ax+t*dx,ay+t*dy);
+    if(d<bd) bd=d;
   }
+  return bd;
+}
+// Область конфіга, усередині якої лежить точка. Спрощені контури сусідів
+// подекуди накладаються — тоді менша область: велика в чужий контур заходить
+// краєм, а мала в ньому лежить.
+function regionIn(la,lo){
+  let best=null;
+  for(const r of (REGIDX||regIndex()))
+    if(inBoxed(la,lo,r)&&inRings(la,lo,r.rings)&&(!best||r.area<best.area)) best=r;
+  return best;
+}
+// Куди зарахувати місце. Порядок має значення:
+//   1. усередині області конфіга — вона;
+//   2. усередині України (ТОТ уже забрав крок 1) — підконтрольна територія.
+//      Саме ДО берегового кроку: інакше прикордонне село за 5 км від
+//      Бєлгородщини стало б Бєлгородщиною;
+//   3. берег: спрощений контур лишає причали й миси у воді (Фіолент, Тамань,
+//      Очаків) — найближча область або Україна в межах nearKm;
+//   4. усередині РФ, але області в конфігу нема — «інші регіони РФ».
+// Контур країни Україна містить і Крим, і окуповані області, а берег у нього
+// той самий, що в їхніх контурів. Тому там, де Україна «ближча» на сотні
+// метрів, а поруч (REG_SLIVER_KM) лежить Крим чи ТОТ, — це вони: Форос за
+// першою версією ставав «підконтрольною територією» (звірка з Natural
+// Earth, 19 повідомлень).
+const REG_SLIVER_KM=1.5;
+function regionAt(la,lo,nearKm){
+  const idx=REGIDX||regIndex(), hit=regionIn(la,lo);
+  if(hit) return hit;
   if(!nearKm) return null;
-  let best=null, bd=nearKm;
-  const kx=111*Math.cos(la*Math.PI/180), pad=nearKm/100;
-  for(const r of idx){
-    const b=r.box;
-    if(la<b[0]-pad||la>b[1]+pad||lo<b[2]-2*pad||lo>b[3]+2*pad) continue;
-    for(const ring of r.rings) for(let i=0,j=ring.length-1;i<ring.length;j=i++){
-      const ax=(ring[j][1]-lo)*kx, ay=(ring[j][0]-la)*111;
-      const dx=(ring[i][1]-lo)*kx-ax, dy=(ring[i][0]-la)*111-ay, l2=dx*dx+dy*dy;
-      let t=l2?-(ax*dx+ay*dy)/l2:0; t=t<0?0:t>1?1:t;
-      const d=Math.hypot(ax+t*dx,ay+t*dy);
+  const pad=nearKm/100;
+  const nearest=(lim,only)=>{
+    let best=null, bd=lim;
+    for(const r of idx){
+      if(only&&!REG_UA[r.key]) continue;
+      if(!inBoxed(la,lo,r,pad)) continue;
+      const d=ringsKm(la,lo,r.rings,bd);
       if(d<bd){ bd=d; best=r; }
     }
+    return best?{r:best,d:bd}:null;
+  };
+  if(inBoxed(la,lo,idx.ua)&&inRings(la,lo,idx.ua.rings)){
+    const s=nearest(REG_SLIVER_KM,true);        // шпарина між двома спрощеннями
+    return s?s.r:REG_OTHER['~ua'];
   }
-  return best;
+  const n=nearest(nearKm,false);
+  const du=inBoxed(la,lo,idx.ua,pad)?ringsKm(la,lo,idx.ua.rings,nearKm):nearKm;
+  if(du<nearKm&&(!n||du<n.d)){
+    const s=nearest(du+REG_SLIVER_KM,true);
+    return s?s.r:REG_OTHER['~ua'];
+  }
+  if(n) return n.r;
+  if(inBoxed(la,lo,idx.ru)&&inRings(la,lo,idx.ru.rings)) return REG_OTHER['~ru'];
+  return REG_OTHER[''];
 }
 // Повідомлення місця по днях — лише ті, що у вікні годин.
 function sightDayCounts(s){
@@ -8429,8 +8495,8 @@ function spanStats(){
   const idx=new Map(regIndex().map(r=>[r.key,r]));
   const rows=[...by.values()].sort((a,b)=>b.msgs-a.msgs||a.key.localeCompare(b.key));
   for(const r of rows){
-    const g=idx.get(r.key);
-    r.name=g?g.name:'Поза РФ і ТОТ'; r.tot=!!(g&&g.tot); r.rings=g?g.rings:null;
+    const g=idx.get(r.key)||REG_OTHER[r.key]||REG_OTHER[''];
+    r.name=g.name; r.tag=g.tag; r.rings=g.rings;
     r.places.sort((a,b)=>b.cnt-a.cnt);
   }
   return {rows,msgs,places};
@@ -8463,6 +8529,7 @@ function renderSightStats(){
       +'<div style="margin-top:4px">'+r.places.slice(0,8).map((p,i)=>
           `<span class="schip" data-sp="${esc(r.key)}|${i}" title="показати на карті">${esc((p.s.aim?'курс на ':'')+(p.s.place||'без назви'))} <b>${nfmt(p.cnt)}</b></span>`).join('')
         +(r.places.length>8?`<span style="color:#5f7386"> і ще ${nfmt(r.places.length-8)}</span>`:'')+'</div>'
+      +(r.tag==='частково ТОТ'?'<div style="margin-top:5px;color:#5f7386">уся область, разом із підконтрольною Україні частиною: лінії фронту в даних нема</div>':'')
       +`<div style="margin-top:5px">${pairs(r.kinds)}</div>`
       +(Object.keys(r.types).length?`<div>чим: ${pairs(r.types)}</div>`:'')
       +(win?'<div style="color:#5f7386">склад — за весь період, без вікна годин</div>':'')
@@ -8477,7 +8544,7 @@ function renderSightStats(){
       return `<div class="srow${on?' on':''}" data-sr="${esc(r.key)}" title="клік — деталі області">`
         +`<span class="sbar" style="width:${Math.max(1.5,r.msgs/top*100).toFixed(1)}%;background:${hexa(col,.16)}"></span>`
         +`<span class="srk">${i+1}</span>`
-        +`<span class="snm">${esc(r.name)}${r.tot?'<em>ТОТ</em>':''}</span>`
+        +`<span class="snm">${esc(r.name)}${r.tag?`<em>${esc(r.tag)}</em>`:''}</span>`
         +`<b>${nfmt(r.msgs)}</b></div>`+(on?det(r):'');
     }).join('')
     +(st.rows.length>LIM?`<span class="schip" data-sa="1" style="margin-top:6px">${STATUI.all?'лише перші '+LIM:'усі області — '+st.rows.length}</span>`:'')
@@ -8488,7 +8555,7 @@ function statsText(){
   const st=STAT||spanStats(), sp=S.sightSpan;
   const win=S.tfilter&&S.tfilter.on?`, ${S.tfilter.from}–${S.tfilter.to}`:'';
   return `Фіксації за ${sp.label}${win} — повідомлення каналів моніторингу за областями:\n`
-    +st.rows.map((r,i)=>`${i+1}. ${r.name}${r.tot?' (ТОТ)':''} — ${nfmt(r.msgs)}`).join('\n')
+    +st.rows.map((r,i)=>`${i+1}. ${r.name}${r.tag?` (${r.tag})`:''} — ${nfmt(r.msgs)}`).join('\n')
     +`\nРазом: ${nfmt(st.msgs)} ${plur(st.msgs,'повідомлення','повідомлення','повідомлень')}, `
     +`${nfmt(st.places)} ${plur(st.places,'місце','місця','місць')}.`;
 }
@@ -8637,7 +8704,7 @@ function mergeSights(nights,lists,from,to){
     if(!b.allArea) b.area='';
     const ds=[...b.dset].sort();
     b.days=ds.length; b.d0=ds[0]; b.d1=ds[ds.length-1];
-    const rg=regionAt(b.la,b.lo,REG_NEAR_KM); b.reg=rg?rg.key:'';
+    b.reg=regionAt(b.la,b.lo,REG_NEAR_KM).key;
     delete b.allArea; delete b.dset;
   }
   return out.sort((a,b)=>b.n-a.n);

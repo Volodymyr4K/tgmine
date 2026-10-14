@@ -1,5 +1,5 @@
 {
-  "version": 35,
+  "version": 36,
   "channels": {
     "vrv_radar": {
       "last_id": 99245,
@@ -16,7 +16,11 @@
     "locatorru": {
       "last_id": 90073,
       "last_date": "2026-10-14T20:00:03+00:00"
+    },
+    "radar_plus_bpla": {
+      "last_id": 15096,
+      "last_date": "2026-10-14T20:17:22+00:00"
     }
   },
-  "updated": "2026-10-14T20:01:59.896050+00:00"
+  "updated": "2026-10-14T20:36:57.913337+00:00"
 }

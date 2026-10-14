@@ -994,7 +994,8 @@ def main(src="raid_2026-07-17.json"):
     sub = (f"{ev[0]['hhmm']}–{ev[-1]['hhmm']} МСК · {len(ev)} повідомлень · "
            f"{places} НП · {regs} регіонів · {len(trk)} треків")
     warn = track_warning(raid.get("null"), len(trk))
-    note = ("Джерела: lpr1_treugolnik, kupolrussia, vrv_radar (дзеркала схлопнуто). "
+    note = ("Джерела: lpr1_treugolnik, kupolrussia, vrv_radar, locatorru, radar_plus_bpla "
+            "(дзеркала схлопнуто). "
             "Точки — центри НП зі згадок у повідомленнях, не координати апаратів і "
             "не підтверджені влучання. Час повідомлення випереджає проліт на "
             "невідому величину, тому рух комет — реконструкція, а не запис. "

@@ -96,6 +96,8 @@ class TestLogic(unittest.TestCase):
         t = {ch: busy for ch in H.MONITOR}
         t["vrv_radar"] = [0.0]
         t["exilenova_plus"] = [0.0]
+        # radar_plus_bpla пише рідко: 3 год без нього при 1080 постах — норма
+        t["radar_plus_bpla"] = [0.0]
         g = [x for x in H.gaps(t, 3 * h, 0.0) if x["ch"] == "vrv_radar"]
         self.assertEqual(len(g), 1)
         self.assertIsNone(g[0]["to"])

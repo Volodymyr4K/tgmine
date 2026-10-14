@@ -81,7 +81,8 @@ python3 site.py --days 10 --raids     # перебудувати свіже
 | Військові обʼєкти | OpenStreetMap / Overpass | ODbL |
 | НПЗ і термінали | курований список | — |
 
-Канали: `lpr1_treugolnik`, `kupolrussia`, `vrv_radar`. Змінюються в `sync.py`.
+Канали: `lpr1_treugolnik`, `kupolrussia`, `vrv_radar`, `locatorru`, `radar_plus_bpla`.
+Змінюються в `sync.py` (і в `health.py` — пороги мовчання каналу).
 
 ## Конфігурація
 

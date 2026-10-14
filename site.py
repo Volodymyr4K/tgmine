@@ -1019,7 +1019,7 @@ def main():
 <h1>Удари по РФ · моніторинг</h1>
 <div class=lead>
 Реконструкція за повідомленнями публічних моніторингових Telegram-каналів
-(lpr1_treugolnik, kupolrussia, vrv_radar). Дзеркальні канали схлопнуто.<br>
+(lpr1_treugolnik, kupolrussia, vrv_radar, locatorru, radar_plus_bpla). Дзеркальні канали схлопнуто.<br>
 Період {rows[0]['date']} — {rows[-1]['date']} · доба рахується 12:00–12:00 МСК · оновлено {upd} UTC
 </div>
 

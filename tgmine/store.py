@@ -102,7 +102,11 @@ MSK = timezone(timedelta(hours=3))
 # 36: пʼятий канал моніторингу radar_plus_bpla; його підпис у кожному пості
 #     зрізається до розбору (`unsign`); «Подмосковье» — Московська область;
 #     «на подлёте» — ознака присутності (`DRONE_HERE`).
-PIPELINE_VERSION = 36
+# 37: «Приготовиться / Готовность к сбитию», «Возможны / Будут сбития» —
+#     тривога, а не збиття (`SHOT_NOUN`); речення з запереченим
+#     спостереженням («Больше не фиксируем», «фиксаций нет») точкового виду
+#     не дає (`NEG_OBS`, `_unsaid`).
+PIPELINE_VERSION = 37
 
 # Курс, названий словами. 2040 точкових подій (5.6%) кажуть «пролёт БПЛА на
 # северо-восток» або «с юго-запада фиксации», і досі ці слова викидались, а
@@ -563,6 +567,42 @@ MONITOR_AFTER = re.compile(r"\s+(?:за\b|направлени)", re.I)
 NEG_AFTER = re.compile(
     r"\s*(?:не\s+было|нет\b|не\s+(?:за)?фиксир\w*|не\s+наблюда\w*)", re.I)
 
+#: «Збиття», яке ще ТІЛЬКИ ОЧІКУЮТЬ: «Приготовиться к сбитию», «Готовность к
+#: сбитиям», «Возможны / Будут сбития». Це попередження, а не подія — до
+#: 15 жовтня 2026 воно ставало точковим `збиття` (vrv_radar 87 подій,
+#: radar_plus_bpla ~60, по кілька в locatorru, lpr1, kupol). Намір той самий,
+#: що для пуску (PLAN_BEFORE у вікні 60), але лише перед ІМЕННИКОМ: «Возможно
+#: сбит», «Возможно сбиты» — звіт із невпевненістю (дієприкметник, минулий
+#: час), як «возможно были пуски», і збиттям лишається.
+SHOT_NOUN = re.compile(r"(?:сбити|уничтожени)\w*", re.I)
+
+#: Заперечене СПОСТЕРЕЖЕННЯ: «Больше не фиксируем БПЛА на Ярославль»,
+#: «Фиксаций на данный момент не наблюдаем», «Ярославль - фиксаций нет в
+#: вашу сторону», «Фиксации не подтвердились». NEG_BEFORE і NEG_AFTER
+#: дивляться впритул до тригера, а тут заперечення стоїть де завгодно в
+#: реченні, і тригером буває саме те, що заперечено («в направлении»,
+#: «фиксаций», «над» у фолбеку). Тому гаситься все РЕЧЕННЯ (`_unsaid`):
+#: межа — кінець рядка, « / » (так `strip_promo` склеює рядки), «.!?;» або
+#: кома. Кома — свідомо: «Также над Нижегородской областью были единичные
+#: сбития, больше не фиксируем» — збиття було, заперечено лише те, що після
+#: коми. Сюди ж умова «В случае фиксаций — оповестим» (radar_plus_bpla
+#: дописує її до «не фиксируем»): спостереження там теж нема.
+NEG_OBS = re.compile(
+    r"(?<!\w)не\s+(?:(?:за)?фиксир|наблюда|видим|подтвер)\w*"
+    r"|фиксаци\w*\s+нет\b|(?<!\w)нет\s+фиксаци\w*|в\s+случае\s+фиксаци\w*", re.I)
+CLAUSE = re.compile(r"[^\n/.!?;,]+")
+
+
+def _unsaid(s, spans):
+    """`s`, у якому речення `spans` замінено пробілами — довжина та сама,
+    тож позиції збігів не зсуваються."""
+    if not spans:
+        return s
+    out = list(s)
+    for a, b in spans:
+        out[a:b] = " " * (b - a)
+    return "".join(out)
+
 # «ё» у тригерах. Канали пишуть «пролёт» і «прилёт», а патерни KIND — «пролет»
 # і «прилет», тому справжнє точкове спостереження падало в «інше».
 #
@@ -926,6 +966,13 @@ def kind_of(text, fallback=True):
     розбивалась — 30 пар у v27) і `_event`, щоб знати, чи вид узято
     фолбеком."""
     norm = text.translate(YO)
+    # Точкові види й фолбеки читають текст БЕЗ заперечених речень (NEG_OBS);
+    # тривога й відбій — увесь: «Отбой опасности БПЛА. Больше не фиксируем»
+    # лишається відбоєм.
+    full = norm
+    neg = ([(c.start(), c.end()) for c in CLAUSE.finditer(norm) if NEG_OBS.search(c.group(0))]
+           if NEG_OBS.search(norm) else [])
+    norm, raw = _unsaid(norm, neg), _unsaid(text, neg)
     # Пуск, який ще ТІЛЬКИ ОЧІКУЮТЬ, не є пуском — по КОЖНІЙ згадці, як
     # NEG_BEFORE: пуск є, якщо хоч одна згадка — факт.
     #
@@ -947,7 +994,7 @@ def kind_of(text, fallback=True):
     # далі «запуск» у тригері ДОДАВ 437 справжніх пусків, а широке вікно
     # наміру прибрало 29 — стало 1105 (21 вересня 2026; числа включають свіжі
     # пости, що доходили між правками).
-    def launch_is(m):
+    def launch_is(m, norm=norm):
         before = norm[max(0, m.start() - 24):m.start()]
         if NEG_BEFORE.search(before):
             return "ні"
@@ -965,7 +1012,12 @@ def kind_of(text, fallback=True):
         return "так"
     verdicts = [launch_is(m) for m in LAUNCH_RX.finditer(norm)]
     launched = "так" in verdicts
-    planned = "намір" in verdicts and not launched
+    # Намір — з УСЬОГО тексту: «Не видим опасности по подготовке к возможным
+    # пускам … / Внимательно наблюдаем за самолётами» лишається попередженням,
+    # хоч речення з наміром і заперечене.
+    planned = not launched and (
+        "намір" in verdicts or (norm is not full and "намір" in (
+            launch_is(m, full) for m in LAUNCH_RX.finditer(full))))
 
     def weak(m, s):
         w = m.group(0)
@@ -973,19 +1025,29 @@ def kind_of(text, fallback=True):
                 or (w.lower().startswith("наблюда")
                     and MONITOR_AFTER.match(s, m.end()) is not None))
 
+    warned = False
     for n, rx in KIND:
         if n == "пуск":
             if launched:
                 return n
             continue
-        s = text if n in RAW_KINDS else norm
+        s = (raw if n in RAW_KINDS else norm) if n in POINT_KINDS else full
         # finditer, а не search: якщо перший збіг заперечений, а далі є
         # незаперечений — тип усе одно чинний.
         ms = [m for m in rx.finditer(s)
               if not NEG_BEFORE.search(s[max(0, m.start() - 24):m.start()])]
         if planned and n == "фіксація":
             ms = [m for m in ms if not weak(m, s)]
-        if ms:
+        if n == "збиття":
+            plan = [(m, PLAN_BEFORE.search(s[max(0, m.start() - 60):m.start()]))
+                    for m in ms if SHOT_NOUN.match(m.group(0))]
+            soon = [m for m, p in plan if p]
+            # «средства для уничтожения» — мета, а не попередження
+            warned = any(p and not p.group(0).lower().startswith("для") for _, p in plan)
+            ms = [m for m in ms if m not in soon]
+        # Очікуване збиття — тривога, якщо пост не каже нічого точнішого
+        # («Приготовиться к сбитию / Фиксация БПЛА» лишається фіксацією).
+        if ms or (n == "тривога" and warned):
             return n
     if DRONE_MOVE.search(norm) and not MOVE_GUARD.search(norm) and not planned:
         return "фіксація"

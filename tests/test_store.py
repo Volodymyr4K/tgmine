@@ -75,6 +75,38 @@ class TestExpectedShootdownIsAWarning(unittest.TestCase):
     def test_real_shootdown_beside_a_warning(self):
         self.assertEqual(ST.kind_of("Сбит 1 БПЛА. Возможны ещё сбития."), "збиття")
 
+    def test_advice_for_the_case_is_an_alarm(self):
+        """«при сбитиях» — порада на випадок збиття (критична перевірка v37)."""
+        for text in ["Алексин, Тульская область - соблюдаем меры безопасности при сбитиях.",
+                     "Железногорск / Курская область / Займите укрытия / "
+                     "При сбитиях, не попадите под осколки",
+                     "Керчь и близлежащие / Соблюдайте меры безопасности / При сбитиях БПЛА"]:
+            with self.subTest(text=text):
+                self.assertEqual(ST.kind_of(text), "тривога")
+        self.assertEqual(ST.kind_of("Ещё фиксации БПЛА. Соблюдаем меры безопасности "
+                                    "при сбитиях БПЛА."), "фіксація")
+
+    def test_expected_flyover_is_an_alarm(self):
+        """«Приготовиться к массовым пролётам», «Ожидаем фиксации» — те саме
+        попередження (рецензія v37: 73 крапки-фіксації)."""
+        for text in ["Борисоглебский район Воронежской области - приготовится к "
+                     "массовым пролётам БПЛА в тыл.",
+                     "Севастополь / Ожидаем фиксации с Севера/Северо-Востока/Восток",
+                     "Рязанская область - готовность к массовому пролёту БПЛА от "
+                     "Тамбовской области.",
+                     "Алексин, Тульская область - приготовится к массовым пролётам и "
+                     "сбитиям БПЛА.",
+                     "Тула / Щёкино / Переодически будут идти сбития.",
+                     "Тула / Приготовится к новой волне сбитий."]:
+            with self.subTest(text=text):
+                self.assertEqual(ST.kind_of(text), "тривога")
+
+    def test_possibly_sighted_is_left_to_the_owner(self):
+        """«Возможно фиксации» лишається фіксацією свідомо: у locatorru це
+        радше невпевнене спостереження (466 подій), рішення за власником."""
+        self.assertEqual(ST.kind_of("Трубчевский район, Брянская область - возможно "
+                                    "фиксации чужих БПЛА."), "фіксація")
+
     def test_purpose_is_not_a_warning(self):
         """«средства для уничтожения» (новина) — не збиття і не тривога."""
         self.assertEqual(ST.kind_of("У НАТО есть необходимые средства для "
@@ -103,7 +135,33 @@ class TestNegatedSighting(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertNotIn(ST.kind_of(text), ST.POINT_KINDS)
 
-    def test_alarm_and_all_clear_read_the_whole_text(self):
+    def test_call_to_report_is_not_a_sighting(self):
+        # заклик — не попередження: не тривога, а «інше»
+        self.assertEqual(ST.kind_of("При фиксациях БПЛА, сообщайте в чат-бот"), "інше")
+        for text in ["При фиксациях БПЛА, сообщайте в чат-бот — @locatorrubot",
+                     "Брянск / Сельцо / И ближайшие населенные пункты / При фиксации "
+                     "БПЛА соблюдайте меры предосторожности!!!",
+                     "Орел / Орловская область / Без фиксаций",
+                     "Ростовская область - грозы, сбитий не было.",
+                     "МО Раменское / Московская область / Работы ПВО по БПЛА не было"]:
+            with self.subTest(text=text):
+                self.assertNotIn(ST.kind_of(text), ST.POINT_KINDS)
+
+    def test_negation_with_words_between(self):
+        for text in ["Нижегородская область / Чувашская Республика / Фиксаций в вашу "
+                     "сторону нет, все идут южнее.",
+                     "Рязань и область - чисто. Без новых фиксаций БПЛА."]:
+            with self.subTest(text=text):
+                self.assertNotIn(ST.kind_of(text), ST.POINT_KINDS)
+
+    def test_no_danger_is_not_an_alarm(self):
+        """«опасность не фиксируем» — ні тривога, ні спостереження."""
+        for text in ["Таганрог, опасность пока не фиксируем.",
+                     "Нижний Ломов, Пензенская область - опасность не фиксируем."]:
+            with self.subTest(text=text):
+                self.assertEqual(ST.kind_of(text), "інше")
+
+    def test_alarm_and_all_clear_survive_the_negation(self):
         self.assertEqual(ST.kind_of("Оренбургская область / На данный момент фиксаций "
                                     "не наблюдаем, опасность сохраняется"), "тривога")
         self.assertEqual(ST.kind_of("Белгородская область - отбой ракетной опасности! "
